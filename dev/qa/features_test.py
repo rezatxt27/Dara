@@ -32,7 +32,7 @@ async def main():
             if mt.get('lastRun') and not mt.get('running'): break
             await boot.wait_for_timeout(500)
         seed['settings']['theme'] = THEME
-        seed['ai'] = {'connections': [{'id': 'c1', 'service': 'custom', 'api': 'openai', 'name': 'سرویس آزمایشی', 'baseUrl': 'http://127.0.0.1:8765/v1', 'apiKey': 'test-key', 'model': 'mock-model-1', 'fastModel': ''}],
+        seed['ai'] = {'connections': [{'id': 'c1', 'service': 'sotoon', 'api': 'openai', 'name': 'سرویس آزمایشی', 'baseUrl': 'http://127.0.0.1:8765/v1', 'apiKey': 'test-key', 'model': 'mock-model-1', 'fastModel': ''}],
                       'activeId': 'c1', 'privacy': 'full', 'fallback': True, 'weekly': False, 'trustedSites': []}
         await boot.evaluate("async (s) => { await chrome.storage.local.clear(); await chrome.storage.local.set(s); }", seed)
         await boot.close()
@@ -243,6 +243,38 @@ async def main():
             check('delete: undo from the event list restores the asset', any(a['id'] == 'loanOut' for a in assets))
             await pg.close()
         await step('delete', t_delete())
+
+        # tooltips for every analysis section (for beginners)
+        async def t_tips():
+            pg = await newpage('analysis')
+            n = await pg.locator('.tipbtn').count()
+            check('tooltips: one per analysis section (≥ 14)', n >= 14, n)
+            await pg.locator('#perf .card-h .tipbtn').hover(); await pg.wait_for_selector('.tippop', timeout=3000)
+            txt = await pg.inner_text('.tippop')
+            check('tooltip opens on hover with plain-language text', 'حقوق' in txt and 'طلا' in txt, txt[:90])
+            await pg.mouse.move(5, 5); await pg.wait_for_timeout(400)
+            check('tooltip closes when the pointer leaves', await pg.locator('.tippop').count() == 0)
+            await pg.locator('.card:has-text("نردبان نقدشوندگی") .card-h .tipbtn').click(); await pg.wait_for_selector('.tippop')
+            await pg.mouse.move(5, 5); await pg.wait_for_timeout(400)
+            check('tooltip pinned by click stays open', await pg.locator('.tippop').count() == 1)
+            await pg.locator('.card:has-text("نردبان نقدشوندگی") .card-h').screenshot(path=f'{SH}/tooltip-{THEME}.png') if False else None
+            await pg.screenshot(path=f'{SH}/tooltip-{THEME}.png')
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200)
+            check('tooltip closes with Escape', await pg.locator('.tippop').count() == 0)
+            await pg.close()
+        await step('tips', t_tips())
+
+        # AI connections are provider-neutral
+        async def t_neutral():
+            pg = await newpage('settings')
+            txt = await pg.inner_text('#ai')
+            await pg.click('#ai button:has-text("اتصال جدید")'); await pg.wait_for_timeout(300)
+            opts = await pg.evaluate("() => [...document.querySelectorAll('#ai select option')].map(o => o.textContent).join(' | ')")
+            body = await pg.inner_text('body')
+            check('AI connections: no provider-specific Persian brand', 'ستون' not in txt and 'ستون' not in opts and 'Sotoon' not in opts, opts[:160])
+            check('AI connections: generic OpenAI-compatible is the default', (await pg.locator('#ai select').first.input_value()) == 'custom')
+            await pg.close()
+        await step('neutral', t_neutral())
 
         # regressions on narrow screens
         async def t_narrow():

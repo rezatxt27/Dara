@@ -114,10 +114,38 @@ async def main():
             s = await get(newp, 'settings'); a = await get(newp, 'assets')
             check('data kept across the update', len(a) == len(seed['assets']) and any(w['provider'] == 'tsetmc' for w in s['watch']))
             await newp.screenshot(path=f'{SH}/after-update.png')
+        # --- settings: «بررسی نسخه جدید»
+        sp = await ctx.new_page(); sp.on('pageerror', lambda e: errors.append(str(e)))
+        await sp.goto(f'chrome-extension://{ext}/ui/app.html#/settings'); await sp.wait_for_timeout(1200)
+        vt = await sp.inner_text('#version')
+        check('settings: shows installed version and «latest»', '1.2.99' in vt.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789')) and 'آخرین نسخه را داری' in vt, vt[:120].replace('\n', ' | '))
+        check('settings: changelog listed', await sp.locator('#version .changelog li').count() >= 0)
+        m['version'] = '1.2.150'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
+        await sp.click('#version button:has-text("بررسی نسخه جدید")'); await sp.wait_for_timeout(800)
+        vt = await sp.inner_text('#version')
+        check('settings: new files detected as ready to install', 'آماده است' in vt and 'نصب نسخه' in vt, vt[:160].replace('\n', ' | '))
+        await sp.screenshot(path=f'{SH}/settings-version.png')
+        try: await sp.click('#version button:has-text("نصب نسخه")')
+        except Exception: pass
+        newp = None
+        for _ in range(40):
+            await asyncio.sleep(0.5)
+            for t in ctx.pages:
+                if t.url.endswith('#/settings') and not t.is_closed():
+                    try:
+                        if await t.evaluate("() => chrome.runtime.getManifest().version") == '1.2.150': newp = t
+                    except Exception: pass
+            if newp: break
+        check('settings: «نصب» installs and reopens settings', newp is not None)
+        if newp:
+            await newp.wait_for_timeout(1200)
+            vt = await newp.inner_text('#version')
+            check('settings: after install it says latest', 'آخرین نسخه را داری' in vt)
+
         # --- worker-side: with no Dara tab open, it updates by itself
         for t in list(ctx.pages):
             if '/ui/app.html' in t.url: await t.close()
-        m['version'] = '1.2.100'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
+        m['version'] = '1.2.200'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
         pp = await ctx.new_page()
         try: await pp.goto(f'chrome-extension://{ext}/ui/popup.html')
         except Exception: pass
@@ -127,7 +155,7 @@ async def main():
             for w in ctx.service_workers:
                 if ext in w.url:
                     try:
-                        if await w.evaluate("() => chrome.runtime.getManifest().version") == '1.2.100': ok = True
+                        if await w.evaluate("() => chrome.runtime.getManifest().version") == '1.2.200': ok = True
                     except Exception: pass
             if ok: break
             await asyncio.sleep(0.5)

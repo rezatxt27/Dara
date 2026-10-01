@@ -1,8 +1,8 @@
-// Provider-agnostic AI client: OpenAI-compatible (OpenAI, OpenRouter, Sotoon, Gemini, DeepSeek, Groq, Ollama…)
+// Provider-agnostic AI client: OpenAI-compatible (any compatible provider, OpenAI, OpenRouter, Gemini, DeepSeek, Groq, Ollama…)
 // and Anthropic Messages API. Supports native tool calling, with a text protocol fallback for models without tools.
 
 export const SERVICES = {
-  sotoon: { name: 'ستون (Sotoon)', api: 'openai', base: '', keyHint: 'کلید API از پنل ستون', baseHint: 'آدرس سازگار با OpenAI از پنل ستون' },
+  custom: { name: 'سرویس سازگار با OpenAI', api: 'openai', base: '', keyHint: 'کلید API از پنل سرویس‌دهنده', baseHint: 'آدرس API سازگار با OpenAI از پنل سرویس‌دهنده (معمولاً با /v1 تمام می‌شود)' },
   openrouter: { name: 'OpenRouter', api: 'openai', base: 'https://openrouter.ai/api/v1', keyHint: 'sk-or-…', modelHint: 'مثلاً anthropic/claude-sonnet-5.5' },
   openai: { name: 'OpenAI', api: 'openai', base: 'https://api.openai.com/v1', keyHint: 'sk-…' },
   anthropic: { name: 'Anthropic (Claude)', api: 'anthropic', base: 'https://api.anthropic.com', keyHint: 'sk-ant-…', modelHint: 'مثلاً claude-sonnet-5-5' },
@@ -10,11 +10,16 @@ export const SERVICES = {
   deepseek: { name: 'DeepSeek', api: 'openai', base: 'https://api.deepseek.com/v1', keyHint: 'sk-…' },
   groq: { name: 'Groq', api: 'openai', base: 'https://api.groq.com/openai/v1', keyHint: 'gsk_…' },
   ollama: { name: 'Ollama (روی همین کامپیوتر)', api: 'openai', base: 'http://localhost:11434/v1', noKey: true, modelHint: 'مثلاً llama3.1' },
-  custom: { name: 'سرویس دیگر (سازگار با OpenAI)', api: 'openai', base: '' },
 };
 
 let _fetch = (...a) => fetch(...a);
 export function setAIFetch(f) { _fetch = f; }
+
+/** Older saves may name a provider that is no longer listed: treat it as a generic OpenAI-compatible service. */
+export function normalizeConnection(c) {
+  if (!c || SERVICES[c.service]) return c;
+  return { ...c, service: c.api === 'anthropic' ? 'anthropic' : 'custom', name: c.name === 'ستون (Sotoon)' ? 'اتصال من' : c.name };
+}
 
 export class AIError extends Error {
   constructor(msg, { status = 0, detail = '', retryable = true, toolsUnsupported = false } = {}) {

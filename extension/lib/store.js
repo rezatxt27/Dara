@@ -1,6 +1,8 @@
 // Storage layer over chrome.storage.local. Each top-level key is stored separately
 // so the background worker and UI pages don't overwrite each other's unrelated data.
 
+import { normalizeConnection } from './ai.js';
+
 export const SCHEMA_VERSION = 1;
 
 export const DEFAULT_SETTINGS = {
@@ -18,7 +20,9 @@ export const DEFAULT_SETTINGS = {
   denom: 'money',           // money | usd | gold | coin
   onboarded: false,
   watch: [],                // market watchlist refs (price only, not holdings)
-  depositPct: null,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
+  depositPct: null,
+  updateUrl: '',            // optional public JSON {version, url} announcing the latest release
+  lastUpdateCheck: 0,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
 };
 
 export const DEFAULTS = {
@@ -59,7 +63,7 @@ function withDefaults(key, value) {
       targets: { ...(value.targets || {}) } };
   }
   if (key === 'meta') return { ...structuredClone(DEFAULTS.meta), ...value };
-  if (key === 'ai') return { ...structuredClone(DEFAULTS.ai), ...value };
+  if (key === 'ai') { const v = { ...structuredClone(DEFAULTS.ai), ...value }; v.connections = (v.connections || []).map(normalizeConnection); return v; }
   return value;
 }
 

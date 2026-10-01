@@ -450,3 +450,37 @@ export function Explain({ get, s, title = 'این عدد از کجا آمد؟', 
 export function AskBtn({ q, label = 'بپرس', cls = '', title }) {
   return html`<a class=${'askbtn ' + cls} href=${'#/assistant?ask=' + encodeURIComponent(q)} title=${title || q} onClick=${(e) => e.stopPropagation()}><${Icon} n="sparkles" cls="sm" />${label ? html`<span>${label}</span>` : ''}</a>`;
 }
+
+/* ---------------- راهنمای کوتاه (tooltip) ---------------- */
+/** «i» next to a title: plain-language help for people new to the concept. Opens on hover or tap; tap pins it. */
+export function Tip({ title, text, example }) {
+  const [pos, setPos] = useState(null); // {right, w, top|bottom, pinned}
+  const btn = useRef(); const hideT = useRef(0);
+  const place = (pinned) => {
+    const r = btn.current.getBoundingClientRect();
+    const w = Math.min(320, innerWidth - 24);
+    const right = Math.min(Math.max(12, innerWidth - r.right - 8), innerWidth - w - 12);
+    const below = innerHeight - r.bottom > 220 || r.top < 220;
+    setPos({ right, w, top: below ? r.bottom + 6 : null, bottom: below ? null : innerHeight - r.top + 6, pinned });
+  };
+  useEffect(() => {
+    if (!pos?.pinned) return;
+    const close = (e) => { if (!e.target.closest?.('.tippop') && !btn.current?.contains(e.target)) setPos(null); };
+    const esc = (e) => e.key === 'Escape' && setPos(null);
+    const off = (e) => { if (e?.target?.closest?.('.tippop')) return; setPos(null); };
+    const t = setTimeout(() => document.addEventListener('mousedown', close), 0);
+    addEventListener('keydown', esc); document.addEventListener('scroll', off, true);
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); removeEventListener('keydown', esc); document.removeEventListener('scroll', off, true); };
+  }, [pos?.pinned]);
+  const enter = () => { clearTimeout(hideT.current); if (!pos) place(false); };
+  const leave = () => { if (pos && !pos.pinned) hideT.current = setTimeout(() => setPos((p) => (p && !p.pinned ? null : p)), 120); };
+  const click = (e) => { e.stopPropagation(); e.preventDefault(); if (pos?.pinned) setPos(null); else place(true); };
+  return html`<span class="xwrap" onClick=${(e) => e.stopPropagation()}>
+    <button type="button" ref=${btn} class=${'xbtn tipbtn' + (pos ? ' on' : '')} aria-label=${'راهنما: ' + title} onMouseEnter=${enter} onMouseLeave=${leave} onFocus=${() => !pos && place(false)} onBlur=${leave} onClick=${click}><${Icon} n="info" cls="sm" /></button>
+    ${pos && html`<div class="xpop tippop" role="tooltip" onMouseEnter=${enter} onMouseLeave=${leave} style=${`right:${pos.right}px;width:${pos.w}px;${pos.top !== null ? `top:${pos.top}px` : `bottom:${pos.bottom}px`}`}>
+      <div class="sb small" style="margin-bottom:4px">${title}</div>
+      <div class="small ink2" style="line-height:1.9">${text}</div>
+      ${example && html`<div class="xs muted" style="margin-top:6px"><b>مثال:</b> ${example}</div>`}
+    </div>`}
+  </span>`;
+}

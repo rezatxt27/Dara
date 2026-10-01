@@ -11,7 +11,7 @@ function requestHost(baseUrl) {
   return chrome.permissions.request({ origins: [pattern] }).catch(() => false);
 }
 
-function blankConn(service = 'sotoon') {
+function blankConn(service = 'custom') {
   const sv = AI.SERVICES[service];
   return { id: uid('c'), service, api: sv.api, name: '', baseUrl: sv.base, apiKey: '', model: '', fastModel: '' };
 }
@@ -24,7 +24,7 @@ function ConnForm({ initial, onDone, onCancel }) {
   const [res, setRes] = useState(initial.lastTest || null);
   const sv = AI.SERVICES[c.service] || AI.SERVICES.custom;
   const set = (p) => setC((x) => ({ ...x, ...p }));
-  const pickService = (id) => { const s2 = AI.SERVICES[id]; set({ service: id, api: s2.api, baseUrl: s2.base || (c.service === 'custom' || c.service === 'sotoon' ? c.baseUrl : ''), model: '', fastModel: '' }); setModels(null); };
+  const pickService = (id) => { const s2 = AI.SERVICES[id]; set({ service: id, api: s2.api, baseUrl: s2.base || (c.service === 'custom' ? c.baseUrl : ''), model: '', fastModel: '' }); setModels(null); };
   const valid = (c.baseUrl || '').trim() && c.model.trim() && (sv.noKey || c.apiKey.trim() || c.service === 'custom');
   const norm = () => ({ ...c, name: c.name.trim() || sv.name, baseUrl: c.baseUrl.trim(), apiKey: c.apiKey.trim(), model: c.model.trim(), fastModel: c.fastModel.trim() });
 
@@ -140,7 +140,7 @@ export function AIConnections({ st }) {
           </div>
         </div>`;
       })}
-      ${!conns.length && !form && html`<div class="empty small"><div class="ico"><${Icon} n="bot" /></div>هنوز اتصالی تعریف نشده. با یک کلید API از ستون، OpenRouter، OpenAI، Anthropic یا یک مدل محلی (Ollama) شروع کن.</div>`}
+      ${!conns.length && !form && html`<div class="empty small"><div class="ico"><${Icon} n="bot" /></div>هنوز اتصالی تعریف نشده. با یک کلید API از هر سرویس سازگار با OpenAI، یا OpenRouter، OpenAI، Anthropic، یا یک مدل محلی (Ollama) شروع کن.</div>`}
       ${form && html`<${ConnForm} initial=${form} onDone=${() => setForm(null)} onCancel=${() => setForm(null)} />`}
     </div>
     <hr class="sep" />

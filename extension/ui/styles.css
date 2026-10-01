@@ -417,3 +417,6 @@ input[dir="ltr"], .latin, .msg .by { font-family: 'Vazir', ui-monospace, Tahoma,
 .assume .arow .sb { min-width: 110px; } .assume .arow .num { min-width: 48px; font-weight: 700; }
 @media (max-width: 860px) { .perf, .be { grid-template-columns: 1fr; } .brow { grid-template-columns: 1fr auto; } .brow .wt { display: none; } }
 .brow .bn { display: flex; flex-direction: column; line-height: 1.6; }
+.changelog { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--ink-2); }
+.pill.warn { background: var(--warn-bg); color: var(--warn); }
+.tipbtn { width: 20px; height: 20px; }

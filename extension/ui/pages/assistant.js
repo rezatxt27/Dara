@@ -94,7 +94,7 @@ export function AssistantPage({ st, s, route }) {
         </div>
         <div class="chat-log" ref=${logRef}>
           ${!active && html`<div class="empty"><div class="ico"><${Icon} n="bot" /></div><div class="sb" style="margin-bottom:6px">دستیار هنوز فعال نیست</div>
-            <div class="small" style="margin-bottom:12px">یک اتصال هوش مصنوعی (ستون، OpenRouter، OpenAI، Anthropic یا مدل محلی) اضافه کن.</div>
+            <div class="small" style="margin-bottom:12px">یک اتصال هوش مصنوعی (هر سرویس سازگار با OpenAI، Anthropic یا مدل محلی) اضافه کن.</div>
             <a class="btn primary" href="#/settings" onClick=${() => setTimeout(() => document.getElementById('ai')?.scrollIntoView({ behavior: 'smooth' }), 300)}><${Icon} n="plug" cls="sm" />افزودن اتصال</a></div>`}
           ${active && !msgs.length && html`<div class="empty" style="padding:30px 10px"><div class="ico"><${Icon} n="message" /></div>
             <div class="sb" style="margin-bottom:4px">درباره دارایی‌هایت بپرس</div><div class="small" style="margin-bottom:14px">دستیار به داده‌های واقعی دارا دسترسی دارد، سناریو شبیه‌سازی می‌کند و تغییرات را فقط با تأیید تو اعمال می‌کند.</div>

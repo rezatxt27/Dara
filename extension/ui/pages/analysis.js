@@ -1,4 +1,4 @@
-import { html, useState, useMemo, useEffect, Icon, Money, Delta, Ava, StackBar, NumField, MoneyField, Slider, Seg, toast, num, pct, fmtJ, send, Explain, AskBtn, BackfillButton } from '../components.js';
+import { html, useState, useMemo, useEffect, Icon, Money, Delta, Ava, StackBar, NumField, MoneyField, Slider, Seg, toast, num, pct, fmtJ, send, Explain, AskBtn, BackfillButton, Tip } from '../components.js';
 import { CAT, EXPOSURES, LIQUIDITY, SCENARIOS } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
@@ -7,6 +7,26 @@ import * as A from '../../lib/assistant.js';
 import * as store from '../../lib/store.js';
 import { ago } from '../../lib/format.js';
 import { act } from '../actions.js';
+
+/* Plain-language help for each section (for people new to these ideas). */
+const TIPS = {
+  perf: ['واقعاً پولدارتر شدم؟', 'نشان می‌دهد دارایی‌هایت در این دوره واقعاً چقدر رشد کرده‌اند. پولی که خودت اضافه کرده‌ای (مثل حقوق یا واریز) سود حساب نمی‌شود. بعد همان پول، با همان تاریخ‌ها، در سه حالت دیگر هم حساب می‌شود: اگر همه را طلا، دلار یا سپرده نگه داشته بودی. «جلوتری» یعنی ترکیب دارایی‌هایت از آن حالت بهتر عمل کرده.', 'اگر طلا در این مدت ۲۰٪ رشد کرده و دارایی تو ۱۵٪، از «طلا» عقب‌تری.'],
+  deposit: ['نرخ سپرده برای مقایسه', 'سود سالانه‌ای که بانک یا صندوق درآمد ثابت واقعاً به تو می‌دهد. برای مقایسه منصفانه، نرخی را بگذار که خودت به آن دسترسی داری.'],
+  scenario: ['شبیه‌ساز سناریو', 'می‌بینی اگر قیمت‌ها تغییر کنند، ارزش دارایی‌هایت چه می‌شود. لغزنده‌ها را جابه‌جا کن، یکی از سناریوهای آماده را بزن، یا اتفاق را با یک جمله بنویس تا فرض‌ها خودکار ساخته شوند. این پیش‌بینی نیست؛ فقط حساب «اگر … شود» است.', '«اگر دلار ۳۰٪ گران شود» را امتحان کن و ببین کدام دارایی‌ها بیشتر اثر می‌گیرند.'],
+  terms: ['بر حسب دلار و طلا', 'ارزش دارایی‌هایت را با دلار یا طلا می‌سنجد، نه تومان. اگر ارزش تومانی بالا برود ولی این عدد منفی شود، یعنی با پولت دلار یا طلای کمتری می‌توانی بخری؛ قدرت خریدت کم شده.'],
+  ounce: ['انس جهانی طلا', 'قیمت جهانی هر اونس (حدود ۳۱ گرم) طلا به دلار. قیمت طلای داخل ایران تقریباً برابر است با انس × نرخ دلار؛ پس هر دو روی طلای تو اثر دارند.'],
+  exposure: ['مواجهه با تورم و ارز', 'نشان می‌دهد دارایی‌هایت به چه چیزی حساس‌اند. دارایی «ریالی» (حساب بانکی، سپرده، طلب) با تورم ارزش واقعی از دست می‌دهد؛ طلا، ارز، سهام و ملک معمولاً همراه تورم بالا می‌روند. «ضدتورمی» یعنی سهم دارایی‌های غیرریالی.'],
+  liquidity: ['نردبان نقدشوندگی', 'چقدر از دارایی‌ات را می‌توانی زود به پول نقد تبدیل کنی. بالا: در چند روز (حساب بانکی، ارز، صندوق بورسی). متوسط: چند هفته. پایین: ملک، سهام خصوصی و طلب‌ها. بهتر است همیشه بخشی برای شرایط اضطراری در ردیف «بالا» باشد.'],
+  custody: ['تمرکز بر اساس محل نگهداری', 'دارایی‌هایت کجا یا نزد چه کسی است: بانک، کارگزاری، پلتفرم آنلاین یا خانه. اگر بخش بزرگی فقط در یک جا باشد، هر مشکلی در همان یک جا روی کل دارایی‌ات اثر می‌گذارد.'],
+  risks: ['ریسک‌ها و نکات', 'هشدارهای خودکار درباره ترکیب دارایی‌هایت، مثل تمرکز زیاد روی یک دارایی یا کمبود پول در دسترس. «نگاه دستیار» با هوش مصنوعی سه نقطه ضعف را به زبان ساده توضیح می‌دهد؛ برای این کار فقط درصدها فرستاده می‌شود، نه مبلغ‌ها.'],
+  targets: ['تخصیص هدف', 'مشخص کن دوست داری هر دسته چند درصد از دارایی‌ات باشد (بهتر است جمع ۱۰۰٪ شود). جدول نشان می‌دهد الان کجا بیشتر یا کمتر از هدفی و تقریباً چقدر باید خرید یا فروخت تا به هدف برسی. این فقط حساب ریاضی بر اساس هدف خودت است، نه توصیه.', 'اگر هدف طلا ۳۰٪ باشد و الان ۲۰٪ داری، ستون آخر می‌گوید چقدر طلا کم داری.'],
+  newmoney: ['پول جدید را کجا بگذارم؟', 'اگر پول تازه‌ای داری (مثلاً پاداش یا پس‌انداز)، این بخش آن را طوری بین دسته‌ها پخش می‌کند که به درصدهای هدفت نزدیک‌تر شوی، بدون اینکه چیزی را بفروشی.'],
+  breakeven: ['نقطه سربه‌سر', 'سرمایه‌گذاری در یک دارایی را با گذاشتن همان پول در سپرده مقایسه می‌کند. نشان می‌دهد قیمت آن دارایی تا پایان مدت باید به چه عددی برسد تا سودش از سپرده بیشتر شود. اگر فکر می‌کنی به آن قیمت نمی‌رسد، سپرده انتخاب امن‌تری است.', 'سپرده ۲۵٪ در ۶ ماه حدود ۱۳٪ سود می‌دهد؛ پس طلا باید بیش از ۱۳٪ (به‌علاوه کارمزد) گران شود.'],
+  fee: ['کارمزد خرید و فروش', 'هزینه‌ای که در خرید و فروش از دست می‌دهی: اختلاف قیمت خرید و فروش، کارمزد پلتفرم یا اجرت طلا. برای طلای آب‌شده معمولاً کم و برای طلای زینتی بیشتر است.'],
+  pnl: ['سود و زیان دارایی‌ها', 'برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
+  critique: ['نگاه دستیار', 'هوش مصنوعی با نگاه به درصدهای ترکیب دارایی‌ات، سه نقطه ضعف مهم را پیدا می‌کند و برای هرکدام یک بررسی ساده پیشنهاد می‌دهد. توصیه خرید یا فروش نمی‌کند.'],
+};
+const T = (k) => html`<${Tip} title=${TIPS[k][0]} text=${TIPS[k][1]} example=${TIPS[k][2]} />`;
 
 const unitOf = (s) => (s.currency === 'rial' ? 'ریال' : 'تومان');
 const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٫,]/g, '.'));
@@ -17,7 +37,7 @@ function Performance({ st, pf, s }) {
   const dep = I.defaultDepositPct(st);
   const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st, pf, days, dep]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
-  const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟</h3>
+  const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
     <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="توضیح بده" />`}
     <${Seg} value=${days} onChange=${setDays} options=${[[30, 'ماه'], [90, '۳ ماه'], [365, 'سال'], [0, 'از ابتدا']]} /></div></div>`;
   if (!r) return html`<div class="card" id="perf">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این مقایسه تاریخچه ارزش دارایی لازم است. نمودار از امروز خودکار پر می‌شود، یا همین حالا یک سال گذشته را بازسازی کن.</div><${BackfillButton} st=${st} /></div></div>`;
@@ -49,7 +69,7 @@ function Performance({ st, pf, s }) {
         <span class="bn"><span class="small">${b.name}</span><span class="xs muted">${b.short} در این مدت <span class="ltr">${pct(b.ret)}</span></span></span>
         <div class="wt" dir="ltr"><b style=${`${b.diff >= 0 ? 'left:50%' : `left:${50 - Math.abs(b.diff) / max * 50}%`};width:${Math.max(1.5, Math.abs(b.diff) / max * 50)}%;background:${b.diff >= 0 ? 'var(--pos)' : 'var(--neg)'}`}></b></div>
         <span class=${'bv ' + (b.diff >= 0 ? 'pos' : 'neg')}><${Money} v=${Math.abs(b.diff)} s=${s} compact /> ${b.diff >= 0 ? 'جلوتری' : 'عقب‌تری'}</span></div>`)}
-        <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه:
+        <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه${T('deposit')}:
           <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>
       </div>
     </div>
@@ -86,7 +106,7 @@ function BreakEven({ st, s }) {
     return () => { alive = false; };
   }, [pick, months]);
   return html`<div class="card" id="breakeven">
-    <div class="card-h"><h3><${Icon} n="target" cls="sm" />نقطه سربه‌سر: سپرده یا …؟</h3>
+    <div class="card-h"><h3><${Icon} n="target" cls="sm" />نقطه سربه‌سر: سپرده یا …؟${T('breakeven')}</h3>
       <${AskBtn} q=${`اگر به‌جای سپرده ${num(rate, 1)}٪، روی «${name}» برای ${num(months)} ماه سرمایه‌گذاری کنم (کارمزد ${num(fee, 1)}٪)، نقطه سربه‌سر چقدر است و در گذشته چطور بوده؟`} label="بپرس" /></div>
     <div class="be">
       <div class="col" style="gap:12px">
@@ -95,7 +115,7 @@ function BreakEven({ st, s }) {
           ${held.length > 0 && html`<optgroup label="دارایی‌های من">${held.map((a) => html`<option value=${a.id}>${a.name}</option>`)}</optgroup>`}</select></div>
         <div class="grid2">
           <${NumField} label="سود سپرده (سالانه)" value=${rate} onInput=${(v) => setRate(Math.max(0, Math.min(200, v || 0)))} suffix="٪" digits=${1} />
-          <${NumField} label="کارمزد خرید و فروش" value=${fee} onInput=${(v) => setFee(Math.max(0, Math.min(50, v || 0)))} suffix="٪" digits=${1} hint="اختلاف قیمت خرید و فروش، کارمزد یا اجرت" />
+          <${NumField} label="کارمزد خرید و فروش" value=${fee} onInput=${(v) => setFee(Math.max(0, Math.min(50, v || 0)))} suffix="٪" digits=${1} hint=${html`اختلاف قیمت خرید و فروش، کارمزد یا اجرت ${T('fee')}`} />
         </div>
         <div class="field"><label>مدت</label><${Seg} value=${months} onChange=${setMonths} options=${[[1, '۱ ماه'], [3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']]} /></div>
       </div>
@@ -135,7 +155,7 @@ function Critique({ st, pf, s }) {
   };
   const LV = { high: ['var(--neg)', 'var(--neg-bg, rgba(239,77,107,.12))'], mid: ['var(--warn)', 'var(--warn-bg)'], low: ['var(--accent)', 'var(--accent-soft)'] };
   return html`<div class="critique">
-    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="sparkles" cls="sm" />نگاه دستیار</span>
+    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="sparkles" cls="sm" />نگاه دستیار${T('critique')}</span>
       ${conns.length ? html`<button class="btn sm" onClick=${run} disabled=${busy || !(pf.gross > 0)}><${Icon} n=${busy ? 'refresh' : 'sparkles'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال بررسی…' : c ? 'بررسی دوباره' : 'نقد پرتفوی'}</button>`
         : html`<a class="btn sm" href="#/settings">افزودن اتصال هوش مصنوعی</a>`}</div>
     ${err && html`<div class="callout err" style="margin-bottom:8px"><${Icon} n="circleX" cls="sm" /><div>${err}</div></div>`}
@@ -162,7 +182,7 @@ function NewMoney({ pf, s, targets, assets, dirty }) {
   const plan = amount > 0 ? I.allocateNew(pf, tf, amount, assets) : null;
   const hasTargets = Object.values(tf).some((v) => v > 0);
   return html`<div class="newmoney" id="newmoney">
-    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="plus" cls="sm" />پول جدید را کجا بگذارم؟</span>
+    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="plus" cls="sm" />پول جدید را کجا بگذارم؟${T('newmoney')}</span>
       ${plan && !dirty && html`<${AskBtn} q=${`اگر ${num(amount / (s.currency === 'rial' ? 1 : 10))} ${unitOf(s)} پول جدید داشته باشم، طبق تخصیص هدفم کجا بگذارم؟ با plan_new_money حساب کن و دلیلش را بگو.`} label="توضیح بده" />`}</div>
     ${!hasTargets ? html`<div class="xs muted">اول درصد هدف دسته‌ها را در جدول بالا وارد کن (یا «پر کردن با وضعیت فعلی» را بزن و تغییر بده)؛ بعد مبلغ را بنویس.</div>` : html`
       <div style="max-width:340px"><${MoneyField} label="مبلغی که می‌خواهی سرمایه‌گذاری کنی" rial=${amount} onRial=${setAmount} s=${s} /></div>
@@ -184,7 +204,7 @@ function Targets({ pf, s, assets }) {
   const dirty = JSON.stringify(t) !== JSON.stringify(s.targets);
   const fill = () => { const n = {}; for (const r of rows) n[r.id] = Math.round(r.currentShare * 1000) / 10; setT(n); };
   return html`<div class="card">
-    <div class="card-h"><h3><${Icon} n="target" cls="sm" />تخصیص هدف و پیشنهاد متوازن‌سازی</h3>
+    <div class="card-h"><h3><${Icon} n="target" cls="sm" />تخصیص هدف و پیشنهاد متوازن‌سازی${T('targets')}</h3>
       <div class="row"><button class="btn sm ghost" onClick=${fill}>پر کردن با وضعیت فعلی</button>
         <button class="btn sm primary" disabled=${!dirty} onClick=${() => { act.setSettings({ targets: t }); toast('اهداف ذخیره شد'); }}>ذخیره اهداف</button></div></div>
     <div class=${'callout' + (Math.abs(sum - 100) > 0.5 && sum > 0 ? ' warn' : '')} style="margin-bottom:12px"><${Icon} n="info" cls="sm" /><div>
@@ -238,7 +258,7 @@ function Scenario({ st, pf, s }) {
   const touched = Object.values(sh).some((v) => v !== 0);
   const maxAbs = Math.max(1, ...r.exposures.map((e) => Math.abs(e.after - e.before)));
   return html`<div class="card">
-    <div class="card-h"><h3><${Icon} n="sliders" cls="sm" />شبیه‌ساز سناریو</h3>
+    <div class="card-h"><h3><${Icon} n="sliders" cls="sm" />شبیه‌ساز سناریو${T('scenario')}</h3>
       <div class="row" style="gap:8px">${touched && html`<${AskBtn} q=${`اگر ${Object.entries(sh).filter(([, v]) => v).map(([k, v]) => `${A.SCENARIO_LABELS[k]} ${v > 0 ? '+' : ''}${v}٪`).join('، ')} شود، روی دارایی‌هایم چه اثری دارد؟ با simulate_scenario حساب کن و بگو کدام بخش بیشترین اثر را می‌گیرد.`} label="توضیح بده" />`}
       ${touched && html`<button class="btn sm ghost" onClick=${() => { setSh(ZERO); setPreset(null); setAi(null); }}><${Icon} n="reset" cls="sm" />بازنشانی</button>`}</div></div>
     <div class="nl-scn">
@@ -256,7 +276,7 @@ function Scenario({ st, pf, s }) {
     <div class="why" style="grid-template-columns:1fr 1fr">
       <div class="col" style="gap:14px">
         <${Slider} label="نرخ دلار (بازار آزاد)" value=${sh.usd} onChange=${set('usd')} min=${-50} max=${150} note="روی ارز، طلا، رمزارز و فلزات اثر می‌گذارد" />
-        <${Slider} label="انس جهانی طلا (دلاری)" value=${sh.gold} onChange=${set('gold')} min=${-50} max=${100} note=${html`طلای داخلی ≈ <span class="ltr">${goldLocal >= 0 ? '+' : ''}${num(goldLocal, 1)}٪</span>`} />
+        <${Slider} label="انس جهانی طلا (دلاری)" value=${sh.gold} onChange=${set('gold')} min=${-50} max=${100} note=${html`طلای داخلی ≈ <span class="ltr">${goldLocal >= 0 ? '+' : ''}${num(goldLocal, 1)}٪</span>${T('ounce')}`} />
         <${Slider} label="بورس تهران" value=${sh.equity} onChange=${set('equity')} min=${-60} max=${150} />
         ${more ? html`
           <${Slider} label="رمزارز (دلاری)" value=${sh.crypto} onChange=${set('crypto')} min=${-80} max=${200} />
@@ -272,7 +292,7 @@ function Scenario({ st, pf, s }) {
           <span class=${'sb ' + (r.delta >= 0 ? 'pos' : 'neg')}><span class="ltr">${pct(r.pct)}</span>، <${Money} v=${r.delta} s=${s} compact sign /></span>
         </div>
         <div class="grid2">
-          <div class="pcell"><span class="n">بر حسب دلار</span><span class="v"><${Delta} p=${usdTerms} showAbs=${false} /></span></div>
+          <div class="pcell"><span class="n row" style="gap:2px">بر حسب دلار${T('terms')}</span><span class="v"><${Delta} p=${usdTerms} showAbs=${false} /></span></div>
           <div class="pcell"><span class="n">بر حسب طلا</span><span class="v"><${Delta} p=${goldTerms} showAbs=${false} /></span></div>
         </div>
         ${touched && usdTerms !== null && usdTerms < -0.005 && r.delta > 0 && html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>ارزش تومانی بالا می‌رود ولی قدرت خرید دلاری‌ات <b>${pct(Math.abs(usdTerms), { sign: false })}</b> کم می‌شود — بخش ریالی دارایی از تورم عقب می‌ماند.</div></div>`}
@@ -304,17 +324,17 @@ export function AnalysisPage({ st, pf, s, open }) {
     <${Performance} st=${st} pf=${pf} s=${s} />
     <${Scenario} st=${st} pf=${pf} s=${s} />
     <div class="grid-ov">
-      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز</h3><span class="sub">ضدتورمی: ${pf.gross > 0 ? pct(1 - (pf.byExposure.rial || 0) / g, { sign: false }) : '—'}</span></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز${T('exposure')}</h3><span class="sub">ضدتورمی: ${pf.gross > 0 ? pct(1 - (pf.byExposure.rial || 0) / g, { sign: false }) : '—'}</span></div>
         <${StackBar} items=${exItems} height=${14} /><div style="height:14px"></div><${Bars} items=${exItems} s=${s} total=${g} /></div>
-      <div class="card"><div class="card-h"><h3><${Icon} n="droplet" cls="sm" />نردبان نقدشوندگی</h3></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="droplet" cls="sm" />نردبان نقدشوندگی${T('liquidity')}</h3></div>
         <${StackBar} items=${liqItems} height=${14} /><div style="height:14px"></div><${Bars} items=${liqItems} s=${s} total=${g} />
         <div class="xs muted" style="margin-top:8px">بالا: قابل نقد در چند روز (بانک، ارز، صندوق بورسی)، متوسط: چند هفته، پایین: ملک، سهام خصوصی، مطالبات</div></div>
     </div>
 
     <div class="grid-ov">
-      <div class="card"><div class="card-h"><h3><${Icon} n="bank" cls="sm" />تمرکز بر اساس محل نگهداری</h3></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="bank" cls="sm" />تمرکز بر اساس محل نگهداری${T('custody')}</h3></div>
         <${Bars} items=${cust} s=${s} total=${g} /></div>
-      <div class="card"><div class="card-h"><h3><${Icon} n="alert" cls="sm" />ریسک‌ها و نکات</h3></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="alert" cls="sm" />ریسک‌ها و نکات${T('risks')}</h3></div>
         ${risks.length ? html`<div class="list">${risks.map((r) => html`<div class="it" style="align-items:flex-start"><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="alert" /></span>
           <div class="grow"><div class="sb small">${r.t}</div><div class="xs muted">${r.d}</div></div></div>`)}</div>`
           : html`<div class="empty small"><div class="ico"><${Icon} n="check" /></div>ریسک برجسته‌ای در ترکیب فعلی دیده نشد.</div>`}
@@ -326,7 +346,7 @@ export function AnalysisPage({ st, pf, s, open }) {
     <${Targets} pf=${pf} s=${s} assets=${st.assets} />
     <${BreakEven} st=${st} s=${s} />
 
-    <div class="card"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
+    <div class="card"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها${T('pnl')}</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
       ${perf.length ? html`<table class="tbl"><thead><tr><th>دارایی</th><th class="n">بهای تمام‌شده</th><th class="n">ارزش روز</th><th class="n">سود / زیان</th><th class="n">بازده</th></tr></thead><tbody>
         ${perf.map((r) => html`<tr class="r" style="cursor:pointer" onClick=${() => open(r.asset)}><td><div class="row"><${Ava} cat=${r.asset.category} size=${28} /><span class="sb">${r.asset.name}</span></div></td>
           <td class="n small"><${Money} v=${r.asset.costBasis} s=${s} compact /></td><td class="n small"><${Money} v=${r.value} s=${s} compact /></td>

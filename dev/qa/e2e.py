@@ -182,6 +182,31 @@ async def main():
             check('capture logged as undoable event', any(e['kind'] == 'capture' and e['changes'] for e in evs))
         await step('capture', t_capture())
 
+        async def t_capture_broker():
+            site = await ctx.new_page(); await site.goto('http://127.0.0.1:8765/broker.html'); await site.wait_for_timeout(300)
+            helper = await ctx.new_page(); await helper.goto(f'chrome-extension://{ext}/ui/popup.html')
+            tab_id = await helper.evaluate("async () => (await chrome.tabs.query({url: 'http://127.0.0.1:8765/broker*'}))[0].id")
+            async with ctx.expect_page() as cp:
+                await helper.evaluate("(id) => new Promise(res => chrome.runtime.sendMessage({type:'capture', tabId:id}, res))", tab_id)
+            cap = await cp.value
+            cap.on('pageerror', lambda e: errors.append(f'[capture pageerror] {e}'))
+            await cap.wait_for_timeout(1200)
+            await cap.click('button:has-text("خواندن موجودی‌ها")')
+            await cap.wait_for_selector('.cap-row input[type=checkbox]', timeout=20000); await cap.wait_for_timeout(400)
+            checked = await cap.locator('.cap-row:not(:first-child) input[type=checkbox]:checked').count()
+            check('broker capture: all 4 rows pre-selected (1 update + 3 new)', checked == 4, checked)
+            txt = await cap.inner_text('body')
+            check('broker capture: new symbol priced from exchange', 'قیمت خودکار از بورس' in txt)
+            await cap.screenshot(path=f'{SH}/capture-broker-{THEME}.png', full_page=True)
+            await cap.click('button:has-text("ثبت ")'); await cap.wait_for_timeout(900)
+            assets = await get(helper, 'assets')
+            etf = [a for a in assets if a['id'] == 'etf'][0]
+            check('broker capture: existing fund matched by symbol', etf['quantity'] == 1200, etf['quantity'])
+            sh = [a for a in assets if a.get('name') == 'شستا']
+            check('broker capture: new stock with TSETMC ref + cost basis', len(sh) == 1 and sh[0]['price']['ref']['symbol'] == 'شستا' and sh[0]['costBasis'] == 6000000, sh[0] if sh else None)
+            check('broker capture: buying power as cash balance', any(a.get('name') == 'قدرت خرید' and a.get('balance') == 3000000 and a.get('custodian') == 'کارگزاری نمونه' for a in assets))
+        await step('capture-broker', t_capture_broker())
+
         async def t_popup():
             pp = await ctx.new_page(); await pp.set_viewport_size({'width': 392, 'height': 780})
             pp.on('pageerror', lambda e: errors.append(f'[popup pageerror] {e}'))

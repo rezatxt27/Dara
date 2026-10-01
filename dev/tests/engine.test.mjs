@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as E from '../../extension/lib/engine.js';
 import * as P from '../../extension/lib/providers.js';
+import * as A from '../../extension/lib/assistant.js';
 import * as J from '../../extension/lib/jalali.js';
 import { numToWordsFa, parseNum } from '../../extension/lib/format.js';
 
@@ -327,4 +328,30 @@ test('crypto search: Persian names hit the catalog, Latin text adds CoinGecko re
   assert.ok(en.items.find((c) => c.key === 'btc').catalog, 'catalog entry first');
   assert.ok(en.items.some((c) => c.cg === 'bitcoin-gold' && c.key === 'btg'));
   assert.equal(en.items.filter((c) => c.cg === 'bitcoin').length, 1, 'no duplicate of a catalog coin');
+});
+
+test('capture: broker portfolio — symbol fallback match, new holdings priced from TSETMC with cost basis', () => {
+  const assets = [
+    { id: 'z', name: 'صندوق طلای «زر»', category: 'stock', mode: 'units', quantity: 100, price: { source: 'market', ref: { provider: 'tsetmc', key: '1', symbol: 'زر', label: 'زر', field: 'close' } } },
+    { id: 'b', name: 'حساب بانکی الف', category: 'bank', mode: 'balance', balance: 5 },
+  ];
+  const json = { site: 'کارگزاری نمونه', currency_unit: 'rial', items: [
+    { label: 'زر', kind: 'quantity', amount: 120, unit: 'واحد', type: 'stock', symbol: 'زر', match_id: null, confidence: 0.99 },
+    { label: 'شستا', kind: 'quantity', amount: 5000, unit: 'سهم', type: 'stock', symbol: 'شستا', avg_cost: 1200, match_id: null, confidence: 0.97 },
+    { label: 'عسکه۵', kind: 'quantity', amount: 10, unit: 'واحد', type: 'coin', symbol: 'عسكه5', match_id: null, confidence: 0.93 },
+    { label: 'قدرت خرید', kind: 'balance', amount: 3_000_000, unit: 'ریال', type: 'cash', symbol: null, match_id: null, confidence: 0.99 },
+  ] };
+  const props = A.captureProposals(json, assets, {}, {});
+  assert.equal(props[0].assetId, 'z', 'matched by ticker even though the model returned no match_id');
+  assert.equal(props[0].field, 'quantity'); assert.equal(props[0].value, 120);
+  assert.equal(props[1].assetId, null); assert.equal(props[1].category, 'stock'); assert.equal(props[1].avgCost, 1200);
+  const shasta = A.newAssetFromCapture(props[1], { site: json.site, category: props[1].category });
+  assert.equal(shasta.price.ref.provider, 'tsetmc'); assert.equal(shasta.price.ref.symbol, 'شستا'); assert.equal(shasta.price.ref.key, '');
+  assert.equal(shasta.costBasis, 6_000_000); assert.equal(shasta.custodian, 'کارگزاری نمونه'); assert.equal(shasta.name, 'شستا');
+  assert.equal(props[2].category, 'stock', 'coin certificate units trade on the exchange');
+  const coin = A.newAssetFromCapture(props[2], { category: props[2].category });
+  assert.equal(coin.price.ref.symbol, 'عسکه5');
+  assert.equal(E.exposureOf(coin), 'gold', 'coin certificates count as gold');
+  const cash = A.newAssetFromCapture(props[3], { category: props[3].category });
+  assert.equal(cash.mode, 'balance'); assert.equal(cash.balance, 3_000_000); assert.equal(cash.category, 'bank');
 });

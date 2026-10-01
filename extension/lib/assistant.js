@@ -1,6 +1,6 @@
 // Dara assistant: system prompt, portfolio tools, weekly report and page-capture prompts.
 import * as E from './engine.js';
-import { CAT, CATEGORIES, EXPOSURES, TGJU_BY_KEY, NOBITEX_BY_KEY } from './catalog.js';
+import { CAT, CATEGORIES, EXPOSURES, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 
@@ -220,7 +220,7 @@ export function captureSystem() {
   return 'You extract a user\'s own financial holdings from the text of a web page (Iranian banks, brokers, gold platforms, crypto exchanges). Output strictly one JSON object and nothing else.';
 }
 export function capturePrompt(page, assets, quotesUnitHint) {
-  const list = assets.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name, custodian: a.custodian || '', category: CAT[a.category]?.short, mode: a.mode, unit: a.unit || (a.mode === 'balance' ? 'ریال' : '') }));
+  const list = assets.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name, symbol: refSymbol(a) || undefined, custodian: a.custodian || '', category: CAT[a.category]?.short, mode: a.mode, unit: a.unit || (a.mode === 'balance' ? 'ریال' : '') }));
   return `صفحه: ${page.title || ''} — ${page.url || ''}
 ${page.selection ? `متن انتخاب‌شده توسط کاربر (اولویت با این است):\n${page.selection}\n` : ''}
 دارایی‌های فعلی کاربر (برای تطبیق):
@@ -231,10 +231,14 @@ ${JSON.stringify(list)}
 - kind: "quantity" (مقدار/تعداد مثل گرم، عدد، واحد صندوق، مقدار رمزارز) یا "balance" (مانده مبلغی حساب/کیف پول) یا "unit_price" (فقط اگر قیمت واحدِ دارایی کاربر صریحاً آمده)
 - amount: عدد خالص (بدون جداکننده؛ ارقام فارسی را به انگلیسی تبدیل کن)
 - unit: واحد (گرم، عدد، USDT، BTC، ریال، تومان، …)
-- match_id: شناسه دارایی متناظر از فهرست بالا یا null
+- type: یکی از stock (سهم یا صندوق بورسی/ETF)، gold، coin، metal، crypto، fx، cash (مانده نقد، قدرت خرید، کیف پول)، deposit، other
+- symbol: نماد معاملاتی دقیقاً همان‌طور که در صفحه آمده (برای سهام، صندوق بورسی و رمزارز)، وگرنه null
+- avg_cost: قیمت سربه‌سر یا میانگین قیمت خرید «هر واحد» اگر در صفحه آمده، وگرنه null (به همان واحد پول صفحه)
+- match_id: شناسه دارایی متناظر از فهرست بالا یا null — اگر نماد یا نام با symbol یا name یک دارایی یکی است، حتماً همان را بده
 - confidence: ۰ تا ۱
+همه ردیف‌های پرتفوی را برگردان، حتی آن‌هایی که در فهرست بالا نیستند (برای آن‌ها match_id را null بگذار).
 اگر برای یک دارایی هم مقدار و هم ارزش ریالی آمده، برای دارایی‌های واحددار مقدار (quantity) را برگردان.
-خروجی فقط JSON: {"site":"...","currency_unit":"rial|toman|unknown","items":[{"label":"...","kind":"quantity","amount":0,"unit":"...","match_id":null,"confidence":0.9}]}
+خروجی فقط JSON: {"site":"نام کوتاه سایت یا کارگزاری","currency_unit":"rial|toman|unknown","items":[{"label":"...","kind":"quantity","amount":0,"unit":"...","type":"stock","symbol":"...","avg_cost":null,"match_id":null,"confidence":0.9}]}
 
 متن صفحه:
 """
@@ -242,13 +246,45 @@ ${page.text}
 """`;
 }
 
+/** Symbol/ticker an asset is priced by (TSE symbol, crypto symbol), if any. */
+function refSymbol(a) {
+  const r = a?.price?.ref;
+  if (!r) return '';
+  if (r.provider === 'tsetmc') return r.symbol || r.label || '';
+  if (r.provider === 'nobitex') return String(r.sym || NOBITEX_BY_KEY[r.key]?.sym || r.key || '').toUpperCase();
+  return '';
+}
+/** Compare tickers loosely: Arabic/Persian letters, digits, spaces and ZWNJ don't matter. */
+export const normSym = (s) => String(s || '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[\s\u200c\u200f\u200e«»"']/g, '').toLowerCase();
+const TYPE_CATEGORY = { stock: 'stock', fund: 'stock', gold: 'gold', coin: 'gold', metal: 'metal', crypto: 'crypto', fx: 'fx', cash: 'bank', deposit: 'fixed', other: 'other' };
+
+/** Exchange-traded gold (ETF units, coin certificates) is priced like a stock even if the model calls it gold. */
+function categoryOf(type, symbol, unit) {
+  if (symbol && (type === 'gold' || type === 'coin' || type === 'fund') && /واحد|سهم|unit|share/i.test(String(unit || ''))) return 'stock';
+  return TYPE_CATEGORY[type] || null;
+}
+
 /** Turn extracted items into concrete proposals against current assets. */
 export function captureProposals(json, assets, quotes, settings) {
   const items = Array.isArray(json?.items) ? json.items : [];
-  const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
+  const live = assets.filter((a) => !a.archived);
+  const byId = Object.fromEntries(live.map((a) => [a.id, a]));
   const cu = json?.currency_unit;
+  const used = new Set();
+  // Deterministic fallback when the model didn't match: same ticker, else same name.
+  const findBySymbol = (it) => {
+    for (const key of [it.symbol, it.label].filter(Boolean).map(normSym)) {
+      const a = live.find((x) => !used.has(x.id) && ((refSymbol(x) && normSym(refSymbol(x)) === key) || normSym(x.name) === key));
+      if (a) return a;
+    }
+    return null;
+  };
   return items.filter((it) => isFinite(+it.amount) && +it.amount >= 0).map((it, i) => {
-    const a = it.match_id ? byId[it.match_id] : null;
+    let a = it.match_id && byId[it.match_id] && !used.has(it.match_id) ? byId[it.match_id] : null;
+    if (!a) a = findBySymbol(it);
+    if (a) used.add(a.id);
+    const type = String(it.type || '').toLowerCase();
+    const symbol = it.symbol ? String(it.symbol).trim() : null;
     const moneyUnit = /تومان|toman/i.test(it.unit || '') ? 'toman' : /ریال|rial|irr/i.test(it.unit || '') ? 'rial' : (it.kind !== 'quantity' ? (cu === 'toman' ? 'toman' : 'rial') : null);
     const amt = +it.amount;
     let field = null, value = null, current = null;
@@ -264,7 +300,42 @@ export function captureProposals(json, assets, quotes, settings) {
       } else if (a.mode === 'balance') { field = 'balance'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.balance || 0; }
       else if (a.mode === 'rate') { field = 'rate.principal'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.rate?.principal || 0; }
     }
+    const pageMoney = cu === 'toman' ? 10 : 1;
+    const avgCost = isFinite(+it.avg_cost) && +it.avg_cost > 0 ? +it.avg_cost * pageMoney : null;
     return { key: i, label: it.label, kind: it.kind, amount: amt, unit: it.unit, moneyUnit, confidence: +it.confidence || 0, assetId: a?.id || null, field, value, current,
+      type, symbol, avgCost, category: categoryOf(type, symbol, it.unit),
       changed: field ? Math.abs(value - current) > Math.max(1e-9, Math.abs(current) * 1e-6) : true };
   });
+}
+
+/** A new asset from a captured row: priced automatically when the row names something we can price. */
+export function newAssetFromCapture(r, { site = '', category, now = Date.now(), id } = {}) {
+  const c = CAT[category] || CAT.other;
+  const base = { id, custodian: site, category: c.id, liquidity: c.liquidity, createdAt: now, updatedAt: now };
+  const isMoney = r.kind !== 'quantity';
+  const rial = (r.moneyUnit === 'toman' ? 10 : 1) * r.amount;
+  if (isMoney || c.defaultMode === 'balance' || c.defaultMode === 'rate') {
+    return { ...base, name: r.label, mode: 'balance', balance: isMoney ? rial : r.amount, balanceAt: now };
+  }
+  const qty = r.amount;
+  const costBasis = r.avgCost ? Math.round(r.avgCost * qty) : undefined;
+  const sym = String(r.symbol || r.label || '').trim().replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+  let price = null; let unit = r.unit || 'واحد';
+  if (c.id === 'stock' && sym) {
+    price = { source: 'market', ref: { provider: 'tsetmc', key: '', symbol: sym, label: sym, field: 'close' }, adjustPct: 0, factor: 1 };
+    if (/سهم|واحد|share|unit/i.test(unit) === false) unit = 'سهم';
+  } else if (c.id === 'crypto') {
+    const k = normSym(sym);
+    const coin = NOBITEX.find((x) => x.key === k || x.sym.toLowerCase() === k);
+    if (coin) price = { source: 'market', ref: { provider: 'nobitex', key: coin.key }, adjustPct: 0, factor: 1 };
+  } else if ((c.id === 'gold' || c.id === 'gold_online') && /گرم|gram/i.test(unit)) {
+    price = { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: 0, factor: 1 };
+  } else if (c.id === 'fx') {
+    const key = /یورو|eur/i.test(unit + sym) ? 'price_eur' : /دلار|usd/i.test(unit + sym) ? 'price_dollar_rl' : null;
+    if (key) price = { source: 'market', ref: { provider: 'tgju', key }, adjustPct: 0, factor: 1 };
+  }
+  const name = c.id === 'stock' && r.symbol ? sym : r.label;
+  return { ...base, name, mode: 'units', quantity: qty, unit, costBasis,
+    price: price || { source: 'manual', value: r.avgCost || 0, updatedAt: now },
+    ...(price ? {} : { review: 'از صفحه ثبت شد؛ منبع قیمت را تنظیم کن' }) };
 }

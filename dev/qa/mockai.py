@@ -7,6 +7,11 @@ PAGE = """<!doctype html><html lang=fa dir=rtl><meta charset=utf-8><title>پلت
 <div>موجودی طلای آب‌شده: ۴۲٫۱۵ گرم</div><div>ارزش تقریبی: ۱٬۰۶۸٬۹۰۰٬۰۰۰ تومان</div>
 <div>کیف پول تومانی: ۱۲٬۵۰۰٬۰۰۰ تومان</div><div>قیمت لحظه‌ای خرید هر گرم: ۲۵٬۴۰۰٬۰۰۰ تومان</div></body></html>"""
 
+BROKER = """<!doctype html><html lang=fa dir=rtl><meta charset=utf-8><title>کارگزاری نمونه — پرتفوی</title>
+<body><h1>پرتفوی نمونه</h1><table><tr><th>نماد</th><th>تعداد</th><th>قیمت سربه‌سر</th></tr>
+<tr><td>زر</td><td>1,200</td><td>150,000</td></tr><tr><td>شستا</td><td>5,000</td><td>1,200</td></tr><tr><td>عسکه5</td><td>10</td><td>2,000,000</td></tr></table>
+<div>قدرت خرید: 3,000,000 ریال</div></body></html>"""
+
 def openai_reply(content=None, tool_calls=None):
     msg = {"role": "assistant", "content": content}
     if tool_calls: msg["tool_calls"] = tool_calls
@@ -24,6 +29,7 @@ class H(BaseHTTPRequestHandler):
         self.send_response(204); self.send_header("Access-Control-Allow-Origin", "*"); self.send_header("Access-Control-Allow-Headers", "*"); self.end_headers()
     def do_GET(self):
         if self.path.startswith("/talayin"): return self._send(200, PAGE, "text/html; charset=utf-8")
+        if self.path.startswith("/broker"): return self._send(200, BROKER, "text/html; charset=utf-8")
         if self.path.endswith("/models"): return self._send(200, {"data": [{"id": "mock-model-1"}, {"id": "mock-mini"}]})
         self._send(404, {"error": {"message": "not found"}})
     def do_POST(self):
@@ -37,6 +43,13 @@ class H(BaseHTTPRequestHandler):
         tool_names = {t["function"]["name"] for t in tools}
         if "Reply with" in text: return self._send(200, openai_reply("OK"))
         if "Call the ping tool" in text: return self._send(200, openai_reply(None, [tc("ping", {})]) if "ping" in tool_names else openai_reply("cannot"))
+        if "currency_unit" in text and "پرتفوی نمونه" in text:
+            # The model returns every row but matches none, like a real model often does.
+            items = [{"label": "زر", "kind": "quantity", "amount": 1200, "unit": "واحد", "type": "stock", "symbol": "زر", "avg_cost": 150000, "match_id": None, "confidence": 0.99},
+                     {"label": "شستا", "kind": "quantity", "amount": 5000, "unit": "سهم", "type": "stock", "symbol": "شستا", "avg_cost": 1200, "match_id": None, "confidence": 0.97},
+                     {"label": "عسکه5", "kind": "quantity", "amount": 10, "unit": "واحد", "type": "coin", "symbol": "عسکه5", "avg_cost": 2000000, "match_id": None, "confidence": 0.93},
+                     {"label": "قدرت خرید", "kind": "balance", "amount": 3000000, "unit": "ریال", "type": "cash", "symbol": None, "avg_cost": None, "match_id": None, "confidence": 0.99}]
+            return self._send(200, openai_reply(json.dumps({"site": "کارگزاری نمونه", "currency_unit": "rial", "items": items}, ensure_ascii=False)))
         if "currency_unit" in text:
             m = re.search(r"\(برای تطبیق\):\n(\[.*?\])\n", text, re.S)
             ids = json.loads(m.group(1)) if m else []

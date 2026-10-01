@@ -1,5 +1,5 @@
 // Smart capture: read holdings from the page the user was on, show a reviewable diff, apply on confirmation.
-import { html, useState, useEffect, useMemo, Icon, Money, Ava, toast, num, hasChrome } from '../components.js';
+import { html, useState, useEffect, useMemo, Icon, Money, Ava, toast, num, hasChrome, send } from '../components.js';
 import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import * as E from '../../lib/engine.js';
@@ -8,6 +8,16 @@ import { parseNum, toEnDigits, uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
 
 const hostOf = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch { return ''; } };
+
+/** One line under a new row: how the new asset will be valued. */
+function newHint(r) {
+  const n = A.newAssetFromCapture(r, { category: r.category });
+  const ref = n.price?.ref;
+  if (n.mode === 'balance') return 'به‌صورت مانده ثبت می‌شود';
+  if (ref?.provider === 'tsetmc') return `قیمت خودکار از بورس، نماد «${ref.symbol}»${r.avgCost ? '؛ قیمت سربه‌سر هم ثبت می‌شود' : ''}`;
+  if (ref) return 'قیمت خودکار از بازار';
+  return 'قیمت دستی؛ بعداً می‌توانی منبع قیمت را تنظیم کنی';
+}
 
 function guessCategory(unit, site) {
   const u = String(unit || '');
@@ -57,7 +67,11 @@ export function CapturePage({ st, s }) {
     setState('running'); setErr('');
     try {
       const res = await AI.extract({ ai: st.ai, system: A.captureSystem(), prompt: A.capturePrompt({ ...page, text: masked.slice(0, 24000) }, assets) });
-      const props = A.captureProposals(res.json, assets, st.quotes, s).map((p) => ({ ...p, on: !!p.assetId && p.changed && p.confidence >= 0.5, create: false, category: guessCategory(p.unit, site + ' ' + page.title) }));
+      // Matched rows with a change are pre-selected; holdings not yet in Dara are pre-selected as new assets.
+      const props = A.captureProposals(res.json, assets, st.quotes, s).map((p) => {
+        const create = !p.assetId && p.confidence >= 0.7 && p.amount > 0;
+        return { ...p, create, on: p.assetId ? p.changed && p.confidence >= 0.5 : create, category: p.category || guessCategory(p.unit, site + ' ' + page.title) };
+      });
       setRows(props); setMeta({ conn: res.conn.name, model: res.model, site: res.json.site, unit: res.json.currency_unit });
       setState('done');
       if (trust) act.setAI({ trustedSites: [...new Set([...(st.ai.trustedSites || []), site])] });
@@ -86,17 +100,13 @@ export function CapturePage({ st, s }) {
     const chosen = rows.filter((r) => r.on && ((r.assetId && r.field && isFinite(r.value)) || r.create));
     if (!chosen.length) return toast('موردی برای ثبت انتخاب نشده');
     const updates = chosen.filter((r) => !r.create);
-    const news = chosen.filter((r) => r.create).map((r) => {
-      const c = CAT[r.category] || CAT.other;
-      const money = r.kind !== 'quantity';
-      const rial = (r.moneyUnit === 'toman' ? 10 : 1) * r.amount;
-      return money || c.defaultMode === 'balance'
-        ? { id: uid('a'), name: r.label, category: r.category, custodian: site, mode: 'balance', balance: money ? rial : r.amount, balanceAt: Date.now(), liquidity: c.liquidity }
-        : { id: uid('a'), name: r.label, category: r.category, custodian: site, mode: 'units', quantity: r.amount, unit: r.unit || 'واحد', price: { source: 'manual', value: 0, updatedAt: Date.now() }, liquidity: c.liquidity, review: 'از صفحه ثبت شد؛ منبع قیمت را تنظیم کن' };
-    });
-    await act.applyCapture(updates, news, site);
+    const where = meta?.site && !/^https?:/.test(meta.site) ? meta.site : site;
+    const news = chosen.filter((r) => r.create).map((r) => A.newAssetFromCapture(r, { site: where, category: r.category, id: uid('a') }));
+    await act.applyCapture(updates, news, where);
     await chrome.storage.session.remove('capture');
-    toast(`${num(updates.length + news.length)} مورد ثبت شد`);
+    const priced = news.filter((n) => n.price?.source === 'market').length;
+    toast(`${num(updates.length + news.length)} مورد ثبت شد${priced ? `؛ قیمت ${num(priced)} دارایی جدید خودکار گرفته می‌شود` : ''}`);
+    if (priced) send('refresh');
     location.hash = '#/assets';
   };
 
@@ -129,7 +139,8 @@ export function CapturePage({ st, s }) {
     ${state === 'done' && html`<div class="card">
       <div class="card-h"><h3>${meta?.manual ? 'عددهای پیدا شده در صفحه' : 'موجودی‌های شناسایی‌شده'}</h3><span class="sub">${meta?.manual ? 'هر عدد را به یک دارایی وصل کن' : `با ${meta?.conn}، ${num(rows.length)} مورد`}</span></div>
       ${rows.length ? html`<div>
-        <div class="cap-row xs muted sb" style="padding-top:0"><span></span><span>در صفحه</span><span>دارایی در دارا</span><span>فعلی</span><span>جدید</span></div>
+        <div class="cap-row xs muted sb" style="padding-top:0"><input type="checkbox" title="انتخاب همه" checked=${rows.length > 0 && rows.every((r) => r.on)}
+            onChange=${(e) => setRows((rs) => rs.map((r) => (r.assetId || r.create ? { ...r, on: e.target.checked } : r)))} /><span>در صفحه</span><span>دارایی در دارا</span><span>فعلی</span><span>جدید</span></div>
         ${rows.map((r) => {
           const a = assets.find((x) => x.id === r.assetId);
           const fmtV = (v) => (v === null || v === undefined ? '—' : r.field === 'quantity' ? `${num(v, 'auto')} ${a?.unit || ''}` : html`<${Money} v=${v} s=${s} compact />`);
@@ -142,7 +153,8 @@ export function CapturePage({ st, s }) {
                 ${assets.map((x) => html`<option value=${x.id}>${x.name}${x.custodian && x.custodian !== x.name ? ' — ' + x.custodian : ''}</option>`)}
                 <option value="__new">＋ افزودن به‌عنوان دارایی جدید</option>
               </select>
-              ${r.create && html`<select class="input" value=${r.category} onChange=${(e) => setRow(r.key, { category: e.target.value })}>${Object.values(CAT).map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>`}
+              ${r.create && html`<select class="input" value=${r.category} onChange=${(e) => setRow(r.key, { category: e.target.value })}>${Object.values(CAT).map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
+                <span class="xs muted">${newHint(r)}</span>`}
               ${r.manual && a && a.mode === 'units' && html`<select class="input" value=${r.field} onChange=${(e) => setRow(r.key, { field: e.target.value })}><option value="quantity">مقدار</option>${a.price?.source !== 'market' ? html`<option value="unit_price">قیمت واحد</option>` : ''}</select>`}
             </div>
             <span class="small">${r.create ? html`<span class="muted">جدید</span>` : fmtV(r.current)}</span>

@@ -195,10 +195,16 @@ export async function tsetmcSearch(q) {
     lastDate: it.lastDate || 0, market: persianize(it.flowTitle || ''), active: !!it.lastDate,
   })).sort((a, b) => (b.lastDate || 0) - (a.lastDate || 0));
 }
+const symKey = (s) => persianize(s).replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/\s+/g, '');
 export async function tsetmcResolve(symbol) {
-  const list = await tsetmcSearch(symbol);
-  const target = persianize(symbol);
-  return list.find((x) => x.symbol === target && x.active) || list.find((x) => x.symbol === target) || null;
+  const target = symKey(symbol);
+  // Search with the symbol as typed; if nothing, retry with Persian digits (a ticker ending in 2 typed with Latin digits → Persian digits).
+  for (const q of new Set([String(symbol), String(symbol).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d])])) {
+    const list = await tsetmcSearch(q);
+    const hit = list.find((x) => symKey(x.symbol) === target && x.active) || list.find((x) => symKey(x.symbol) === target);
+    if (hit) return hit;
+  }
+  return null;
 }
 function tseDate(dEven, hEven) {
   if (!dEven) return { at: Date.now(), asOf: '' };

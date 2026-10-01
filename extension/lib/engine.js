@@ -19,7 +19,8 @@ export function exposureOf(a) {
   if (key === 'paxg' || key === 'xaut') return 'gold'; // gold-backed tokens
   if (a.category === 'stock') {
     const sym = a.price?.ref?.symbol || a.price?.ref?.label || '';
-    if (GOLD_ETFS.includes(sym) || /صندوق طلا|طلای «/.test(a.name || '')) return 'gold';
+    // Gold ETFs and gold-coin certificates (گواهی سکه، نمادهای «عسکه…») move with gold, not stocks.
+    if (GOLD_ETFS.includes(sym) || /^عسکه|^سکه/.test(sym) || /صندوق طلا|طلای «|گواهی سکه/.test(a.name || '')) return 'gold';
   }
   return c.exposure;
 }

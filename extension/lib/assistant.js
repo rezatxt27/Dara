@@ -1,6 +1,7 @@
 // Dara assistant: system prompt, portfolio tools, weekly report and page-capture prompts.
 import * as E from './engine.js';
-import { CAT, CATEGORIES, EXPOSURES, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
+import * as I from './insights.js';
+import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 
@@ -151,6 +152,71 @@ export function makeTools(ctx) {
       },
     },
     {
+      name: 'explain_value',
+      description: 'ریز محاسبه یک عدد: با asset_id نشان می‌دهد ارزش آن دارایی دقیقاً چطور حساب شده (مقدار، قیمت، منبع، نرخ، روزها، فرمول)؛ بدون asset_id ترکیب ارزش خالص را می‌دهد.',
+      schema: { type: 'object', properties: { asset_id: { type: 'string' } }, required: [] },
+      run: ({ asset_id } = {}) => {
+        const s = st(); const pf = pfOf();
+        const ex = asset_id ? (() => { const a = s.assets.find((x) => x.id === asset_id); return a ? I.explainAsset(a, s.quotes, s.settings) : null; })() : I.explainNet(pf);
+        if (!ex) return { error: 'دارایی با این شناسه پیدا نشد؛ اول list_assets را صدا بزن' };
+        const line = (l) => {
+          // Public market prices stay absolute; private amounts become a share of net worth in percent mode.
+          if (l.k === 'money') return { label: l.t, ...(P() && !l.pub ? { pct_of_net: pf.net > 0 ? pct(l.v / pf.net) : null } : { amount: disp(l.v, s.settings), unit: unitName(s.settings) }) };
+          if (l.k === 'usd') return { label: l.t, usd: l.v };
+          if (l.k === 'pct') return { label: l.t, pct: pct(l.v) };
+          if (l.k === 'date') return { label: l.t, date: fmtJ(l.v), ...(l.sub ? { note: l.sub } : {}) };
+          if (l.k === 'qty') return { label: l.t, ...(P() ? {} : { quantity: l.v }), unit: l.unit };
+          return { label: l.t, value: l.v, ...(l.unit ? { unit: l.unit } : {}) };
+        };
+        return { formula: ex.formula, lines: ex.lines.map(line), notes: ex.notes };
+      },
+    },
+    {
+      name: 'compare_performance',
+      description: '«واقعاً پولدارتر شدم؟»: بازده واقعی پرتفوی (بعد از کنار گذاشتن واریز، برداشت و ثبت‌های دستی) در مقایسه با نگه‌داشتن همان پول در طلای ۱۸، دلار یا سپرده.',
+      schema: { type: 'object', properties: { period: { type: 'string', enum: ['month', 'quarter', 'year', 'all'] }, deposit_rate_pct: { type: 'number' } }, required: ['period'] },
+      run: ({ period = 'quarter', deposit_rate_pct } = {}) => {
+        const s = st(); const pf = pfOf();
+        const days = { month: 30, quarter: 90, year: 365, all: 0 }[period] ?? 90;
+        const r = I.performance(s, days, { depositPct: deposit_rate_pct || I.defaultDepositPct(s), pf });
+        if (!r) return { error: 'تاریخچه کافی نیست؛ «بازسازی تاریخچه» را در صفحه اصلی اجرا کن' };
+        const m = (v) => (P() ? { pct_of_net: pct(v / Math.abs(r.end || 1)) } : { amount: disp(v, s.settings) });
+        return { from: fmtJ(r.from), days: r.days, estimated_base: r.est || undefined, market_return_pct: r.ret !== null ? pct(r.ret) : null, annualized_pct: r.annual !== null ? pct(r.annual) : null,
+          market_gain: m(r.market), money_added_or_removed: m(r.moneyIn),
+          alternatives: r.bench.map((b) => ({ name: b.name, alternative_return_pct: pct(b.ret), you_are_ahead_by: m(b.diff) })) };
+      },
+    },
+    {
+      name: 'break_even',
+      description: 'نقطه سربه‌سر: یک دارایی (طلا، سکه، دلار، تتر یا یک دارایی واحددار کاربر) در چند ماه باید چقدر رشد کند تا از سپرده با نرخ مشخص جلو بزند (با احتساب کارمزد خرید و فروش).',
+      schema: { type: 'object', properties: { asset: { type: 'string', description: 'gold18 | coin | usd | usdt | btc یا asset_id' }, deposit_rate_pct: { type: 'number' }, months: { type: 'number' }, fee_pct: { type: 'number' } }, required: ['asset', 'deposit_rate_pct', 'months'] },
+      run: ({ asset = 'gold18', deposit_rate_pct = 25, months = 6, fee_pct = 0 } = {}) => {
+        const s = st();
+        const refs = { gold18: 'tgju:geram18', coin: 'tgju:sekee', usd: 'tgju:price_dollar_rl', usdt: 'nobitex:usdt', btc: 'nobitex:btc' };
+        let price0 = null, name = asset;
+        if (refs[asset]) { price0 = s.quotes[refs[asset]]?.price || null; name = { gold18: 'طلای ۱۸ عیار (هر گرم)', coin: 'سکه امامی', usd: 'دلار', usdt: 'تتر', btc: 'بیت‌کوین' }[asset]; }
+        else { const a = s.assets.find((x) => x.id === asset); if (a?.mode === 'units') { price0 = E.unitPriceOf(a, s.quotes).price; name = a.name; } }
+        if (!(price0 > 0)) return { error: 'قیمت فعلی این دارایی در دسترس نیست' };
+        const r = I.breakEven({ price0, ratePct: deposit_rate_pct, months, feePct: fee_pct });
+        return { asset: name, months: r.months, deposit_gain_pct: pct(r.depositGain), required_rise_pct: pct(r.needed), required_annual_pct: pct(r.annualNeeded), price_now: disp(price0, s.settings), price_needed: disp(r.targetPrice, s.settings), unit: unitName(s.settings) };
+      },
+    },
+    {
+      name: 'plan_new_money',
+      description: 'پول جدید را کجا بگذارم: مبلغ (به واحد نمایش) را بر اساس تخصیص هدف کاربر بین دسته‌ها پخش می‌کند تا ترکیب به هدف نزدیک شود، بدون فروش هیچ دارایی.',
+      schema: { type: 'object', properties: { amount: { type: 'number', description: 'به واحد نمایش (تومان/ریال)' } }, required: ['amount'] },
+      run: ({ amount } = {}) => {
+        const s = st(); const pf = pfOf(); const k = s.settings.currency === 'rial' ? 1 : 10;
+        const targets = Object.fromEntries(Object.entries(s.settings.targets || {}).map(([c, v]) => [c, (+v || 0) / 100]));
+        const r = I.allocateNew(pf, targets, (+amount || 0) * k);
+        if (!r) return { error: 'تخصیص هدف تعریف نشده یا مبلغ نامعتبر است؛ کاربر باید در صفحه «تحلیل و سناریو» درصد هدف هر دسته را تعیین کند' };
+        return { ...(P() ? {} : { amount, unit: unitName(s.settings) }),
+          plan: r.rows.filter((x) => x.add >= 1).map((x) => ({ category: x.cat.name, share_of_amount_pct: pct(x.add / r.amount), share_after_pct: pct(x.afterShare), target_pct: pct(x.target), example_asset: x.vehicle?.name,
+            ...(P() ? {} : { add: disp(x.add, s.settings), share_now_pct: pct(x.currentShare) }) })),
+          max_gap_before_pct: pct(r.maxDevBefore), max_gap_after_pct: pct(r.maxDevAfter) };
+      },
+    },
+    {
       name: 'propose_update',
       description: 'پیشنهاد به‌روزرسانی یک دارایی (مقدار، مانده یا قیمت واحد). اعمال فقط بعد از تأیید کاربر. مبالغ به واحد نمایش (تومان/ریال).',
       schema: { type: 'object', properties: { asset_id: { type: 'string' }, field: { type: 'string', enum: ['quantity', 'balance', 'unit_price'] }, new_value: { type: 'number' }, reason: { type: 'string' } }, required: ['asset_id', 'field', 'new_value'] },
@@ -172,6 +238,7 @@ export function makeTools(ctx) {
         const s = st(); const a = s.assets.find((x) => x.id === asset_id);
         if (!a || a.mode !== 'units') return { error: 'دارایی واحددار با این شناسه پیدا نشد' };
         if (!(quantity > 0) || !(unit_price > 0)) return { error: 'مقدار یا قیمت نامعتبر' };
+        if (side === 'sell' && quantity > (+a.quantity || 0) + 1e-9) return { error: `مقدار فروش از موجودی (${+a.quantity || 0} ${a.unit || ''}) بیشتر است` };
         const k = s.settings.currency === 'rial' ? 1 : 10;
         const cash = cash_asset_id ? s.assets.find((x) => x.id === cash_asset_id) : null;
         ctx.onProposal?.({ id: uid('p'), type: 'trade', assetId: a.id, assetName: a.name, side, qty: quantity, price: unit_price * k, cashId: cash?.id || null, cashName: cash?.name || null, unit: a.unit });
@@ -338,4 +405,159 @@ export function newAssetFromCapture(r, { site = '', category, now = Date.now(), 
   return { ...base, name, mode: 'units', quantity: qty, unit, costBasis,
     price: price || { source: 'manual', value: r.avgCost || 0, updatedAt: now },
     ...(price ? {} : { review: 'از صفحه ثبت شد؛ منبع قیمت را تنظیم کن' }) };
+}
+
+/* ---------------- natural-language scenario ---------------- */
+export const SCENARIO_RANGES = { usd: [-50, 150], gold: [-50, 100], equity: [-60, 150], crypto: [-80, 200], metals: [-50, 100], private: [-80, 200], real: [-50, 150] };
+export const SCENARIO_LABELS = { usd: 'نرخ دلار', gold: 'انس جهانی طلا', equity: 'بورس تهران', crypto: 'رمزارز (دلاری)', metals: 'نقره و مس (دلاری)', private: 'سهام غیربورسی', real: 'ملک و خودرو' };
+export function scenarioSystem() {
+  return 'You turn a described economic event into explicit, editable market assumptions for an Iranian household portfolio. You do not predict; you state plausible assumptions. Output strictly one JSON object.';
+}
+export function scenarioPrompt(text, quotes) {
+  const q = (id) => quotes[id]?.price;
+  return `کاربر می‌خواهد این اتفاق را روی دارایی‌هایش امتحان کند: «${text}»
+وضعیت فعلی بازار: دلار آزاد ${q('tgju:price_dollar_rl') ? Math.round(q('tgju:price_dollar_rl') / 10).toLocaleString('en-US') + ' تومان' : 'نامشخص'}، انس طلا ${q('tgju:ons') ? '$' + Math.round(q('tgju:ons')) : 'نامشخص'}.
+برای هر متغیر یک فرض درصدی معقول بده (عدد صحیح، 0 یعنی بدون تغییر). متغیرها:
+usd: تغییر نرخ دلار بازار آزاد ایران، gold: تغییر انس جهانی طلا به دلار (طلای داخلی خودکار = انس × دلار)، equity: بورس تهران، crypto: رمزارز به دلار، metals: نقره و مس به دلار، private: سهام غیربورسی، real: ملک و خودرو.
+قواعد: فقط متغیرهایی را که این اتفاق واقعاً رویشان اثر دارد تغییر بده؛ برای هر متغیر تغییرکرده یک دلیل کوتاه یک‌جمله‌ای فارسی بنویس؛ اعداد را در بازه‌های واقع‌بینانه نگه دار؛ اگر اتفاق مبهم است، رایج‌ترین برداشت را بگیر.
+خروجی فقط JSON: {"title":"عنوان کوتاه سناریو","shocks":{"usd":0,"gold":0,"equity":0,"crypto":0,"metals":0,"private":0,"real":0},"reasons":{"usd":"..."}}`;
+}
+/** Clamp model output to the simulator's ranges; keep a reason per changed variable. */
+export function parseScenario(json) {
+  const shocks = {}; const assumptions = [];
+  const num = (v) => +String(v ?? '').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)).replace(/[٫]/g, '.').replace(/[%٪+\s]/g, '').replace(/[−–]/g, '-');
+  const vals = Object.keys(SCENARIO_RANGES).map((k) => num(json?.shocks?.[k])).filter((v) => isFinite(v) && v !== 0);
+  // Some models answer in fractions (0.2 for +20%): if every value is within ±1 and one is fractional, scale up.
+  const scale = vals.length && vals.every((v) => Math.abs(v) <= 1) && vals.some((v) => !Number.isInteger(v)) ? 100 : 1;
+  for (const [k, [lo, hi]] of Object.entries(SCENARIO_RANGES)) {
+    const raw = num(json?.shocks?.[k]) * scale;
+    const v = isFinite(raw) ? Math.round(Math.min(hi, Math.max(lo, raw))) : 0;
+    shocks[k] = v;
+    if (v !== 0) assumptions.push({ key: k, label: SCENARIO_LABELS[k], value: v, reason: String(json?.reasons?.[k] || '').slice(0, 160), clamped: isFinite(raw) && Math.round(raw) !== v });
+  }
+  return { title: String(json?.title || '').slice(0, 60), shocks, assumptions };
+}
+
+/* ---------------- AI portfolio review ---------------- */
+export function critiqueSystem() {
+  return 'You are a careful, neutral personal-finance reviewer for an Iranian household. You point out structural weaknesses in a portfolio using only the given percentages. No buy/sell advice, no price predictions. Output strictly one JSON object.';
+}
+export function critiquePrompt(facts) {
+  return `این خلاصه درصدی پرتفوی یک کاربر است (هیچ مبلغی نیامده):
+${JSON.stringify(facts)}
+سه نقطه ضعف یا ریسک مهم این ترکیب را پیدا کن (مثلاً تمرکز روی یک دارایی یا یک محل نگهداری، سهم بالای دارایی ریالی در برابر تورم، نقدینگی کم برای شرایط اضطراری، بدهی، فاصله از تخصیص هدف، عقب ماندن از طلا یا دلار).
+برای هر مورد: title (حداکثر ۸ کلمه)، detail (یک تا دو جمله با اشاره به همان درصدها)، check (یک سؤال یا بررسی عملی که کاربر خودش انجام دهد؛ توصیه خرید و فروش نده)، level: high | mid | low.
+اگر ترکیب سالم است، کمتر از سه مورد بده. فقط به فارسی.
+خروجی فقط JSON: {"points":[{"title":"...","detail":"...","check":"...","level":"mid"}]}`;
+}
+export function parseCritique(json) {
+  const pts = Array.isArray(json?.points) ? json.points : [];
+  return pts.slice(0, 3).filter((p) => p && p.title).map((p) => ({ title: String(p.title).slice(0, 80), detail: String(p.detail || '').slice(0, 320), check: String(p.check || '').slice(0, 200), level: ['high', 'mid', 'low'].includes(p.level) ? p.level : 'mid' }));
+}
+
+/* ---------------- one-sentence entry ---------------- */
+export function quickSystem() {
+  return 'You convert one Persian sentence about a personal financial transaction into structured actions against the user\'s existing assets. Never invent numbers that are not in the sentence. Output strictly one JSON object.';
+}
+export function quickPrompt(text, assets) {
+  const list = assets.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name, custodian: a.custodian || undefined, category: CAT[a.category]?.short, mode: a.mode, unit: a.unit || undefined, symbol: refSymbol(a) || undefined }));
+  return `جمله کاربر: «${text}»
+دارایی‌های کاربر:
+${JSON.stringify(list)}
+
+جمله را به یک یا چند action تبدیل کن:
+- خرید یا فروش دارایی واحددار (mode=units): {"type":"trade","asset_id":"شناسه یا null","side":"buy|sell","quantity":عدد,"unit_price":عدد یا null,"total":عدد یا null,"money_unit":"toman|rial","cash_asset_id":"حسابی که پول از آن برداشته/به آن واریز شد یا null","new_asset":null}
+  اگر دارایی در فهرست نیست و خرید است، asset_id را null بگذار و new_asset بده: {"kind":"gold18|gold24|coin_emami|coin_bahar|coin_half|coin_quarter|silver|usd|eur|crypto|stock|other","name":"نام","symbol":"نماد یا null","unit":"گرم|عدد|دلار|..."}
+- اصلاح مقدار یا مانده: {"type":"set","asset_id":"...","field":"quantity|balance","value":عدد,"money_unit":"toman|rial"}
+- واریز یا برداشت از یک حساب (mode=balance): {"type":"cash","asset_id":"...","direction":"in|out","amount":عدد,"money_unit":"toman|rial","note":"شرح کوتاه"}
+- انتقال پول بین دو حساب: {"type":"transfer","from_id":"...","to_id":"...","amount":عدد,"money_unit":"toman|rial"}
+قواعد: «میلیون/میلیارد/هزار» را به عدد کامل تبدیل کن؛ اگر واحد پول گفته نشده toman است؛ قیمت یا مبلغی را که در جمله نیامده null بگذار؛ اگر جمله مبهم است یا دارایی را نمی‌شود پیدا کرد، actions را خالی بگذار و در question یک سؤال کوتاه فارسی بپرس.
+خروجی فقط JSON: {"actions":[...],"question":null}`;
+}
+
+const NEW_KIND = {
+  gold18: { category: 'gold', unit: 'گرم', ref: { provider: 'tgju', key: 'geram18' }, name: 'طلای ۱۸ عیار' },
+  gold24: { category: 'gold', unit: 'گرم', ref: { provider: 'tgju', key: 'geram24' }, name: 'طلای ۲۴ عیار' },
+  coin_emami: { category: 'gold', unit: 'عدد', ref: { provider: 'tgju', key: 'sekee' }, name: 'سکه امامی' },
+  coin_bahar: { category: 'gold', unit: 'عدد', ref: { provider: 'tgju', key: 'sekeb' }, name: 'سکه بهار آزادی' },
+  coin_half: { category: 'gold', unit: 'عدد', ref: { provider: 'tgju', key: 'nim' }, name: 'نیم سکه' },
+  coin_quarter: { category: 'gold', unit: 'عدد', ref: { provider: 'tgju', key: 'rob' }, name: 'ربع سکه' },
+  silver: { category: 'metal', unit: 'گرم', ref: { provider: 'tgju', key: 'silver_999' }, name: 'نقره ۹۹۹' },
+  usd: { category: 'fx', unit: 'دلار', ref: { provider: 'tgju', key: 'price_dollar_rl' }, name: 'دلار' },
+  eur: { category: 'fx', unit: 'یورو', ref: { provider: 'tgju', key: 'price_eur' }, name: 'یورو' },
+};
+/** A new units asset for a purchase of something not tracked yet; priced from the market when we can. */
+export function quickNewAsset(na = {}, id) {
+  const base = NEW_KIND[na.kind];
+  const now = Date.now();
+  if (base) return { id, name: na.name || base.name, category: base.category, mode: 'units', quantity: 0, unit: na.unit || base.unit, price: { source: 'market', ref: { ...base.ref }, adjustPct: 0, factor: 1 }, liquidity: CAT[base.category].liquidity, createdAt: now };
+  if (na.kind === 'crypto') {
+    const k = normSym(na.symbol || na.name);
+    const coin = NOBITEX.find((c) => c.key === k || c.sym.toLowerCase() === k || c.name === na.name);
+    if (coin) return { id, name: na.name || coin.name, category: 'crypto', mode: 'units', quantity: 0, unit: coin.sym, price: { source: 'market', ref: { provider: 'nobitex', key: coin.key }, adjustPct: 0, factor: 1 }, liquidity: 'high', createdAt: now };
+  }
+  if (na.kind === 'stock' && (na.symbol || na.name)) {
+    const sym = String(na.symbol || na.name).trim().replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+    return { id, name: sym, category: 'stock', mode: 'units', quantity: 0, unit: na.unit || 'سهم', price: { source: 'market', ref: { provider: 'tsetmc', key: '', symbol: sym, label: sym, field: 'close' }, adjustPct: 0, factor: 1 }, liquidity: 'high', createdAt: now };
+  }
+  return { id, name: na.name || 'دارایی جدید', category: 'other', mode: 'units', quantity: 0, unit: na.unit || 'واحد', price: { source: 'manual', value: 0, updatedAt: now }, liquidity: 'mid', createdAt: now, review: 'منبع قیمت را تنظیم کن' };
+}
+
+/**
+ * Validate the model's actions against real assets and turn them into proposals the user confirms.
+ * Proposal types: update | trade | newbuy | adjust | transfer. Invalid actions become `problems`.
+ */
+export function quickProposals(json, assets, quotes, { idFor = () => uid('a') } = {}) {
+  const byId = Object.fromEntries(assets.filter((a) => !a.archived).map((a) => [a.id, a]));
+  const k = (u) => (/rial|ریال/i.test(String(u || '')) ? 1 : 10);
+  const proposals = []; const problems = [];
+  const held = Object.fromEntries(Object.values(byId).map((a) => [a.id, +a.quantity || 0])); // running quantity across actions
+  const sideOf = (v) => (/^(sell|فروش|فروختم)$/i.test(String(v || '').trim()) ? 'sell' : /^(buy|خرید|خریدم)$/i.test(String(v || '').trim()) ? 'buy' : null);
+  for (const x of Array.isArray(json?.actions) ? json.actions : []) {
+    const id = uid('p');
+    if (x.type === 'trade') {
+      const side = sideOf(x.side);
+      if (!side) { problems.push('مشخص نیست خرید است یا فروش'); continue; }
+      const qty = +x.quantity;
+      if (!(qty > 0)) { problems.push('مقدار خرید یا فروش مشخص نیست'); continue; }
+      const cash = x.cash_asset_id && byId[x.cash_asset_id]?.mode === 'balance' ? byId[x.cash_asset_id] : null;
+      let a = x.asset_id ? byId[x.asset_id] : null;
+      if (a && a.mode !== 'units') { problems.push(`«${a.name}» دارایی واحددار نیست`); continue; }
+      let newAsset = null;
+      if (!a) {
+        if (side !== 'buy' || !x.new_asset) { problems.push('دارایی مورد نظر پیدا نشد'); continue; }
+        newAsset = quickNewAsset(x.new_asset, idFor());
+      }
+      let price = +x.unit_price > 0 ? +x.unit_price * k(x.money_unit) : +x.total > 0 ? (+x.total * k(x.money_unit)) / qty : null;
+      let priceFromMarket = false;
+      if (!price) {
+        const up = E.unitPriceOf(a || newAsset, quotes).price;
+        if (up > 0) { price = up; priceFromMarket = true; }
+      }
+      if (!(price > 0)) { problems.push('قیمت معامله در جمله نیامده و قیمت بازار هم در دسترس نیست'); continue; }
+      if (side === 'sell' && qty > held[a.id] + 1e-9) { problems.push(`مقدار فروش از موجودی «${a.name}» بیشتر است`); continue; }
+      if (a) held[a.id] += side === 'sell' ? -qty : qty;
+      proposals.push(newAsset
+        ? { id, type: 'newbuy', asset: newAsset, assetName: newAsset.name, side: 'buy', qty, price, priceFromMarket, cashId: cash?.id || null, cashName: cash?.name || null, unit: newAsset.unit }
+        : { id, type: 'trade', assetId: a.id, assetName: a.name, side, qty, price, priceFromMarket, cashId: cash?.id || null, cashName: cash?.name || null, unit: a.unit });
+    } else if (x.type === 'set') {
+      const a = byId[x.asset_id];
+      const field = x.field === 'balance' ? 'balance' : 'quantity';
+      if (!a || (field === 'balance' && a.mode !== 'balance') || (field === 'quantity' && a.mode !== 'units')) { problems.push('دارایی برای اصلاح مقدار پیدا نشد'); continue; }
+      const v = +x.value; if (!(v >= 0)) { problems.push('مقدار جدید نامعتبر است'); continue; }
+      proposals.push({ id, type: 'update', assetId: a.id, assetName: a.name, field, value: field === 'balance' ? v * k(x.money_unit) : v, unit: a.unit });
+    } else if (x.type === 'cash') {
+      const a = byId[x.asset_id];
+      const amt = +x.amount;
+      if (!a || a.mode !== 'balance') { problems.push('حساب مورد نظر پیدا نشد'); continue; }
+      if (!(amt > 0)) { problems.push('مبلغ مشخص نیست'); continue; }
+      proposals.push({ id, type: 'adjust', assetId: a.id, assetName: a.name, delta: (x.direction === 'out' ? -1 : 1) * amt * k(x.money_unit), note: String(x.note || '').slice(0, 60) });
+    } else if (x.type === 'transfer') {
+      const f = byId[x.from_id]; const t = byId[x.to_id]; const amt = +x.amount;
+      if (!f || !t || f.id === t.id || f.mode === 'units' || t.mode === 'units') { problems.push('حساب‌های مبدأ و مقصد انتقال پیدا نشدند'); continue; }
+      if (!(amt > 0)) { problems.push('مبلغ انتقال مشخص نیست'); continue; }
+      proposals.push({ id, type: 'transfer', fromId: f.id, toId: t.id, fromName: f.name, toName: t.name, amount: amt * k(x.money_unit) });
+    }
+  }
+  return { proposals, problems, question: json?.question ? String(json.question).slice(0, 200) : null };
 }

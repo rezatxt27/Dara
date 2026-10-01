@@ -1,5 +1,6 @@
 import { isoFromDate } from '../../lib/jalali.js';
-import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, Seg, AreaChart, toast, send, num, pct, fmtJ, money } from '../components.js';
+import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, Seg, AreaChart, toast, send, num, pct, fmtJ, money, Explain, AskBtn } from '../components.js';
+import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits } from '../../lib/format.js';
@@ -95,7 +96,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   ];
   return html`<div class="xpanel">
     <div class="card flat" style="padding:14px">
-      <div class="row between" style="margin-bottom:6px"><span class="sb small">${view === 'price' ? 'قیمت واحد (۱۲۰ روز)' : 'ارزش این دارایی'}</span>
+      <div class="row between" style="margin-bottom:6px"><span class="sb small row" style="gap:4px">${view === 'price' ? 'قیمت واحد (۱۲۰ روز)' : html`ارزش این دارایی: <${Money} v=${r.value} s=${s} compact /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} />`}</span>
         ${isMarket && html`<${Seg} value=${view} onChange=${setView} options=${[['value', 'ارزش'], ['price', 'قیمت']]} />`}</div>
       ${series === null ? html`<div class="muted small" style="height:150px;display:grid;place-items:center">در حال دریافت…</div>`
         : html`<${AreaChart} points=${series} height=${150} fmt=${(v) => money(v, s, { compact: true })} color=${r.cat.color} emptyText="هنوز تاریخچه‌ای برای این دارایی ثبت نشده" />`}
@@ -109,6 +110,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
         <button class="btn sm primary" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" />ویرایش</button>
         ${a.mode === 'units' && html`<button class="btn sm" onClick=${() => onModal({ t: 'trade', a })}><${Icon} n="swap" cls="sm" />خرید یا فروش</button>`}
         ${a.mode === 'balance' && html`<button class="btn sm" onClick=${() => onModal({ t: 'adjust', a })}><${Icon} n="swap" cls="sm" />واریز یا برداشت</button>`}
+        <${AskBtn} q=${`درباره «${a.name}» توضیح بده: ارزشش چطور حساب شده، اخیراً چرا تغییر کرده و چه ریسکی در پرتفوی من دارد؟`} label="درباره‌اش بپرس" />
         <span class="grow"></span>
         <button class="btn sm ghost danger" onClick=${() => act.deleteAsset(a.id)}><${Icon} n="trash" cls="sm" />حذف</button>
       </div>

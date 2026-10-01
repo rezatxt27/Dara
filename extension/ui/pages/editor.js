@@ -53,7 +53,7 @@ function SourcePicker({ st, s, price, setPrice, cat }) {
     ${prov === 'nobitex' && html`<${CryptoPicker} st=${st} s=${s} autoFocus=${false} isOn=${(r) => r.key === ref.key} onPick=${(r) => setRef(r)} />
       ${ref.key && html`<div class="callout"><${Icon} n="check" cls="sm" /><div>انتخاب‌شده: <b>${refLabel(ref)}</b></div></div>`}`}
     ${(prov === 'tsetmc' || prov === 'fipiran') && html`<div class="col" style="gap:8px">
-      <div class="row"><input class="input" placeholder=${prov === 'tsetmc' ? 'نماد را بنویس: فولاد، خودرو، شستا، کهربا…' : 'نام صندوق: فیروزه، آگاه، کاریزما…'} value=${q}
+      <div class="row"><input class="input" placeholder=${prov === 'tsetmc' ? 'نماد را بنویس: فولاد، خودرو، شستا، کهربا…' : 'نام صندوق: فیروزه، آگاه…'} value=${q}
         onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && (e.preventDefault(), search())} />
         <button type="button" class="btn" onClick=${() => search()} disabled=${loading}><${Icon} n=${loading ? 'refresh' : 'search'} cls=${loading ? 'sm spin' : 'sm'} />جست‌وجو</button></div>
       ${ref.key && html`<div class="callout"><${Icon} n="check" cls="sm" /><div>انتخاب‌شده: <b>${refLabel(ref)}</b> ${ref.name && ref.name !== ref.label ? html`<span class="muted">— ${ref.name}</span>` : ''}</div></div>`}

@@ -2,7 +2,7 @@
 // All money is Rial. Dates are ISO 'YYYY-MM-DD' (local calendar day); Jalali is used for schedules.
 import { CAT, CATEGORIES, EXPOSURES, GOLD_ETFS, TGJU_BY_KEY } from './catalog.js';
 import { quoteId, isUsdRef } from './providers.js';
-import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ } from './jalali.js';
+import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 
 export { quoteId, isUsdRef };
@@ -293,7 +293,7 @@ function setField(a, f, v) {
 export function undoEvent(assets, ev) {
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   for (const c of ev.changes || []) {
-    const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number') continue;
+    const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number' || c.field === 'add' || c.field === 'remove') continue;
     setField(a, c.field, getField(a, c.field) - c.delta);
     a.updatedAt = Date.now();
   }
@@ -488,10 +488,58 @@ export function changeSince(snaps, days, currentNet, today = todayIso()) {
   return { base, date: s.date, abs: currentNet - base, pct: base ? (currentNet - base) / Math.abs(base) : 0, est: !!s.snap.est };
 }
 
+/**
+ * Money moved since snapshot `s` ({date, snap}), from the event log.
+ * flow: per-asset money in/out (transfers, deposits, buys…); edit: per-asset manual corrections, captures, additions, removals;
+ * external: net money that entered (+) or left (−) the portfolio; dated: [{date, amount}] of external money and edits;
+ * byAsset: {assetId: [{date, at, amount}]} every flow/edit increment per asset.
+ * A change record may carry `value` (signed Rial value at the time); otherwise quantity changes are valued at today's price.
+ */
+export function eventEffects(events, s, byId, nowById = {}) {
+  const flow = {}; const edit = {}; let external = 0; const dated = []; const byAsset = {};
+  let cur = null;
+  const add = (m, id, v, removal = false) => { if (id) { m[id] = (m[id] || 0) + v; (byAsset[id] ||= []).push({ date: cur.date, at: cur.at || 0, amount: v, kind: m === flow ? 'flow' : 'edit', ...(removal ? { removal: true } : {}) }); } };
+  for (const e of events || []) {
+    if (e.undone || !e.date) continue;
+    // Real snapshots: count events applied after the snapshot was taken. Rebuilt snapshots: by event date.
+    const after = s.snap.est || !s.snap.at ? e.date > s.date : (e.at || 0) > s.snap.at;
+    if (!after) continue;
+    const amt = +e.amount || 0;
+    cur = e;
+    if (e.kind === 'edit' || e.kind === 'capture') {
+      let sum = 0;
+      for (const c of e.changes || []) {
+        const a = byId[c.assetId];
+        let v = null;
+        if (typeof c.value === 'number') v = c.value; // signed value recorded when it happened (additions, removals)
+        else if (a && typeof c.delta === 'number') {
+          const liab = isLiability(a);
+          let x = 0;
+          if (c.field === 'balance' || c.field === 'rate.principal') x = c.delta;
+          else if (c.field === 'quantity') x = c.delta * (nowById[a.id]?.unitPrice || 0);
+          v = liab ? -x : x;
+        }
+        if (c.field === 'remove') { add(edit, c.assetId, v || 0, true); sum += v || 0; continue; }
+        if (v === null || !v) continue;
+        add(edit, c.assetId, v); sum += v;
+      }
+      if (sum) dated.push({ date: e.date, amount: sum, kind: 'edit' });
+      continue;
+    }
+    if (e.kind === 'interest' && e.fromId === e.toId) continue; // bank day-count interest = return, not a flow
+    if (e.toId) add(flow, e.toId, amt);
+    if (e.fromId) add(flow, e.fromId, -amt);
+    if (e.toId && !e.fromId) { external += amt; dated.push({ date: e.date, amount: amt, kind: 'in' }); }
+    if (e.fromId && !e.toId) { external -= amt; dated.push({ date: e.date, amount: -amt, kind: 'out' }); }
+  }
+  return { flow, edit, external, dated, byAsset };
+}
+
 /* ============================ “why did it change?” attribution ============================ */
 /**
  * Split the change of each asset since `days` ago into market effect vs money moved in/out.
  * flow semantics: contribution to the asset's signed value from events (transfers, deposits, buys…).
+ * Each row also carries `moves`: the dated non-market amounts (Σ moves = flow + edit), used by performance().
  */
 export function attribution(assets, quotes, settings, snaps, events, days = 1, today = todayIso(), pf = null) {
   const s = snapshotBefore(snaps, days, today);
@@ -499,42 +547,47 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
   pf = pf || portfolio(assets, quotes, settings);
   const nowById = Object.fromEntries(pf.rows.map((r) => [r.asset.id, r]));
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const flow = {}; const edit = {}; let external = 0;
-  const add = (m, id, v) => { if (id) m[id] = (m[id] || 0) + v; };
-  for (const e of events || []) {
-    if (e.undone || !e.date) continue;
-    // Real snapshots: count events applied after the snapshot was taken. Rebuilt snapshots: by event date.
-    const after = s.snap.est || !s.snap.at ? e.date > s.date : (e.at || 0) > s.snap.at;
-    if (!after) continue;
-    const amt = +e.amount || 0;
-    if (e.kind === 'edit' || e.kind === 'capture') {
-      for (const c of e.changes || []) {
-        const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number') continue;
-        const liab = isLiability(a);
-        let v = 0;
-        if (c.field === 'balance' || c.field === 'rate.principal') v = c.delta;
-        else if (c.field === 'quantity') v = c.delta * (nowById[a.id]?.unitPrice || 0);
-        add(edit, a.id, liab ? -v : v);
-      }
-      continue;
-    }
-    if (e.kind === 'interest' && e.fromId === e.toId) continue; // bank day-count interest = return, not a flow
-    if (e.toId) add(flow, e.toId, amt);
-    if (e.fromId) add(flow, e.fromId, -amt);
-    if (e.toId && !e.fromId) external += amt;
-    if (e.fromId && !e.toId) external -= amt;
-  }
-  const ids = new Set([...Object.keys(s.snap.v || {}), ...pf.rows.map((r) => r.asset.id)]);
+  const { flow, edit, external, byAsset } = eventEffects(events, s, byId, nowById);
+  const keys = Object.keys(snaps).sort().filter((k) => k > s.date);
+  const sum = (list) => list.reduce((x, m) => x + m.amount, 0);
+  const ids = new Set([...Object.keys(s.snap.v || {}), ...pf.rows.map((r) => r.asset.id), ...Object.keys(byAsset)]);
   const rows = [];
   let added = 0;
   for (const id of ids) {
     const now = nowById[id]?.signedValue ?? 0;
     const then = s.snap.v?.[id];
     const a = byId[id] || nowById[id]?.asset;
-    if (then === undefined) { if (now) { added += now; rows.push({ id, asset: a, then: 0, now, delta: now, flow: 0, edit: now, market: 0, isNew: true }); } continue; }
-    const delta = now - then;
+    const moves = byAsset[id] || [];
     const fl = flow[id] || 0, ed = edit[id] || 0;
-    rows.push({ id, asset: a, then, now, delta, flow: fl, edit: ed, market: delta - fl - ed, removed: !a });
+    if (then === undefined) {
+      // Added during the period. If a later snapshot already holds it, that value is its starting point
+      // (an addition on that day) and only later money counts; otherwise use its own events.
+      const k1 = keys.find((k) => snaps[k]?.v?.[id] !== undefined);
+      if (k1) {
+        const sn = snaps[k1]; const v1 = sn.v[id];
+        const later = moves.filter((m) => (sn.est || !sn.at ? m.date > k1 : m.at > sn.at));
+        const mv = [{ date: k1, amount: v1, kind: 'edit' }, ...later];
+        if (!now && !v1 && !later.length) continue;
+        const f1 = sum(later.filter((m) => m.kind === 'flow')); const e1 = v1 + sum(later.filter((m) => m.kind !== 'flow'));
+        added += v1;
+        rows.push({ id, asset: a, then: 0, now, delta: now, flow: f1, edit: e1, market: now - f1 - e1, isNew: true, moves: mv });
+        continue;
+      }
+      if (moves.length) { rows.push({ id, asset: a, then: 0, now, delta: now, flow: fl, edit: ed, market: now - fl - ed, isNew: true, moves }); added += ed; continue; }
+      if (now) { added += now; rows.push({ id, asset: a, then: 0, now, delta: now, flow: 0, edit: now, market: 0, isNew: true, moves: [{ date: a?.createdAt ? isoFromDate(new Date(a.createdAt)) : today, amount: now }] }); }
+      continue;
+    }
+    const delta = now - then;
+    if (!a || a.archived) {
+      // Removed or archived. With a recorded removal (value at that moment) the market effect up to then is kept;
+      // without one (older data) the whole change is treated as bookkeeping, dated after its last snapshot.
+      if (moves.some((m) => m.removal) || ed) { rows.push({ id, asset: a, then, now, delta, flow: fl, edit: ed, market: delta - fl - ed, removed: true, moves }); continue; }
+      const last = [...keys].reverse().find((k) => snaps[k]?.v?.[id] !== undefined);
+      const when = last ? addDaysIso(last, 1) : today;
+      rows.push({ id, asset: a, then, now, delta, flow: fl, edit: delta - fl, market: 0, removed: true, moves: [...moves, { date: when > today ? today : when, amount: delta - fl - ed, kind: 'edit' }] });
+      continue;
+    }
+    rows.push({ id, asset: a, then, now, delta, flow: fl, edit: ed, market: delta - fl - ed, moves });
   }
   const total = pf.net - s.snap.t;
   const editsTotal = rows.reduce((x, r) => x + r.edit, 0);
@@ -550,7 +603,7 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
   const cats = Object.values(catMap).filter((c) => Math.abs(c.market) >= 1 || Math.abs(c.flow) >= 1 || Math.abs(c.edit) >= 1)
     .sort((a, b) => Math.abs(b.market) - Math.abs(a.market));
   return { from: s.date, est: !!s.snap.est, base: s.snap.t, now: pf.net, total, pct: s.snap.t ? total / Math.abs(s.snap.t) : 0,
-    market: marketTotal, external, edits: editsTotal, internal: rows.reduce((x, r) => x + r.flow, 0) - external, rows: rows.sort((a, b) => Math.abs(b.market) - Math.abs(a.market)), cats, added };
+    market: marketTotal, external, edits: editsTotal, internal: rows.reduce((x, r) => x + r.flow, 0) - external, rows: rows.sort((a, b) => Math.abs(b.market) - Math.abs(a.market)), cats, added, byAsset, snap: s.snap };
 }
 
 /* ============================ scenario simulator ============================ */

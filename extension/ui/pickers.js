@@ -20,7 +20,7 @@ export function TickerSearch({ provider, s, isOn, onPick }) {
     ? { provider: 'tsetmc', key: it.insCode, symbol: it.symbol, label: it.symbol, name: it.name, field: 'close' }
     : { provider: 'fipiran', key: it.regNo, label: it.name, name: it.name, field: 'cancelNav' };
   return html`<div class="col" style="gap:8px">
-    <div class="row"><input class="input" autoFocus placeholder=${provider === 'tsetmc' ? 'نماد را بنویس: فولاد، خودرو، شستا، کهربا…' : 'نام صندوق: فیروزه، آگاه، کاریزما…'} value=${q}
+    <div class="row"><input class="input" autoFocus placeholder=${provider === 'tsetmc' ? 'نماد را بنویس: فولاد، خودرو، شستا، کهربا…' : 'نام صندوق: فیروزه، آگاه…'} value=${q}
       onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && (e.preventDefault(), search())} />
       <button type="button" class="btn" onClick=${() => search()} disabled=${loading}><${Icon} n=${loading ? 'refresh' : 'search'} cls=${loading ? 'sm spin' : 'sm'} />جست‌وجو</button></div>
     ${err && html`<div class="callout err"><${Icon} n="wifi" cls="sm" /><div>${err}. ${provider === 'tsetmc' ? 'سایت TSETMC گاهی از خارج ایران یا با VPN پاسخ نمی‌دهد.' : ''}</div></div>`}

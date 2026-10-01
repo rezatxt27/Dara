@@ -143,9 +143,9 @@ async def main():
             check('assistant: tool-based scenario answer', 'سناریو' in bot and 'شبیه‌سازی سناریو' in bot, bot[:160].replace('\n', ' '))
             await pg.fill('.chat-in textarea', 'مانده حساب بانکی ب را ۱۵ میلیون تومان ثبت کن')
             await pg.keyboard.press('Enter')
-            await pg.wait_for_selector('.prop button:has-text("تأیید و اعمال")', timeout=20000)
+            await pg.wait_for_selector('.prop button:has-text("تأیید و ثبت")', timeout=20000)
             await pg.screenshot(path=f'{SH}/assistant-{THEME}.png')
-            await pg.click('.prop button:has-text("تأیید و اعمال")'); await pg.wait_for_timeout(700)
+            await pg.click('.prop button:has-text("تأیید و ثبت")'); await pg.wait_for_timeout(700)
             assets = await get(pg, 'assets')
             saman = [a for a in assets if a['id'] == 'bankB'][0]
             check('assistant: proposal applied only after confirmation', saman['balance'] == 150000000, saman['balance'])

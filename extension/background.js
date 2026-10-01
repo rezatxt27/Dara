@@ -109,7 +109,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     const quotes = E.mergeQuotes(cur.quotes, fresh, errors);
     const autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
     E.rememberLastPrices(autos.assets, quotes);
-    const events = autos.events.concat(cur.events).slice(0, 500);
+    const events = autos.events.concat(cur.events).slice(0, 3000);
 
     // 4) Snapshot for today
     const pf = E.portfolio(autos.assets, quotes, cur.settings);
@@ -315,7 +315,7 @@ const handlers = {
     const st = await store.loadAll();
     const autos = E.applyAutomations(st.assets, st.flows, st.quotes, todayIso());
     if (autos.events.length) {
-      await store.save({ assets: autos.assets, flows: autos.flows, events: autos.events.concat(st.events).slice(0, 500) });
+      await store.save({ assets: autos.assets, flows: autos.flows, events: autos.events.concat(st.events).slice(0, 3000) });
       await notifyAutomations(autos.events, autos.assets, st.settings);
     }
     return { events: autos.events.length };

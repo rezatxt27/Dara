@@ -1,7 +1,152 @@
-import { html, useState, useMemo, Icon, Money, Delta, Ava, StackBar, NumField, Slider, Seg, toast, num, pct } from '../components.js';
+import { html, useState, useMemo, useEffect, Icon, Money, Delta, Ava, StackBar, NumField, MoneyField, Slider, Seg, toast, num, pct, fmtJ, send, Explain, AskBtn, BackfillButton } from '../components.js';
 import { CAT, EXPOSURES, LIQUIDITY, SCENARIOS } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
+import * as I from '../../lib/insights.js';
+import * as AI from '../../lib/ai.js';
+import * as A from '../../lib/assistant.js';
+import * as store from '../../lib/store.js';
+import { ago } from '../../lib/format.js';
 import { act } from '../actions.js';
+
+const unitOf = (s) => (s.currency === 'rial' ? 'ریال' : 'تومان');
+const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٫,]/g, '.'));
+
+/* ---------------- «واقعاً پولدارتر شدم؟» ---------------- */
+function Performance({ st, pf, s }) {
+  const [days, setDays] = useState(90);
+  const dep = I.defaultDepositPct(st);
+  const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st, pf, days, dep]);
+  const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
+  const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟</h3>
+    <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="توضیح بده" />`}
+    <${Seg} value=${days} onChange=${setDays} options=${[[30, 'ماه'], [90, '۳ ماه'], [365, 'سال'], [0, 'از ابتدا']]} /></div></div>`;
+  if (!r) return html`<div class="card" id="perf">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این مقایسه تاریخچه ارزش دارایی لازم است. نمودار از امروز خودکار پر می‌شود، یا همین حالا یک سال گذشته را بازسازی کن.</div><${BackfillButton} st=${st} /></div></div>`;
+  const ahead = r.bench.filter((b) => b.diff >= 0).map((b) => b.short);
+  const behind = r.bench.filter((b) => b.diff < 0).map((b) => b.short);
+  const verdict = !r.bench.length ? '' : !behind.length ? `از نگه‌داشتن ${ahead.join('، ')} جلوتری.` : !ahead.length ? `از نگه‌داشتن ${behind.join('، ')} عقب‌تری.` : `از ${ahead.join(' و ')} جلوتری، ولی از ${behind.join(' و ')} عقب‌تری.`;
+  const max = Math.max(1, ...r.bench.map((b) => Math.abs(b.diff)));
+  const short = r.partial;
+  return html`<div class="card" id="perf">${head}
+    <div class="perf">
+      <div>
+        <div class="lead">${verdict ? html`<b>${verdict}</b><br />` : ''}
+          در ${short ? `${num(r.days)} روزی که تاریخچه هست` : periodName} بازار برایت <b class=${r.market >= 0 ? 'pos' : 'neg'}><${Money} v=${r.market} s=${s} compact sign /></b>${r.ret !== null ? html` (<span class="ltr">${pct(r.ret)}</span>)` : ''} ساخت${r.annual !== null ? html`، معادل سالانه <span class="ltr">${pct(r.annual)}</span>` : ''}.
+          ${Math.abs(r.moneyIn) >= 1 ? html` <span class="muted">${r.moneyIn > 0 ? 'جدا از آن' : 'و'} <${Money} v=${Math.abs(r.moneyIn)} s=${s} compact /> ${r.moneyIn > 0 ? 'پول تازه (حقوق، واریز یا دارایی تازه‌ثبت‌شده) اضافه شد که بازده حساب نمی‌شود' : 'برداشت یا حذف شد که زیان حساب نمی‌شود'}.</span>` : ''}
+          <${Explain} s=${s} title="این مقایسه چطور حساب می‌شود؟" get=${() => ({
+            formula: 'بازده = اثر قیمت بازار ÷ (ارزش اول دوره + پول‌هایی که در طول دوره اضافه شد، به نسبت مدتی که بوده)',
+            lines: [
+              { t: 'ارزش خالص اول دوره', v: r.base, k: 'money', sub: r.from, subK: 'date' },
+              { t: 'پول اضافه یا کم‌شده', v: r.moneyIn, k: 'money', sign: true },
+              { t: 'اثر قیمت بازار و سود', v: r.market, k: 'money', sign: true, strong: true },
+              { t: 'ارزش خالص الان', v: r.end, k: 'money', total: true },
+              ...r.bench.map((b) => ({ t: b.name, v: b.end, k: 'money' })),
+            ],
+            notes: ['در هر گزینه، همان پول‌هایی که در طول دوره اضافه یا کم شده، در همان روز وارد آن گزینه می‌شود؛ پس مقایسه منصفانه است.', `سپرده با سود ${num(r.depositPct, 1)}٪ سالانه حساب شده که سود هر ماهش دوباره سپرده می‌شود.`, ...(r.est ? ['مبنای اول دوره بازسازی‌شده (تخمینی) است؛ دارایی‌هایی که تاریخ خریدشان ثبت نشده، از اول دوره فرض شده‌اند.'] : [])],
+          })} />
+        </div>
+      </div>
+      <div class="bench">${r.bench.map((b) => html`<div class="brow">
+        <span class="bn"><span class="small">${b.name}</span><span class="xs muted">${b.short} در این مدت <span class="ltr">${pct(b.ret)}</span></span></span>
+        <div class="wt" dir="ltr"><b style=${`${b.diff >= 0 ? 'left:50%' : `left:${50 - Math.abs(b.diff) / max * 50}%`};width:${Math.max(1.5, Math.abs(b.diff) / max * 50)}%;background:${b.diff >= 0 ? 'var(--pos)' : 'var(--neg)'}`}></b></div>
+        <span class=${'bv ' + (b.diff >= 0 ? 'pos' : 'neg')}><${Money} v=${Math.abs(b.diff)} s=${s} compact /> ${b.diff >= 0 ? 'جلوتری' : 'عقب‌تری'}</span></div>`)}
+        <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه:
+          <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- نقطه سربه‌سر ---------------- */
+const BE_ASSETS = [['tgju:geram18', 'طلای ۱۸', { provider: 'tgju', key: 'geram18' }, 'هر گرم'], ['tgju:sekee', 'سکه امامی', { provider: 'tgju', key: 'sekee' }, 'هر سکه'], ['tgju:price_dollar_rl', 'دلار', { provider: 'tgju', key: 'price_dollar_rl' }, 'هر دلار'], ['nobitex:usdt', 'تتر', { provider: 'nobitex', key: 'usdt' }, 'هر تتر']];
+function BreakEven({ st, s }) {
+  const held = st.assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key && !BE_ASSETS.some(([id]) => id === E.quoteId(a.price.ref)));
+  const [pick, setPick] = useState('tgju:geram18');
+  const [rate, setRate] = useState(() => I.defaultDepositPct(st));
+  const [months, setMonths] = useState(6);
+  const [fee, setFee] = useState(0);
+  const [past, setPast] = useState(null);
+  const heldA = held.find((a) => a.id === pick);
+  const preset = BE_ASSETS.find(([id]) => id === pick);
+  const name = preset ? preset[1] : heldA?.name || '';
+  const per = preset ? preset[3] : `هر ${heldA?.unit || 'واحد'}`;
+  const ref = preset ? preset[2] : heldA?.price.ref;
+  const price0 = preset ? st.quotes[pick]?.price : heldA ? E.unitPriceOf(heldA, st.quotes).price : null;
+  const r = I.breakEven({ price0, ratePct: rate, months, feePct: fee });
+  useEffect(() => {
+    let alive = true; setPast(null);
+    if (!ref) return;
+    send('history', { ref, days: months * 31 + 7 }).then((res) => {
+      if (!alive || !res?.ok || !res.points?.length) return;
+      const pts = res.points; const last = pts[pts.length - 1];
+      const target = new Date(); target.setMonth(target.getMonth() - months);
+      const iso = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`;
+      const first = [...pts].reverse().find(([d]) => d <= iso);
+      if (first && first[1] > 0) setPast({ pct: last[1] / first[1] - 1, from: first[0] });
+    });
+    return () => { alive = false; };
+  }, [pick, months]);
+  return html`<div class="card" id="breakeven">
+    <div class="card-h"><h3><${Icon} n="target" cls="sm" />نقطه سربه‌سر: سپرده یا …؟</h3>
+      <${AskBtn} q=${`اگر به‌جای سپرده ${num(rate, 1)}٪، روی «${name}» برای ${num(months)} ماه سرمایه‌گذاری کنم (کارمزد ${num(fee, 1)}٪)، نقطه سربه‌سر چقدر است و در گذشته چطور بوده؟`} label="بپرس" /></div>
+    <div class="be">
+      <div class="col" style="gap:12px">
+        <div class="field"><label>دارایی</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
+          ${BE_ASSETS.map(([id, n]) => html`<option value=${id}>${n}</option>`)}
+          ${held.length > 0 && html`<optgroup label="دارایی‌های من">${held.map((a) => html`<option value=${a.id}>${a.name}</option>`)}</optgroup>`}</select></div>
+        <div class="grid2">
+          <${NumField} label="سود سپرده (سالانه)" value=${rate} onInput=${(v) => setRate(Math.max(0, Math.min(200, v || 0)))} suffix="٪" digits=${1} />
+          <${NumField} label="کارمزد خرید و فروش" value=${fee} onInput=${(v) => setFee(Math.max(0, Math.min(50, v || 0)))} suffix="٪" digits=${1} hint="اختلاف قیمت خرید و فروش، کارمزد یا اجرت" />
+        </div>
+        <div class="field"><label>مدت</label><${Seg} value=${months} onChange=${setMonths} options=${[[1, '۱ ماه'], [3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']]} /></div>
+      </div>
+      <div class="col" style="gap:10px">
+        ${price0 > 0 ? html`
+          <div class="preview" style="flex-direction:column;align-items:stretch;gap:6px">
+            <span class="small">برای اینکه «${name}» در ${months === 12 ? 'یک سال' : months === 24 ? 'دو سال' : num(months) + ' ماه'} از سپرده جلو بزند، قیمت ${per} باید برسد به</span>
+            <span class="v"><${Money} v=${r.targetPrice} s=${s} /></span>
+            <span class="small">یعنی <b class="ltr">${pct(r.needed)}</b> رشد از قیمت فعلی (<${Money} v=${price0} s=${s} compact />)${months !== 12 ? html`، معادل سالانه <span class="ltr">${pct(r.annualNeeded)}</span>` : ''}.</span>
+          </div>
+          <div class="xs muted">سپرده در همین مدت <span class="ltr">${pct(r.depositGain)}</span> سود می‌دهد (اگر سود هر ماه دوباره سپرده شود)${fee ? ` و کارمزد ${num(fee, 1)}٪ هم باید جبران شود` : ''}.</div>
+          ${past && html`<div class="callout"><${Icon} n="history" cls="sm" /><div>برای مقایسه: «${name}» در ${num(months)} ماه گذشته <b class=${past.pct >= r.needed ? 'pos' : 'neg'}><span class="ltr">${pct(past.pct)}</span></b> تغییر کرده؛ ${past.pct >= r.needed ? 'بیشتر از نقطه سربه‌سر.' : 'کمتر از نقطه سربه‌سر.'} گذشته تضمینی برای آینده نیست.</div></div>`}`
+          : html`<div class="empty small">قیمت فعلی این دارایی در دسترس نیست.</div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------- AI review ---------------- */
+function Critique({ st, pf, s }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const conns = AI.orderedConnections(st.ai);
+  const c = st.critique;
+  const run = async () => {
+    setBusy(true); setErr('');
+    try {
+      const perf = I.performance(st, 90, { depositPct: I.defaultDepositPct(st), pf });
+      const facts = I.critiqueFacts(st, pf, perf);
+      if (!facts) throw new Error('هنوز دارایی‌ای برای بررسی ثبت نشده');
+      const res = await AI.extract({ ai: st.ai, system: A.critiqueSystem(), prompt: A.critiquePrompt(facts), maxTokens: 1200 });
+      const points = A.parseCritique(res.json);
+      if (!points.length) throw new Error('پاسخ مدل نکته‌ای نداشت؛ دوباره امتحان کن');
+      await store.save({ critique: { at: Date.now(), points, by: `${res.conn.name}، ${res.model}` } });
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+  const LV = { high: ['var(--neg)', 'var(--neg-bg, rgba(239,77,107,.12))'], mid: ['var(--warn)', 'var(--warn-bg)'], low: ['var(--accent)', 'var(--accent-soft)'] };
+  return html`<div class="critique">
+    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="sparkles" cls="sm" />نگاه دستیار</span>
+      ${conns.length ? html`<button class="btn sm" onClick=${run} disabled=${busy || !(pf.gross > 0)}><${Icon} n=${busy ? 'refresh' : 'sparkles'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال بررسی…' : c ? 'بررسی دوباره' : 'نقد پرتفوی'}</button>`
+        : html`<a class="btn sm" href="#/settings">افزودن اتصال هوش مصنوعی</a>`}</div>
+    ${err && html`<div class="callout err" style="margin-bottom:8px"><${Icon} n="circleX" cls="sm" /><div>${err}</div></div>`}
+    ${c?.points?.length ? html`<div class="list">${c.points.map((p) => html`<div class="it" style="align-items:flex-start">
+        <span class="ava" style=${`background:${LV[p.level][1]};color:${LV[p.level][0]}`}><${Icon} n=${p.level === 'low' ? 'info' : 'alert'} /></span>
+        <div class="grow"><div class="sb small">${p.title}</div><div class="xs muted">${p.detail}</div>${p.check && html`<div class="xs" style="margin-top:3px"><b>بررسی کن:</b> ${p.check}</div>`}</div></div>`)}</div>
+      <div class="xs faint" style="margin-top:6px">${ago(c.at)}، ${c.by}. فقط درصدها فرستاده شد، نه مبلغ‌ها.</div>`
+      : !err && html`<div class="xs muted">سه نقطه ضعف ترکیب دارایی‌ات را پیدا می‌کند: تمرکز، تورم، نقدینگی، بدهی و فاصله از هدف. فقط درصدها فرستاده می‌شود، نه مبلغ‌ها.</div>`}
+  </div>`;
+}
+
 
 function Bars({ items, s, total }) {
   const max = Math.max(...items.map((i) => i.value), 1);
@@ -11,7 +156,28 @@ function Bars({ items, s, total }) {
     <span class="small num" style="text-align:left"><${Money} v=${i.value} s=${s} compact unit=${false} /> <span class="muted">، ${pct(i.value / (total || 1), { sign: false })}</span></span></div>`)}</div>`;
 }
 
-function Targets({ pf, s }) {
+function NewMoney({ pf, s, targets, assets, dirty }) {
+  const [amount, setAmount] = useState(null);
+  const tf = Object.fromEntries(Object.entries(targets).map(([k, v]) => [k, (+v || 0) / 100]));
+  const plan = amount > 0 ? I.allocateNew(pf, tf, amount, assets) : null;
+  const hasTargets = Object.values(tf).some((v) => v > 0);
+  return html`<div class="newmoney" id="newmoney">
+    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="plus" cls="sm" />پول جدید را کجا بگذارم؟</span>
+      ${plan && !dirty && html`<${AskBtn} q=${`اگر ${num(amount / (s.currency === 'rial' ? 1 : 10))} ${unitOf(s)} پول جدید داشته باشم، طبق تخصیص هدفم کجا بگذارم؟ با plan_new_money حساب کن و دلیلش را بگو.`} label="توضیح بده" />`}</div>
+    ${!hasTargets ? html`<div class="xs muted">اول درصد هدف دسته‌ها را در جدول بالا وارد کن (یا «پر کردن با وضعیت فعلی» را بزن و تغییر بده)؛ بعد مبلغ را بنویس.</div>` : html`
+      <div style="max-width:340px"><${MoneyField} label="مبلغی که می‌خواهی سرمایه‌گذاری کنی" rial=${amount} onRial=${setAmount} s=${s} /></div>
+      ${plan && html`<table class="tbl" style="margin-top:10px"><thead><tr><th>دسته</th><th class="n">سهم این پول</th><th class="n">سهم فعلی ← بعد</th><th class="n">هدف</th><th>مثلاً در</th></tr></thead><tbody>
+        ${plan.rows.filter((r) => r.add >= 1).map((r) => html`<tr class="r"><td><div class="row"><${Ava} cat=${r.id} size=${26} /><span class="sb">${r.cat.short}</span></div></td>
+          <td class="n sb"><${Money} v=${r.add} s=${s} compact /></td>
+          <td class="n small num">${pct(r.currentShare, { sign: false })} ← <b>${pct(r.afterShare, { sign: false })}</b></td>
+          <td class="n small num">${pct(r.target, { sign: false })}</td>
+          <td class="small">${r.vehicle ? r.vehicle.name : html`<span class="faint">دارایی جدید</span>`}</td></tr>`)}
+      </tbody></table>
+      <div class="xs muted" style="margin-top:6px">بدون فروش هیچ دارایی. بیشترین فاصله از هدف از <span class="ltr">${pct(plan.maxDevBefore, { sign: false })}</span> به <span class="ltr">${pct(plan.maxDevAfter, { sign: false })}</span> می‌رسد. این فقط حساب ریاضی بر اساس هدف خودت است، نه توصیه خرید.</div>`}`}
+  </div>`;
+}
+
+function Targets({ pf, s, assets }) {
   const [t, setT] = useState(() => ({ ...s.targets }));
   const rows = E.rebalance(pf, Object.fromEntries(Object.entries(t).map(([k, v]) => [k, (+v || 0) / 100])));
   const sum = Object.values(t).reduce((x, v) => x + (+v || 0), 0);
@@ -32,6 +198,8 @@ function Targets({ pf, s }) {
       <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
       <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span class=${r.diff > 0 ? 'pos' : 'neg'}>${r.diff > 0 ? 'خرید' : 'فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
     </tr>`)}</tbody></table>
+    <hr class="sep" />
+    <${NewMoney} pf=${pf} s=${s} targets=${t} assets=${assets} dirty=${dirty} />
   </div>`;
 }
 
@@ -42,6 +210,24 @@ function Scenario({ st, pf, s }) {
   const [sh, setSh] = useState(ZERO);
   const [more, setMore] = useState(false);
   const [preset, setPreset] = useState(null);
+  const [nl, setNl] = useState('');
+  const [nlBusy, setNlBusy] = useState(false);
+  const [nlErr, setNlErr] = useState('');
+  const [ai, setAi] = useState(null); // {title, assumptions:[{key,label,reason}]}
+  const conns = AI.orderedConnections(st.ai);
+  const build = async () => {
+    const text = nl.trim(); if (!text || nlBusy) return;
+    setNlBusy(true); setNlErr('');
+    try {
+      const res = await AI.extract({ ai: st.ai, system: A.scenarioSystem(), prompt: A.scenarioPrompt(text, st.quotes), maxTokens: 900 });
+      const sc = A.parseScenario(res.json);
+      if (!sc.assumptions.length) throw new Error('برای این اتفاق فرض قابل‌استفاده‌ای ساخته نشد؛ دقیق‌تر بنویس');
+      setSh({ ...ZERO, ...sc.shocks }); setPreset(null);
+      if (['crypto', 'metals', 'private', 'real'].some((k) => sc.shocks[k])) setMore(true);
+      setAi({ title: sc.title || text, text, assumptions: sc.assumptions });
+    } catch (e) { setNlErr(e.message); }
+    setNlBusy(false);
+  };
   const shocks = Object.fromEntries(Object.entries(sh).map(([k, v]) => [k, v / 100]));
   const r = useMemo(() => E.simulate(st.assets, st.quotes, s, shocks, pf), [st, pf, JSON.stringify(sh)]);
   const set = (k) => (v) => { setPreset(null); setSh((x) => ({ ...x, [k]: v })); };
@@ -53,8 +239,20 @@ function Scenario({ st, pf, s }) {
   const maxAbs = Math.max(1, ...r.exposures.map((e) => Math.abs(e.after - e.before)));
   return html`<div class="card">
     <div class="card-h"><h3><${Icon} n="sliders" cls="sm" />شبیه‌ساز سناریو</h3>
-      ${touched && html`<button class="btn sm ghost" onClick=${() => { setSh(ZERO); setPreset(null); }}><${Icon} n="reset" cls="sm" />بازنشانی</button>`}</div>
-    <div class="row wrap" style="gap:6px;margin-bottom:14px">${SCENARIOS.map((sc) => html`<button class=${'chip' + (preset === sc.id ? ' on' : '')} onClick=${() => pick(sc)}>${sc.name}</button>`)}</div>
+      <div class="row" style="gap:8px">${touched && html`<${AskBtn} q=${`اگر ${Object.entries(sh).filter(([, v]) => v).map(([k, v]) => `${A.SCENARIO_LABELS[k]} ${v > 0 ? '+' : ''}${v}٪`).join('، ')} شود، روی دارایی‌هایم چه اثری دارد؟ با simulate_scenario حساب کن و بگو کدام بخش بیشترین اثر را می‌گیرد.`} label="توضیح بده" />`}
+      ${touched && html`<button class="btn sm ghost" onClick=${() => { setSh(ZERO); setPreset(null); setAi(null); }}><${Icon} n="reset" cls="sm" />بازنشانی</button>`}</div></div>
+    <div class="nl-scn">
+      <input class="input" placeholder=${conns.length ? 'یک اتفاق را بنویس؛ مثلاً «اگر توافق شود» یا «اگر تورم دو برابر شود»' : 'برای ساختن سناریو با یک جمله، یک اتصال هوش مصنوعی اضافه کن'} disabled=${!conns.length} value=${nl}
+        onInput=${(e) => setNl(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && build()} />
+      <button class="btn primary" onClick=${build} disabled=${!conns.length || !nl.trim() || nlBusy}><${Icon} n=${nlBusy ? 'refresh' : 'sparkles'} cls=${'sm' + (nlBusy ? ' spin' : '')} />${nlBusy ? 'در حال ساختن…' : 'بساز'}</button>
+    </div>
+    ${nlErr && html`<div class="callout err" style="margin-bottom:10px"><${Icon} n="circleX" cls="sm" /><div>${nlErr}</div></div>`}
+    ${ai && html`<div class="assume">
+      <div class="row between"><span class="sb small">فرض‌های سناریوی «${ai.title}»</span><button class="btn icon sm ghost" title="بستن" onClick=${() => setAi(null)}><${Icon} n="x" cls="sm" /></button></div>
+      ${ai.assumptions.map((x) => html`<div class="arow"><span class="sb">${x.label}</span><span class=${'num ltr ' + (sh[x.key] >= 0 ? 'pos' : 'neg')}>${sh[x.key] > 0 ? '+' : ''}${num(sh[x.key])}٪</span><span class="muted grow">${x.reason}</span></div>`)}
+      <div class="xs muted">این‌ها فرض‌اند، نه پیش‌بینی. با لغزنده‌های پایین هر کدام را عوض کن تا نتیجه همان لحظه به‌روز شود.</div>
+    </div>`}
+    <div class="row wrap" style="gap:6px;margin-bottom:14px">${SCENARIOS.map((sc) => html`<button class=${'chip' + (preset === sc.id ? ' on' : '')} onClick=${() => { pick(sc); setAi(null); }}>${sc.name}</button>`)}</div>
     <div class="why" style="grid-template-columns:1fr 1fr">
       <div class="col" style="gap:14px">
         <${Slider} label="نرخ دلار (بازار آزاد)" value=${sh.usd} onChange=${set('usd')} min=${-50} max=${150} note="روی ارز، طلا، رمزارز و فلزات اثر می‌گذارد" />
@@ -94,21 +292,19 @@ export function AnalysisPage({ st, pf, s, open }) {
   const cust = Object.entries(pf.byCustodian).map(([name, value]) => ({ name, value, color: 'var(--violet-2)' })).sort((a, b) => b.value - a.value).slice(0, 8);
   const topAsset = pf.rows.filter((r) => !r.cat.liability).sort((a, b) => b.value - a.value)[0];
   const risks = [];
-  if (topAsset && topAsset.value / g > 0.3) risks.push({ t: `${pct(topAsset.value / g, { sign: false })} از کل دارایی در «${topAsset.asset.name}» است`, d: 'تمرکز بالا روی یک دارایی؛ نوسان آن مستقیماً روی کل ثروت اثر می‌گذارد.', a: topAsset.asset });
-  if ((pf.byExposure.rial || 0) / g > 0.4) risks.push({ t: `${pct((pf.byExposure.rial || 0) / g, { sign: false })} از دارایی‌ها ریالی است`, d: 'با تورم بالا، دارایی‌های ریالی بدون سود کافی ارزش واقعی از دست می‌دهند.' });
-  if ((pf.byLiquidity.high || 0) / g < 0.1) risks.push({ t: 'نقدینگی در دسترس کمتر از ۱۰٪ است', d: 'برای شرایط اضطراری، بخشی از دارایی را با نقدشوندگی بالا نگه دار.' });
-  if (pf.debt > 0 && pf.debt / g > 0.3) risks.push({ t: `نسبت بدهی به دارایی ${pct(pf.debt / g, { sign: false })}`, d: 'بدهی بالا ریسک نقدینگی را زیاد می‌کند.' });
+  const has = pf.gross > 0;
+  if (!has && pf.debt > 0) risks.push({ t: 'بدهی ثبت شده ولی دارایی‌ای نه', d: 'دارایی‌هایت را هم وارد کن تا نسبت بدهی و ریسک‌ها درست حساب شود.' });
+  if (has && topAsset && topAsset.value / g > 0.3) risks.push({ t: `${pct(topAsset.value / g, { sign: false })} از کل دارایی در «${topAsset.asset.name}» است`, d: 'تمرکز بالا روی یک دارایی؛ نوسان آن مستقیماً روی کل ثروت اثر می‌گذارد.', a: topAsset.asset });
+  if (has && (pf.byExposure.rial || 0) / g > 0.4) risks.push({ t: `${pct((pf.byExposure.rial || 0) / g, { sign: false })} از دارایی‌ها ریالی است`, d: 'با تورم بالا، دارایی‌های ریالی بدون سود کافی ارزش واقعی از دست می‌دهند.' });
+  if (has && (pf.byLiquidity.high || 0) / g < 0.1) risks.push({ t: 'نقدینگی در دسترس کمتر از ۱۰٪ است', d: 'برای شرایط اضطراری، بخشی از دارایی را با نقدشوندگی بالا نگه دار.' });
+  if (has && pf.debt > 0 && pf.debt / g > 0.3) risks.push({ t: `نسبت بدهی به دارایی ${pct(pf.debt / g, { sign: false })}`, d: 'بدهی بالا ریسک نقدینگی را زیاد می‌کند.' });
   const perf = pf.rows.filter((r) => r.pnl !== null).sort((a, b) => b.pnl - a.pnl);
-  const realReturn = (() => {
-    const snaps = st.snapshots; const keys = Object.keys(snaps).sort(); if (keys.length < 2) return null;
-    const a = snaps[keys[0]], b = snaps[keys[keys.length - 1]];
-    return { days: keys.length, toman: a.t ? b.t / a.t - 1 : null, usd: a.usd && b.usd ? (b.t / b.usd) / (a.t / a.usd) - 1 : null, gold: a.gold && b.gold ? (b.t / b.gold) / (a.t / a.gold) - 1 : null, from: keys[0] };
-  })();
 
   return html`<div class="page">
+    <${Performance} st=${st} pf=${pf} s=${s} />
     <${Scenario} st=${st} pf=${pf} s=${s} />
     <div class="grid-ov">
-      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز</h3><span class="sub">ضدتورمی: ${pct(1 - (pf.byExposure.rial || 0) / g, { sign: false })}</span></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز</h3><span class="sub">ضدتورمی: ${pf.gross > 0 ? pct(1 - (pf.byExposure.rial || 0) / g, { sign: false }) : '—'}</span></div>
         <${StackBar} items=${exItems} height=${14} /><div style="height:14px"></div><${Bars} items=${exItems} s=${s} total=${g} /></div>
       <div class="card"><div class="card-h"><h3><${Icon} n="droplet" cls="sm" />نردبان نقدشوندگی</h3></div>
         <${StackBar} items=${liqItems} height=${14} /><div style="height:14px"></div><${Bars} items=${liqItems} s=${s} total=${g} />
@@ -122,14 +318,13 @@ export function AnalysisPage({ st, pf, s, open }) {
         ${risks.length ? html`<div class="list">${risks.map((r) => html`<div class="it" style="align-items:flex-start"><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="alert" /></span>
           <div class="grow"><div class="sb small">${r.t}</div><div class="xs muted">${r.d}</div></div></div>`)}</div>`
           : html`<div class="empty small"><div class="ico"><${Icon} n="check" /></div>ریسک برجسته‌ای در ترکیب فعلی دیده نشد.</div>`}
-        ${realReturn && html`<hr class="sep" /><div class="small sb" style="margin-bottom:8px">بازدهی واقعی از ${num(realReturn.days)} روز پیش</div>
-          <div class="grid3"><div class="pcell"><span class="n">ریالی</span><span class="v"><${Delta} p=${realReturn.toman} showAbs=${false} /></span></div>
-          <div class="pcell"><span class="n">بر حسب دلار</span><span class="v"><${Delta} p=${realReturn.usd} showAbs=${false} /></span></div>
-          <div class="pcell"><span class="n">بر حسب طلا</span><span class="v"><${Delta} p=${realReturn.gold} showAbs=${false} /></span></div></div>`}
+        <hr class="sep" />
+        <${Critique} st=${st} pf=${pf} s=${s} />
       </div>
     </div>
 
-    <${Targets} pf=${pf} s=${s} />
+    <${Targets} pf=${pf} s=${s} assets=${st.assets} />
+    <${BreakEven} st=${st} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
       ${perf.length ? html`<table class="tbl"><thead><tr><th>دارایی</th><th class="n">بهای تمام‌شده</th><th class="n">ارزش روز</th><th class="n">سود / زیان</th><th class="n">بازده</th></tr></thead><tbody>

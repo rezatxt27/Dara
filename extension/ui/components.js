@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useMemo, useRef, useCallback } from '../lib/vendor/preact-htm.js';
 import { ICONS } from './icons.js';
 import * as store from '../lib/store.js';
-import { money, pct, num, parseNum, setDigits, signed, compact, numToWordsFa, groupTyping, getDigits, toEnDigits } from '../lib/format.js';
+import { money, pct, num, parseNum, setDigits, signed, compact, numToWordsFa, groupTyping, getDigits, toEnDigits, timeHM } from '../lib/format.js';
 import { fmtJ, parseJ, todayIso, isoToJ, jToIso, monthLength, dateFromIso, MONTHS } from '../lib/jalali.js';
 import { CAT, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from '../lib/catalog.js';
 
@@ -390,3 +390,63 @@ export function BackfillButton({ st, label = 'ساخت نمودار از قیم�
 
 
 export { money, pct, num, fmtJ, todayIso, isoToJ };
+
+/* ---------------- «این عدد از کجا آمد؟» ---------------- */
+function ExplainLine({ l, s }) {
+  let v;
+  if (l.k === 'money') v = html`<${Money} v=${l.v} s=${s} sign=${!!l.sign} />`;
+  else if (l.k === 'usd') v = html`<span class="num ltr">$${num(l.v, 2)}</span>`;
+  else if (l.k === 'qty') v = html`<span class="num">${num(l.v, 'auto')} ${l.unit || ''}</span>`;
+  else if (l.k === 'pct') v = html`<span class="num ltr">${pct(l.v, { sign: !!l.sign })}</span>`;
+  else if (l.k === 'date') v = html`<span>${fmtJ(l.v)}</span>`;
+  else if (l.k === 'num') v = html`<span class="num">${num(l.v, 'auto')}${l.unit ? ' ' + l.unit : ''}</span>`;
+  else v = html`<span>${l.v}</span>`;
+  const sub = l.sub && typeof l.sub === 'object' && 'pct' in l.sub ? html`<span class="ltr">(${pct(l.sub.pct)})</span>` : l.sub ? (l.subK === 'date' ? fmtJ(l.sub) : l.sub) : '';
+  return html`<div class=${'xl' + (l.total ? ' total' : '') + (l.strong ? ' strong' : '')}>
+    <span class="t">${l.color && html`<i style=${'background:' + l.color}></i>`}${l.t}${l.at ? html`<span class="xs muted">، ${timeOrDate(l.at)}</span>` : ''}</span>
+    <span class="v">${v}${sub ? html` <span class="xs muted">${sub}</span>` : ''}</span></div>`;
+}
+const timeOrDate = (ms) => (new Date().toDateString() === new Date(ms).toDateString() ? `ساعت ${timeHM(ms)}` : fmtJ(isoFromMs(ms), 'dm'));
+const isoFromMs = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+
+/** Small «؟» button: opens a breakdown of how a number was calculated. `get()` returns {lines, formula, notes, drivers?}. */
+export function Explain({ get, s, title = 'این عدد از کجا آمد؟', ask, light = false }) {
+  const [pos, setPos] = useState(null);
+  const btn = useRef();
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e) => { if (!e.target.closest?.('.xpop') && !btn.current?.contains(e.target)) setPos(null); };
+    const esc = (e) => e.key === 'Escape' && setPos(null);
+    const off = (e) => { if (e?.target?.closest?.('.xpop')) return; setPos(null); }; // scrolling inside the popover keeps it open
+    const t = setTimeout(() => document.addEventListener('mousedown', close), 0);
+    addEventListener('keydown', esc); addEventListener('resize', off); document.addEventListener('scroll', off, true);
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); removeEventListener('keydown', esc); removeEventListener('resize', off); document.removeEventListener('scroll', off, true); };
+  }, [pos]);
+  const toggle = (e) => {
+    e.stopPropagation(); e.preventDefault();
+    if (pos) return setPos(null);
+    setData(get());
+    const r = btn.current.getBoundingClientRect();
+    const w = Math.min(360, innerWidth - 24);
+    const right = Math.min(Math.max(12, innerWidth - r.right - 8), innerWidth - w - 12);
+    const below = innerHeight - r.bottom > 280 || r.top < 300;
+    setPos({ right, w, top: below ? r.bottom + 6 : null, bottom: below ? null : innerHeight - r.top + 6 });
+  };
+  return html`<span class="xwrap" onClick=${(e) => e.stopPropagation()}>
+    <button type="button" ref=${btn} class=${'xbtn' + (light ? ' light' : '') + (pos ? ' on' : '')} title=${title} aria-label=${title} onClick=${toggle}><${Icon} n="help" cls="sm" /></button>
+    ${pos && data && html`<div class="xpop" role="dialog" style=${`right:${pos.right}px;width:${pos.w}px;${pos.top !== null ? `top:${pos.top}px` : `bottom:${pos.bottom}px`}`}>
+      <div class="xh"><span class="sb small">${title}</span><button class="btn icon sm ghost" onClick=${() => setPos(null)}><${Icon} n="x" cls="sm" /></button></div>
+      ${data.formula && html`<div class="xf">${data.formula}</div>`}
+      <div class="xls">${data.lines.map((l) => html`<${ExplainLine} l=${l} s=${s} />`)}</div>
+      ${data.drivers?.length > 0 && html`<div class="xs muted sb" style="margin:8px 0 2px">بیشترین اثر بازار</div><div class="xls">${data.drivers.map((l) => html`<${ExplainLine} l=${l} s=${s} />`)}</div>`}
+      ${(data.notes || []).map((n) => html`<div class="xs muted" style="margin-top:6px">${n}</div>`)}
+      ${ask && html`<div style="margin-top:10px"><${AskBtn} q=${ask} label="از دستیار بپرس" /></div>`}
+    </div>`}
+  </span>`;
+}
+
+/** «بپرس»: opens the assistant with a question about this spot, already sent. */
+export function AskBtn({ q, label = 'بپرس', cls = '', title }) {
+  return html`<a class=${'askbtn ' + cls} href=${'#/assistant?ask=' + encodeURIComponent(q)} title=${title || q} onClick=${(e) => e.stopPropagation()}><${Icon} n="sparkles" cls="sm" />${label ? html`<span>${label}</span>` : ''}</a>`;
+}

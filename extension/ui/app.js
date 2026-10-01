@@ -1,5 +1,6 @@
 import { isoFromDate } from '../lib/jalali.js';
-import { html, render, useState, useEffect, useMemo, useStore, useTick, Icon, Toasts, send, toast, Money, Delta, Seg, money, num, pct, fmtJ, AreaChart, StackBar, Ava, StatusPill, refLabel, Markdown, BackfillButton } from './components.js';
+import { html, render, useState, useEffect, useMemo, useStore, useTick, Icon, Toasts, send, toast, Money, Delta, Seg, money, num, pct, fmtJ, AreaChart, StackBar, Ava, StatusPill, refLabel, Markdown, BackfillButton, Explain, AskBtn } from './components.js';
+import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
 import { CAT, EXPOSURES } from '../lib/catalog.js';
 import { ago, timeHM, signed } from '../lib/format.js';
@@ -63,11 +64,11 @@ function Hero({ st, pf, s }) {
   const hasEst = series.some((p) => p.est);
   return html`<section class="hero">
     <div style="position:relative;z-index:1;display:flex;flex-direction:column">
-      <div class="row between"><span class="lbl">ارزش خالص دارایی‌ها</span>
+      <div class="row between"><span class="lbl row" style="gap:4px">ارزش خالص دارایی‌ها<${Explain} light s=${s} get=${() => I.explainNet(pf)} ask="ارزش خالص دارایی‌هایم از چه بخش‌هایی تشکیل شده و کدام بخش بیشترین وزن را دارد؟" /></span>
         <${Seg} value=${denom} onChange=${(v) => act.setSettings({ denom: v })} options=${[['money', s.currency === 'rial' ? 'ریال' : 'تومان'], ['usd', 'دلار'], ['gold', 'طلا'], ['coin', 'سکه']]} /></div>
       <div class="big num"><${DenomText} v=${net} denom=${denom} s=${s} /></div>
       ${denom === 'money' && s.compact && html`<div class="full num money"><span class="n">${money(pf.net, s)}</span></div>`}
-      <div class="chg">${periods.map(([t, d]) => html`<div class="box">${t}<b><${Delta} p=${d?.pct} showAbs=${false} /></b>
+      <div class="chg">${periods.map(([t, d], i) => html`<div class="box"><span class="row" style="gap:2px">${t}<${Explain} light s=${s} title=${`تغییر ${t} از کجا آمد؟`} get=${() => I.explainChange(st, [1, 7, 30][i], pf)} /></span><b><${Delta} p=${d?.pct} showAbs=${false} /></b>
         <span class="xs" style="opacity:.75">${d && isFinite(d.abs) ? html`<${Money} v=${d.abs} s=${s} compact sign unit=${false} />` : '—'}</span></div>`)}</div>
       <div class="equiv" style="margin-top:auto;padding-top:14px">
         ${denom !== 'usd' && rates.usd && html`<span>≈ <b class="money"><span class="n">${num(pf.net / rates.usd)}</span></b> دلار</span>`}
@@ -89,7 +90,8 @@ function WhyChanged({ st, pf, s, open }) {
   const [days, setDays] = useState(1);
   const at = useMemo(() => E.attribution(st.assets, st.quotes, s, st.snapshots, st.events, days, todayIso(), pf), [st, pf, days]);
   const label = { 1: 'از دیروز', 7: 'در ۷ روز گذشته', 30: 'در ۳۰ روز گذشته' }[days];
-  const head = html`<div class="card-h"><h3><${Icon} n="sparkles" cls="sm" />چرا تغییر کرد؟</h3><${Seg} value=${days} onChange=${setDays} options=${[[1, 'امروز'], [7, '۷ روز'], [30, '۳۰ روز']]} /></div>`;
+  const askQ = { 1: 'چرا ارزش دارایی‌هایم امروز تغییر کرد؟ اثر قیمت بازار را از واریز و برداشت جدا کن.', 7: 'ارزش دارایی‌هایم در ۷ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.', 30: 'ارزش دارایی‌هایم در ۳۰ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.' }[days];
+  const head = html`<div class="card-h"><h3><${Icon} n="sparkles" cls="sm" />چرا تغییر کرد؟</h3><div class="row" style="gap:8px"><${AskBtn} q=${askQ} label="توضیح بده" /><${Seg} value=${days} onChange=${setDays} options=${[[1, 'امروز'], [7, '۷ روز'], [30, '۳۰ روز']]} /></div></div>`;
   if (!at) return html`<div class="card">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این دوره هنوز عکس‌فوری ذخیره نشده.</div><${BackfillButton} st=${st} /></div></div>`;
   const up = at.total >= 0;
   const drivers = at.cats.filter((c) => Math.abs(c.market) >= 1);
@@ -127,17 +129,17 @@ function Kpis({ st, pf, s }) {
   for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
   return html`<div class="kpis">
     <div class="kpi"><span class="t"><${Icon} n="shield" cls="sm" />دارایی ضدتورمی</span>
-      <span class="v num">${pct(hard / g, { sign: false })}</span><${StackBar} items=${exItems} height=${6} />
+      <span class="v num">${pf.gross > 0 ? pct(hard / g, { sign: false }) : '—'}</span><${StackBar} items=${exItems} height=${6} />
       <span class="s">طلا ${pct((ex.gold || 0) / g, { sign: false })}، ارز ${pct(((ex.fx || 0) + (ex.crypto || 0)) / g, { sign: false })}، سهام ${pct((ex.equity || 0) / g, { sign: false })}</span></div>
     <div class="kpi"><span class="t"><${Icon} n="droplet" cls="sm" />نقدشوندگی بالا</span>
-      <span class="v num">${pct(liq.high / g, { sign: false })}</span>
+      <span class="v num">${pf.gross > 0 ? pct(liq.high / g, { sign: false }) : '—'}</span>
       <${StackBar} items=${[{ name: 'بالا', value: liq.high, color: '#14BCDB' }, { name: 'متوسط', value: liq.mid, color: '#8E70FF' }, { name: 'پایین', value: liq.low, color: '#D946A8' }]} height=${6} />
       <span class="s">قابل نقد در چند روز: <${Money} v=${liq.high} s=${s} compact /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span>
       <span class="v"><${Money} v=${auto.interest + auto.inflow} s=${s} compact /></span>
       <span class="s">سود <${Money} v=${auto.interest} s=${s} compact unit=${false} />، ورودی‌ها <${Money} v=${auto.inflow} s=${s} compact unit=${false} /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="live" cls="sm" />به‌روزرسانی خودکار</span>
-      <span class="v num">${pct(autoVal / g, { sign: false })}</span>
+      <span class="v num">${pf.gross > 0 ? pct(autoVal / g, { sign: false }) : '—'}</span>
       <${StackBar} items=${[{ name: 'خودکار', value: autoVal, color: '#0E9F6E' }, { name: 'دستی', value: g - autoVal, color: 'var(--line-2)' }]} height=${6} />
       <span class="s">از ارزش دارایی‌ها خودکار به‌روز می‌شود</span></div>
   </div>`;

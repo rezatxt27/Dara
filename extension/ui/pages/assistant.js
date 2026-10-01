@@ -5,51 +5,21 @@ import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import { uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
+import { ProposalCard } from '../proposals.js';
 
 const STEP = {
   get_overview: 'بررسی خلاصه پرتفوی', list_assets: 'خواندن دارایی‌ها', get_prices: 'خواندن قیمت‌ها', explain_change: 'تحلیل تغییرات',
   simulate_scenario: 'شبیه‌سازی سناریو', get_schedule: 'بررسی رویدادهای آینده', get_history: 'بررسی تاریخچه', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
+  explain_value: 'بررسی ریز محاسبه', compare_performance: 'مقایسه با طلا، دلار و سپرده', break_even: 'محاسبه نقطه سربه‌سر', plan_new_money: 'تقسیم پول جدید',
 };
 const SUGGESTIONS = [
   'امروز ارزش دارایی‌ام چرا تغییر کرد؟',
   'اگر دلار ۳۰٪ گران شود و انس طلا ۱۰٪ بریزد، چه می‌شود؟',
   'چند درصد از دارایی‌ام ریالی است و چه ریسکی دارد؟',
   'تا یک ماه آینده چه سودها و پرداخت‌هایی دارم؟',
-  'کدام دارایی‌هایم بیشترین سود و زیان را داشته‌اند؟',
-  'ترکیب دارایی‌ام را با تخصیص هدفم مقایسه کن',
+  'در سه ماه گذشته واقعاً پولدارتر شدم؟ با طلا، دلار و سپرده مقایسه کن',
+  'اگر ۵۰۰ میلیون تومان پول جدید داشته باشم، طبق هدفم کجا بگذارم؟',
 ];
-
-function Proposal({ p, st, s, onStatus }) {
-  const a = st.assets.find((x) => x.id === p.assetId);
-  const k = s.currency === 'rial' ? 1 : 10;
-  const unit = s.currency === 'rial' ? 'ریال' : 'تومان';
-  let title = '', detail = '';
-  if (p.type === 'update') {
-    const cur = p.field === 'quantity' ? a?.quantity : p.field === 'balance' ? a?.balance : a?.price?.value;
-    const f = (v) => (p.field === 'quantity' ? `${num(v, 'auto')} ${a?.unit || ''}` : `${num(v / k)} ${unit}`);
-    title = `به‌روزرسانی «${p.assetName}»`;
-    detail = `${p.field === 'quantity' ? 'مقدار' : p.field === 'balance' ? 'مانده' : 'قیمت واحد'}: ${cur !== undefined ? f(cur) : '—'} ← ${f(p.value)}`;
-  } else {
-    title = `${p.side === 'buy' ? 'خرید' : 'فروش'} «${p.assetName}»`;
-    detail = `${num(p.qty, 'auto')} ${p.unit || ''} × ${num(p.price / k)} ${unit} = ${num(p.qty * p.price / k)} ${unit}${p.cashName ? `، ${p.side === 'buy' ? 'از' : 'به'} ${p.cashName}` : ''}`;
-  }
-  const apply = async () => {
-    if (!a) return toast('این دارایی دیگر وجود ندارد');
-    if (p.type === 'update') {
-      if (p.field === 'quantity') await act.patchAsset(a.id, { quantity: p.value });
-      else if (p.field === 'balance') await act.patchAsset(a.id, { balance: p.value, balanceAt: Date.now() });
-      else if (a.price?.source === 'market') return toast('قیمت این دارایی خودکار است و دستی تغییر نمی‌کند');
-      else await act.patchAsset(a.id, { price: { ...a.price, value: p.value, updatedAt: Date.now() } });
-    } else await act.trade({ assetId: a.id, side: p.side, qty: p.qty, price: p.price, cashId: p.cashId });
-    onStatus('applied'); toast('اعمال شد');
-  };
-  return html`<div class="prop">
-    <div class="row"><${Icon} n="wand" cls="sm" /><span class="sb small grow">${title}</span>${p.status === 'applied' ? html`<span class="pill live">اعمال شد</span>` : p.status === 'rejected' ? html`<span class="pill">رد شد</span>` : ''}</div>
-    <div class="small num">${detail}</div>
-    ${p.reason && html`<div class="xs muted">${p.reason}</div>`}
-    ${!p.status && html`<div class="row"><button class="btn sm primary" onClick=${apply}><${Icon} n="check" cls="sm" />تأیید و اعمال</button><button class="btn sm ghost" onClick=${() => onStatus('rejected')}>رد</button></div>`}
-  </div>`;
-}
 
 function Reports({ st, s }) {
   const [busy, setBusy] = useState(false);
@@ -105,6 +75,13 @@ export function AssistantPage({ st, s, route }) {
     }
     setBusy(null); ctlRef.current = null;
   };
+  // «بپرس» buttons elsewhere open this page with ?ask=…: send it once, then clean the address.
+  useEffect(() => {
+    const q = route.q.ask;
+    if (!q) return;
+    history.replaceState(null, '', '#/assistant');
+    if (active) ask(q); else setText(q);
+  }, [route.q.ask]);
   const setPropStatus = (mid, pid, status) => persist(msgs.map((m) => (m.id === mid ? { ...m, proposals: m.proposals.map((p) => (p.id === pid ? { ...p, status } : p)) } : m)));
 
   return html`<div class="page">
@@ -125,7 +102,7 @@ export function AssistantPage({ st, s, route }) {
           ${msgs.map((m) => html`<div class=${'msg ' + (m.role === 'user' ? 'user' : 'bot') + (m.error ? ' err' : '')} key=${m.id}>
             ${m.role === 'user' ? m.content : html`<${Markdown} text=${m.content} />`}
             ${m.steps?.length > 0 && html`<div class="steps">${m.steps.map((x) => html`<span class="pill"><${Icon} n="check" cls="sm" />${STEP[x] || x}</span>`)}</div>`}
-            ${(m.proposals || []).map((p) => html`<${Proposal} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}
+            ${(m.proposals || []).map((p) => html`<${ProposalCard} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}
             ${m.error && html`<div class="row" style="margin-top:6px"><a class="btn sm" href="#/settings">بررسی اتصال‌ها</a></div>`}
             ${m.by && html`<div class="by">${m.by}</div>`}
           </div>`)}

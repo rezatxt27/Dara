@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS = {
   denom: 'money',           // money | usd | gold | coin
   onboarded: false,
   watch: [],                // market watchlist refs (price only, not holdings)
+  depositPct: null,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
 };
 
 export const DEFAULTS = {
@@ -32,6 +33,7 @@ export const DEFAULTS = {
   ai: { connections: [], activeId: null, privacy: 'full', fallback: true, weekly: true, trustedSites: [] },
   chat: { messages: [] },
   reports: [],  // weekly narratives [{id, weekOf, createdAt, facts, text, by, model}]
+  critique: null, // last AI portfolio review {at, points:[{title, detail, check, level}], by}
   meta: { lastRun: 0, lastOk: 0, running: false, errors: {}, schema: SCHEMA_VERSION, lastStaleNotice: 0 },
 };
 export const KEYS = Object.keys(DEFAULTS);

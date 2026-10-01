@@ -43,6 +43,26 @@ class H(BaseHTTPRequestHandler):
         tool_names = {t["function"]["name"] for t in tools}
         if "Reply with" in text: return self._send(200, openai_reply("OK"))
         if "Call the ping tool" in text: return self._send(200, openai_reply(None, [tc("ping", {})]) if "ping" in tool_names else openai_reply("cannot"))
+        if '"shocks"' in text:
+            return self._send(200, openai_reply(json.dumps({"title": "توافق", "shocks": {"usd": -20, "gold": 0, "equity": 25, "crypto": 0, "metals": 0, "private": 10, "real": -5},
+                "reasons": {"usd": "انتظار ورود ارز و کاهش نرخ", "equity": "خوش‌بینی به سودآوری شرکت‌ها", "private": "بهبود فضای کسب‌وکار", "real": "کاهش تقاضای سفته‌بازی"}}, ensure_ascii=False)))
+        if '"points"' in text:
+            leaked = bool(re.search(r"\d{7,}", text))
+            print("CRITIQUE_AMOUNTS_LEAKED" if leaked else "CRITIQUE_PERCENT_ONLY", flush=True)
+            return self._send(200, openai_reply(json.dumps({"points": [
+                {"title": "تمرکز روی یک محل نگهداری", "detail": "بخش بزرگی از دارایی در یک حساب است.", "check": "اگر این حساب در دسترس نباشد چه می‌کنی؟", "level": "high"},
+                {"title": "سهم ریالی بالا", "detail": "دارایی ریالی در برابر تورم آسیب‌پذیر است.", "check": "سود سپرده‌ها را با تورم مقایسه کن.", "level": "mid"}]}, ensure_ascii=False)))
+        if "جمله کاربر" in text:
+            m = re.search(r"دارایی‌های کاربر:\n(\[.*?\])\n", text, re.S)
+            ids = json.loads(m.group(1)) if m else []
+            gold = next((a["id"] for a in ids if "آب" in a["name"]), None)
+            bank = next((a["id"] for a in ids if a["name"].endswith("الف")), None)
+            sentence = re.search(r"جمله کاربر: «(.*?)»", text).group(1)
+            if "سکه" in sentence:
+                acts = [{"type": "trade", "asset_id": None, "side": "buy", "quantity": 1, "unit_price": None, "total": 260000000, "money_unit": "toman", "cash_asset_id": bank, "new_asset": {"kind": "coin_emami", "name": "سکه امامی", "unit": "عدد"}}]
+            else:
+                acts = [{"type": "trade", "asset_id": gold, "side": "buy", "quantity": 2, "unit_price": 25000000, "total": None, "money_unit": "toman", "cash_asset_id": bank, "new_asset": None}]
+            return self._send(200, openai_reply(json.dumps({"actions": acts, "question": None}, ensure_ascii=False)))
         if "currency_unit" in text and "پرتفوی نمونه" in text:
             # The model returns every row but matches none, like a real model often does.
             items = [{"label": "زر", "kind": "quantity", "amount": 1200, "unit": "واحد", "type": "stock", "symbol": "زر", "avg_cost": 150000, "match_id": None, "confidence": 0.99},

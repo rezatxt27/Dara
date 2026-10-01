@@ -355,3 +355,245 @@ test('capture: broker portfolio — symbol fallback match, new holdings priced f
   const cash = A.newAssetFromCapture(props[3], { category: props[3].category });
   assert.equal(cash.mode, 'balance'); assert.equal(cash.balance, 3_000_000); assert.equal(cash.category, 'bank');
 });
+
+/* ======================= v1.3: explain, performance, break-even, new money, NL helpers ======================= */
+import * as IN from '../../extension/lib/insights.js';
+
+test('explain: market units (USD-priced metal), payout deposit and bank interest show the real calculation', () => {
+  const now = Date.now();
+  const quotes = { 'tgju:base_global_copper': { price: 10_000, at: now }, 'tgju:price_dollar_rl': { price: 1_000_000, at: now } };
+  const cu = { id: 'c', name: 'مس', category: 'metal', mode: 'units', quantity: 50, unit: 'کیلوگرم', price: { source: 'market', ref: { provider: 'tgju', key: 'base_global_copper' }, factor: 0.001 } };
+  const ex = IN.explainAsset(cu, quotes, {});
+  const by = (t) => ex.lines.find((l) => l.t.startsWith(t));
+  assert.equal(by('قیمت بازار').k, 'usd'); assert.equal(by('قیمت بازار').v, 10_000);
+  assert.equal(by('ضرب در نرخ دلار').v, 1_000_000);
+  assert.equal(by('ضریب تبدیل').v, 0.001);
+  assert.equal(by('قیمت هر واحد').v, 10_000 * 1_000_000 * 0.001);
+  assert.equal(ex.lines.at(-1).v, 50 * 10_000_000);
+  assert.equal(ex.value, 50 * 10_000_000);
+  const today = J.todayIso();
+  const dep = { id: 'd', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 1_000_000_000, annualPct: 24, start: J.addDaysIso(today, -10), mode: 'payout', basis: 365 } };
+  const ed = IN.explainAsset(dep, {}, {});
+  const acc = ed.lines.find((l) => l.t === 'سود انباشته').v;
+  // 10 full days plus the live fraction of today
+  assert.ok(acc >= 1e9 * 0.24 * 10 / 365 - 1 && acc <= 1e9 * 0.24 * 11 / 365 + 1, String(acc));
+  assert.match(ed.formula, /آخرین واریز ماهانه/);
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1e9, interest: { on: true, annualPct: 10, basis: 365, lastAccrual: J.addDaysIso(today, -1), accrued: 500_000 } };
+  const eb = IN.explainAsset(bank, {}, {});
+  assert.ok(eb.lines.some((l) => l.t.startsWith('سود انباشته') && l.v >= 500_000));
+  assert.equal(eb.lines.at(-1).v, eb.value);
+});
+
+test('explainNet adds categories up to gross and subtracts debt', () => {
+  const assets = [
+    { id: 'b', name: 'b', category: 'bank', mode: 'balance', balance: 700, balanceAt: Date.now() },
+    { id: 'g', name: 'g', category: 'gold', mode: 'units', quantity: 1, price: { source: 'manual', value: 300, updatedAt: Date.now() } },
+    { id: 'l', name: 'l', category: 'debt', mode: 'balance', balance: 100, balanceAt: Date.now() },
+  ];
+  const pf = E.portfolio(assets, {}, {});
+  const ex = IN.explainNet(pf);
+  assert.equal(ex.lines.find((l) => l.t === 'جمع دارایی‌ها').v, 1000);
+  assert.equal(ex.lines.at(-1).v, 900);
+  assert.equal(ex.lines.filter((l) => !l.strong && !l.total).reduce((x, l) => x + l.v, 0), 900);
+});
+
+test('performance: salary is not return; benchmarks replay the same money into gold, dollar and deposit', () => {
+  const today = J.todayIso();
+  const d0 = J.addDaysIso(today, -90), d1 = J.addDaysIso(today, -30);
+  const P0 = 100, Pm = 110, P1 = 120; // gold price per gram (also the 18k benchmark rate)
+  const U0 = 50, Um = 50, U1 = 60;
+  const now = Date.now();
+  const assets = [
+    { id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 10, price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' } } },
+    { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1000 + 300, balanceAt: now },
+  ];
+  const quotes = { 'tgju:geram18': { price: P1, at: now }, 'tgju:price_dollar_rl': { price: U1, at: now } };
+  const snapshots = {
+    [d0]: { t: 10 * P0 + 1000, v: { g: 10 * P0, b: 1000 }, gold: P0, usd: U0, est: 1 },
+    [d1]: { t: 10 * Pm + 1000, v: { g: 10 * Pm, b: 1000 }, gold: Pm, usd: Um, est: 1 },
+  };
+  const events = [{ id: 'e', kind: 'flow', date: d1, at: now - 30 * 864e5, title: 'حقوق', amount: 300, fromId: null, toId: 'b' }];
+  const st = { assets, quotes, settings: {}, snapshots, events };
+  const r = IN.performance(st, 90, { depositPct: 20 });
+  assert.equal(r.from, d0);
+  close(r.market, 10 * (P1 - P0), 1e-6);
+  close(r.moneyIn, 300, 1e-6);
+  close(r.ret, 200 / (2000 + 300 * (30 / 90)), 1e-9);
+  const g = r.bench.find((b) => b.id === 'gold'); const u = r.bench.find((b) => b.id === 'usd'); const d = r.bench.find((b) => b.id === 'deposit');
+  close(g.end, 2000 * (P1 / P0) + 300 * (P1 / Pm), 1e-6);
+  close(u.end, 2000 * (U1 / U0) + 300 * (U1 / Um), 1e-6);
+  const dep = (days) => Math.pow(1 + 0.2 / 12, days * 12 / 365);
+  close(d.end, 2000 * dep(90) + 300 * dep(30), 1e-6);
+  close(g.diff, 2500 - g.end, 1e-6);
+  assert.equal(r.end, 2500);
+  // a 365-day request with 90 days of history falls back to the whole history
+  const all = IN.performance(st, 365, { depositPct: 20 });
+  assert.ok(all.partial); assert.equal(all.from, d0);
+});
+
+test('attribution: deleting an asset is a bookkeeping change, not a market loss', () => {
+  const today = J.todayIso();
+  const d0 = J.addDaysIso(today, -7);
+  const assets = [{ id: 'b', name: 'b', category: 'bank', mode: 'balance', balance: 1000, balanceAt: Date.now() }];
+  const snapshots = { [d0]: { t: 1500, v: { b: 1000, gone: 500 }, est: 1 } };
+  const at = E.attribution(assets, {}, {}, snapshots, [], 7, today);
+  close(at.market, 0, 1e-9);
+  close(at.edits, -500, 1e-9);
+});
+
+test('break-even: deposit vs asset with fees', () => {
+  const r = IN.breakEven({ price0: 1000, ratePct: 24, months: 6, feePct: 2 });
+  const dg = Math.pow(1.02, 6); // 2% a month, re-deposited
+  close(r.depositGain, dg - 1, 1e-12);
+  close(r.needed, dg / 0.98 - 1, 1e-12);
+  close(r.targetPrice, 1000 * dg / 0.98, 1e-9);
+  close(r.annualNeeded, Math.pow(dg / 0.98, 2) - 1, 1e-12);
+  // the annual rate needed is never below the deposit's own effective rate
+  const long = IN.breakEven({ price0: 1, ratePct: 25, months: 24 });
+  assert.ok(long.annualNeeded >= 0.25, String(long.annualNeeded));
+  const z = IN.breakEven({ price0: 0, ratePct: 24, months: 12 });
+  assert.equal(z.targetPrice, null);
+});
+
+test('new money fills the shortfalls first and never sells', () => {
+  const now = Date.now();
+  const assets = [
+    { id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 2, price: { source: 'manual', value: 100, updatedAt: now } },
+    { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 800, balanceAt: now },
+  ];
+  const pf = E.portfolio(assets, {}, {});
+  const a = IN.allocateNew(pf, { gold: 0.5, bank: 0.5 }, 400);
+  close(a.rows.find((r) => r.id === 'gold').add, 400, 1e-9);
+  close(a.rows.find((r) => r.id === 'bank').add, 0, 1e-9);
+  assert.equal(a.rows.find((r) => r.id === 'gold').vehicle.id, 'g');
+  const b = IN.allocateNew(pf, { gold: 0.5, bank: 0.5 }, 1000);
+  close(b.rows.find((r) => r.id === 'gold').add, 800, 1e-9);
+  close(b.rows.find((r) => r.id === 'bank').add, 200, 1e-9);
+  close(b.maxDevAfter, 0, 1e-12);
+  // targets below 100% are used as entered (not scaled up); gold 20% of 2000 = 400 → +200, the rest by weight
+  const c = IN.allocateNew(pf, { gold: 0.2, bank: 0.2 }, 1000);
+  close(c.rows.find((r) => r.id === 'gold').target, 0.2, 1e-12);
+  close(c.rows.find((r) => r.id === 'gold').add, 200 + 800 * 0.5, 1e-9);
+  close(c.rows.reduce((x, r) => x + r.add, 0), 1000, 1e-9);
+  const over = IN.allocateNew(pf, { gold: 0.8, bank: 0.8 }, 1000); // above 100% is scaled down
+  close(over.rows.find((r) => r.id === 'gold').target, 0.5, 1e-12);
+  assert.equal(IN.allocateNew(pf, {}, 1000), null);
+  assert.equal(IN.allocateNew(pf, { gold: 1 }, 0), null);
+});
+
+test('NL scenario: clamped to slider ranges, reasons kept', () => {
+  const sc = A.parseScenario({ title: 'توافق', shocks: { usd: -25, equity: 30, gold: 500, crypto: 'x' }, reasons: { usd: 'ارز ارزان‌تر', equity: 'خوش‌بینی', gold: 'بی‌ربط' } });
+  assert.deepEqual(sc.shocks, { usd: -25, gold: 100, equity: 30, crypto: 0, metals: 0, private: 0, real: 0 });
+  assert.equal(sc.assumptions.find((x) => x.key === 'gold').clamped, true);
+  assert.equal(sc.assumptions.find((x) => x.key === 'usd').reason, 'ارز ارزان‌تر');
+  assert.equal(sc.assumptions.length, 3);
+  assert.equal(A.parseCritique({ points: [{ title: 'تمرکز', detail: 'x', level: 'weird' }, {}] }).length, 1);
+  assert.equal(A.parseCritique({ points: [{ title: 'تمرکز', level: 'weird' }] })[0].level, 'mid');
+});
+
+test('one-sentence entry: validated against real assets, toman → rial, market price when missing', () => {
+  const now = Date.now();
+  const assets = [
+    { id: 'g', name: 'طلای آب‌شده', category: 'gold_online', mode: 'units', quantity: 5, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' } } },
+    { id: 'b', name: 'حساب الف', category: 'bank', mode: 'balance', balance: 1e9, balanceAt: now },
+    { id: 'c', name: 'حساب ب', category: 'bank', mode: 'balance', balance: 1e8, balanceAt: now },
+  ];
+  const quotes = { 'tgju:geram18': { price: 250_000_000, at: now }, 'tgju:sekee': { price: 2_500_000_000, at: now } };
+  const json = { actions: [
+    { type: 'trade', asset_id: 'g', side: 'buy', quantity: 2, unit_price: 25_000_000, money_unit: 'toman', cash_asset_id: 'b' },
+    { type: 'trade', asset_id: 'g', side: 'sell', quantity: 1, unit_price: null, total: null, money_unit: 'toman', cash_asset_id: null },
+    { type: 'trade', asset_id: 'g', side: 'sell', quantity: 50 },
+    { type: 'trade', asset_id: null, side: 'buy', quantity: 1, total: 260_000_000, money_unit: 'toman', new_asset: { kind: 'coin_emami', name: 'سکه امامی' } },
+    { type: 'cash', asset_id: 'b', direction: 'out', amount: 5_000_000, money_unit: 'toman', note: 'خرج' },
+    { type: 'transfer', from_id: 'b', to_id: 'c', amount: 1_000_000, money_unit: 'rial' },
+    { type: 'set', asset_id: 'nope', field: 'balance', value: 1 },
+  ] };
+  const r = A.quickProposals(json, assets, quotes, { idFor: () => 'new1' });
+  const [buy, sell, coin, cash, tr] = r.proposals;
+  assert.equal(buy.type, 'trade'); assert.equal(buy.price, 250_000_000); assert.equal(buy.cashId, 'b');
+  assert.equal(sell.side, 'sell'); assert.equal(sell.price, 250_000_000); assert.ok(sell.priceFromMarket);
+  assert.equal(coin.type, 'newbuy'); assert.equal(coin.asset.price.ref.key, 'sekee'); assert.equal(coin.asset.id, 'new1'); assert.equal(coin.price, 2_600_000_000);
+  assert.equal(cash.type, 'adjust'); assert.equal(cash.delta, -50_000_000);
+  assert.equal(tr.type, 'transfer'); assert.equal(tr.amount, 1_000_000);
+  assert.equal(r.proposals.length, 5);
+  assert.equal(r.problems.length, 2, r.problems.join(' | '));
+});
+
+test('attribution/performance: realised gains survive deletion; new assets bought with cash earn market return; removals dated', () => {
+  const today = J.todayIso();
+  const d0 = J.addDaysIso(today, -90), d60 = J.addDaysIso(today, -60), d59 = J.addDaysIso(today, -59), d89 = J.addDaysIso(today, -89);
+  const now = Date.now();
+  // A) gold 1000 sold for 1300 into the bank, then deleted (removal recorded at value 0)
+  {
+    const assets = [{ id: 'b', name: 'b', category: 'bank', mode: 'balance', balance: 1300, balanceAt: now }];
+    const snapshots = { [d0]: { t: 1000, v: { g: 1000, b: 0 }, est: 1 } };
+    const events = [
+      { id: 'e1', kind: 'trade', date: J.addDaysIso(today, -2), amount: 1300, fromId: 'g', toId: 'b' },
+      { id: 'e2', kind: 'edit', date: J.addDaysIso(today, -1), amount: 0, changes: [{ assetId: 'g', field: 'remove', delta: 0, value: -0 }] },
+    ];
+    const at = E.attribution(assets, {}, {}, snapshots, events, 90, today);
+    close(at.market, 300, 1e-9);
+    const r = IN.performance({ assets, quotes: {}, settings: {}, snapshots, events }, 90, { depositPct: 20 });
+    close(r.market, 300, 1e-9); close(r.moneyIn, 0, 1e-9);
+  }
+  // B) 2000 in the bank; 60 days ago 1000 bought 10 g of gold (new asset); gold now 150/g
+  {
+    const assets = [
+      { id: 'b', name: 'b', category: 'bank', mode: 'balance', balance: 1000, balanceAt: now },
+      { id: 'g', name: 'g', category: 'gold', mode: 'units', quantity: 10, createdAt: now - 60 * 864e5, price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' } } },
+    ];
+    const quotes = { 'tgju:geram18': { price: 150, at: now } };
+    const snapshots = { [d0]: { t: 2000, v: { b: 2000 }, gold: 100, est: 1 }, [d59]: { t: 2000, v: { b: 1000, g: 1000 }, gold: 100, est: 1 } };
+    const events = [{ id: 't', kind: 'trade', date: d60, amount: 1000, fromId: 'b', toId: 'g' }];
+    const st = { assets, quotes, settings: {}, snapshots, events };
+    const r = IN.performance(st, 90, { depositPct: 20 });
+    close(r.market, 500, 1e-9);
+    close(r.moneyIn, 0, 1e-6);
+    const g = r.bench.find((x) => x.id === 'gold');
+    close(g.end, 2000 * 1.5, 1e-6); // the same 2000 held in gold from the start
+    close(g.diff, -500, 1e-6);
+  }
+  // C) 2000 a year ago, 1000 of it deleted the next day (older data: no removal record), gold doubled
+  {
+    const assets = [{ id: 'b', name: 'b', category: 'bank', mode: 'balance', balance: 1000, balanceAt: now }];
+    const snapshots = { [d0]: { t: 2000, v: { b: 1000, x: 1000 }, gold: 100, est: 1 }, [d89]: { t: 2000, v: { b: 1000, x: 1000 }, gold: 100, est: 1 } };
+    const quotes = { 'tgju:geram18': { price: 200, at: now } };
+    const r = IN.performance({ assets, quotes, settings: {}, snapshots, events: [] }, 90, { depositPct: 20 });
+    const g = r.bench.find((x) => x.id === 'gold');
+    close(g.end, 2000 * 2 - 1000 * 2, 1e-6); // removed the day after its last snapshot, at that day's gold rate
+    close(r.market, 0, 1e-9);
+  }
+});
+
+test('assistant tools respect percent privacy for prices and plans', () => {
+  const now = Date.now();
+  const st = { assets: [{ id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 10, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' } } },
+                        { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 5e9, balanceAt: now }],
+    quotes: { 'tgju:geram18': { price: 250_000_000, at: now } }, settings: { currency: 'toman', targets: { gold: 50, bank: 50 } }, snapshots: {}, events: [], flows: [], alerts: [] };
+  const tools = A.makeTools({ getState: () => st, privacy: 'percent' });
+  const ex = tools.find((t) => t.name === 'explain_value').run({ asset_id: 'g' });
+  const price = ex.lines.find((l) => l.label.startsWith('قیمت بازار'));
+  assert.equal(price.amount, 25_000_000, 'public price stays absolute');
+  const value = ex.lines.find((l) => l.label === 'ارزش');
+  assert.ok(value.pct_of_net !== undefined && value.amount === undefined);
+  assert.ok(!ex.lines.some((l) => 'quantity' in l));
+  const plan = tools.find((t) => t.name === 'plan_new_money').run({ amount: 1_000_000_000 });
+  assert.ok(!('amount' in plan) && plan.plan.every((x) => !('add' in x) && !('share_now_pct' in x)));
+  assert.equal(IN.critiqueFacts(st, E.portfolio([], {}, {})), null, 'nothing to review on an empty portfolio');
+});
+
+test('one-sentence entry: running quantity across actions and side words', () => {
+  const now = Date.now();
+  const assets = [{ id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 5, price: { source: 'manual', value: 100, updatedAt: now } }];
+  const r = A.quickProposals({ actions: [
+    { type: 'trade', asset_id: 'g', side: 'فروش', quantity: 3, unit_price: 10 },
+    { type: 'trade', asset_id: 'g', side: 'sell', quantity: 3, unit_price: 10 },
+    { type: 'trade', asset_id: 'g', side: 'SELL', quantity: 1, unit_price: 10 },
+    { type: 'trade', asset_id: 'g', side: 'maybe', quantity: 1, unit_price: 10 },
+  ] }, assets, {});
+  assert.equal(r.proposals.length, 2, JSON.stringify(r.problems)); // 3 sold, the next 3 exceed the 2 left, then 1 is fine
+  assert.equal(r.proposals[1].qty, 1);
+  assert.equal(r.problems.length, 2);
+  const sc = A.parseScenario({ shocks: { usd: 0.2, equity: '-۰٫۱' } });
+  assert.equal(sc.shocks.usd, 20); assert.equal(sc.shocks.equity, -10);
+});

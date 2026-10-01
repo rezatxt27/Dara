@@ -5,6 +5,12 @@ import { uid } from '../lib/format.js';
 import { todayIso } from '../lib/jalali.js';
 import { send, toast } from './components.js';
 
+/** Long enough for a few years of salaries, payouts and trades (each event is small). */
+const EVENTS_MAX = 3000;
+const quotesNow = async () => (await store.load('quotes')).quotes || {};
+/** Signed value of a quantity change at today's price (recorded so later analysis doesn't revalue it). */
+const qtyValue = (a, dq, quotes) => { const p = E.unitPriceOf(a, quotes).price; return p > 0 ? (E.isLiability(a) ? -1 : 1) * dq * p : undefined; };
+
 export const act = {
   async setSettings(patch) { return store.update('settings', (s) => ({ ...s, ...patch })); },
   /** Watchlist: price-only refs shown on the market page and refreshed with everything else. */
@@ -14,20 +20,27 @@ export const act = {
   async saveAsset(a) {
     const now = Date.now();
     let ev = null;
+    const quotes = await quotesNow();
     const list = await store.update('assets', (list) => {
       const i = list.findIndex((x) => x.id === a.id);
       const rec = { ...a, updatedAt: now };
       if (i >= 0) {
         const x = list[i]; const changes = [];
         if (x.mode === a.mode && a.mode === 'balance' && +x.balance !== +a.balance) changes.push({ assetId: a.id, field: 'balance', delta: +a.balance - (+x.balance || 0) });
-        if (x.mode === a.mode && a.mode === 'units' && +x.quantity !== +a.quantity) changes.push({ assetId: a.id, field: 'quantity', delta: +a.quantity - (+x.quantity || 0) });
+        if (x.mode === a.mode && a.mode === 'units' && +x.quantity !== +a.quantity) { const dq = +a.quantity - (+x.quantity || 0); changes.push({ assetId: a.id, field: 'quantity', delta: dq, value: qtyValue(rec, dq, quotes) }); }
         if (x.mode === a.mode && a.mode === 'rate' && +x.rate?.principal !== +a.rate?.principal) changes.push({ assetId: a.id, field: 'rate.principal', delta: +a.rate.principal - (+x.rate?.principal || 0) });
         if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: now, title: `ویرایش «${a.name}»`, amount: 0, changes };
         list[i] = rec;
-      } else list.push({ ...rec, id: a.id || uid('a'), createdAt: now });
+      } else {
+        const id = a.id || uid('a');
+        list.push({ ...rec, id, createdAt: now });
+        // Record what was added, so later analysis treats it as money brought in, not as a market gain.
+        const v = E.valueOf({ ...rec, id }, quotes, {}).signedValue;
+        if (v) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: now, title: `افزودن «${a.name}»`, amount: 0, noUndo: true, changes: [{ assetId: id, field: 'add', delta: 0, value: v }] };
+      }
       return list;
     });
-    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, 500));
+    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
     if (a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key) send('quote', { ref: a.price.ref });
     if (a.mode === 'rate' || a.interest?.on) send('automate');
     send('badge');
@@ -36,38 +49,45 @@ export const act = {
 
   async patchAsset(id, patch) {
     let ev = null;
+    const quotes = 'quantity' in patch ? await quotesNow() : {};
     const list = await store.update('assets', (list) => list.map((x) => {
       if (x.id !== id) return x;
       // Manual corrections of balance / quantity are logged so "why did it change" can tell them apart from market moves
       const changes = [];
       if ('balance' in patch && +patch.balance !== +x.balance) changes.push({ assetId: id, field: 'balance', delta: +patch.balance - (+x.balance || 0) });
-      if ('quantity' in patch && +patch.quantity !== +x.quantity) changes.push({ assetId: id, field: 'quantity', delta: +patch.quantity - (+x.quantity || 0) });
+      if ('quantity' in patch && +patch.quantity !== +x.quantity) { const dq = +patch.quantity - (+x.quantity || 0); changes.push({ assetId: id, field: 'quantity', delta: dq, value: qtyValue(x, dq, quotes) }); }
       if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `ویرایش «${x.name}»`, amount: 0, changes };
       return { ...x, ...patch, updatedAt: Date.now() };
     }));
-    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, 500));
+    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
     return list;
   },
 
   /** Apply reviewed page-capture rows: [{assetId, field, value}] and new assets */
   async applyCapture(rows, newAssets = [], source = '') {
     let ev = null;
+    const quotes = await quotesNow();
     await store.update('assets', (assets) => {
       const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
       const changes = [];
       for (const r of rows) {
         const a = byId[r.assetId]; if (!a || r.value === null || !isFinite(r.value)) continue;
-        if (r.field === 'quantity') { changes.push({ assetId: a.id, field: 'quantity', delta: r.value - (+a.quantity || 0) }); a.quantity = r.value; }
+        if (r.field === 'quantity') { const dq = r.value - (+a.quantity || 0); changes.push({ assetId: a.id, field: 'quantity', delta: dq, value: qtyValue(a, dq, quotes) }); a.quantity = r.value; }
         else if (r.field === 'balance') { changes.push({ assetId: a.id, field: 'balance', delta: r.value - (+a.balance || 0) }); a.balance = r.value; a.balanceAt = Date.now(); }
         else if (r.field === 'rate.principal') { changes.push({ assetId: a.id, field: 'rate.principal', delta: r.value - (+a.rate.principal || 0) }); a.rate.principal = r.value; }
         else if (r.field === 'unit_price') { a.price = { ...a.price, value: r.value, updatedAt: Date.now() }; }
         a.updatedAt = Date.now();
       }
-      for (const n of newAssets) assets.push({ ...n, id: n.id || uid('a'), createdAt: Date.now(), updatedAt: Date.now() });
+      for (const n of newAssets) {
+        const rec = { ...n, id: n.id || uid('a'), createdAt: Date.now(), updatedAt: Date.now() };
+        assets.push(rec);
+        const v = E.valueOf(rec, quotes, {}).signedValue; // 0 when its price isn't known yet; the next snapshot then becomes its start
+        if (v) changes.push({ assetId: rec.id, field: 'add', delta: 0, value: v });
+      }
       ev = { id: uid('e'), kind: 'capture', date: todayIso(), at: Date.now(), title: `ثبت از صفحه${source ? ' «' + source + '»' : ''}`, amount: 0, changes };
       return assets;
     });
-    if (ev && ev.changes.length) await store.update('events', (l) => [ev, ...l].slice(0, 500));
+    if (ev && ev.changes.length) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
     send('badge');
   },
 
@@ -88,11 +108,20 @@ export const act = {
   async saveChat(messages) { return store.save({ chat: { messages: messages.slice(-60) } }); },
 
   async deleteAsset(id) {
-    const { assets } = await store.load('assets');
+    const { assets, quotes } = await store.load('assets', 'quotes');
     const removed = assets.find((a) => a.id === id);
+    if (!removed) return;
     await store.update('assets', (list) => list.filter((x) => x.id !== id));
     await store.update('flows', (fl) => fl.map((f) => (f.fromId === id || f.toId === id ? { ...f, active: false } : f)));
-    toast(`«${removed?.name}» حذف شد`, { label: 'بازگردانی', fn: () => store.update('assets', (l) => [...l, removed]) });
+    // Log the value at removal: analysis then keeps the market effect up to now and treats the removal as bookkeeping.
+    const v = E.valueOf(removed, quotes, {}).signedValue;
+    const ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `حذف «${removed.name}»`, amount: 0, restore: removed, changes: [{ assetId: id, field: 'remove', delta: 0, value: -v }] };
+    await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
+    const restore = async () => {
+      await store.update('assets', (l) => (l.some((x) => x.id === id) ? l : [...l, removed]));
+      await store.update('events', (l) => l.map((e) => (e.id === ev.id ? { ...e, undone: true } : e)));
+    };
+    toast(`«${removed.name}» حذف شد`, { label: 'بازگردانی', fn: restore });
   },
 
   async saveFlow(f) {
@@ -107,7 +136,9 @@ export const act = {
   async deleteFlow(id) { await store.update('flows', (l) => l.filter((x) => x.id !== id)); },
 
   async undoEvent(ev) {
-    await store.update('assets', (assets) => E.undoEvent(assets, ev));
+    if (ev.noUndo) return;
+    if (ev.restore) await store.update('assets', (l) => (l.some((x) => x.id === ev.restore.id) ? l : [...l, ev.restore]));
+    else await store.update('assets', (assets) => E.undoEvent(assets, ev));
     await store.update('events', (evs) => evs.map((e) => (e.id === ev.id ? { ...e, undone: true } : e)));
     toast('رویداد برگشت داده شد');
   },
@@ -118,13 +149,15 @@ export const act = {
     await store.update('assets', (assets) => {
       const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
       const a = byId[assetId]; if (!a) return assets;
-      const amount = qty * price; const changes = [];
+      const changes = [];
       const q0 = +a.quantity || 0; const cb0 = +a.costBasis || 0;
+      // never sell more than is held; cash and the event follow the quantity actually sold
+      const sellQ = Math.min(qty, q0);
+      const amount = (side === 'buy' ? qty : sellQ) * price;
       if (side === 'buy') {
         a.quantity = q0 + qty; changes.push({ assetId, field: 'quantity', delta: qty });
         a.costBasis = cb0 + amount; changes.push({ assetId, field: 'costBasis', delta: amount });
       } else {
-        const sellQ = Math.min(qty, q0);
         a.quantity = q0 - sellQ; changes.push({ assetId, field: 'quantity', delta: -sellQ });
         const dc = q0 ? -cb0 * (sellQ / q0) : 0;
         if (cb0) { a.costBasis = cb0 + dc; changes.push({ assetId, field: 'costBasis', delta: dc }); }
@@ -134,7 +167,7 @@ export const act = {
       ev = { id: uid('e'), kind: 'trade', date: date || todayIso(), at: Date.now(), title: `${side === 'buy' ? 'خرید' : 'فروش'} «${a.name}»`, amount, fromId: side === 'buy' ? cashId : assetId, toId: side === 'buy' ? assetId : cashId, changes };
       return assets;
     });
-    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, 500));
+    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
   },
 
   /** Deposit/withdraw on a balance asset (logged) */
@@ -146,7 +179,21 @@ export const act = {
       ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: note || (delta >= 0 ? `واریز به «${a.name}»` : `برداشت از «${a.name}»`), amount: Math.abs(delta), toId: delta >= 0 ? a.id : null, fromId: delta < 0 ? a.id : null, changes };
       return assets;
     });
-    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, 500));
+    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
+  },
+
+  /** Move money between two balance accounts (logged, undoable; not counted as income or spending). */
+  async transfer({ fromId, toId, amount, note }) {
+    let ev;
+    await store.update('assets', (assets) => {
+      const f = assets.find((x) => x.id === fromId); const t = assets.find((x) => x.id === toId);
+      if (!f || !t || !(amount > 0)) return assets;
+      const changes = [...E.applyDelta(f, -amount), ...E.applyDelta(t, amount)];
+      f.updatedAt = t.updatedAt = Date.now();
+      ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: note || `انتقال از «${f.name}» به «${t.name}»`, amount, fromId, toId, changes };
+      return assets;
+    });
+    if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
   },
 
   async saveAlert(al) {

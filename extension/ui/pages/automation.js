@@ -144,7 +144,7 @@ export function AutomationPage({ st, pf, s, open }) {
           <span class="ava" style="background:var(--surface-3);color:var(--ink-2)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'trade' ? 'swap' : e.kind === 'capture' ? 'scan' : e.kind === 'adjust' || e.kind === 'edit' ? 'edit' : 'repeat'} /></span>
           <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${fmtJ(e.date)}، ${ago(e.at)}${e.undone ? '، برگشت داده شد' : ''}</div></div>
           ${e.amount ? html`<span class="small"><${Money} v=${e.amount} s=${s} compact /></span>` : ''}
-          ${!e.undone && e.changes?.length ? html`<button class="btn icon sm ghost" title="برگشت" onClick=${() => act.undoEvent(e)}><${Icon} n="undo" cls="sm" /></button>` : ''}</div>`)}</div>`
+          ${!e.undone && !e.noUndo && (e.changes?.length || e.restore) ? html`<button class="btn icon sm ghost" title="برگشت" onClick=${() => act.undoEvent(e)}><${Icon} n="undo" cls="sm" /></button>` : ''}</div>`)}</div>`
           : html`<div class="empty small">هنوز رویدادی ثبت نشده.</div>`}
       </div>
     </div>

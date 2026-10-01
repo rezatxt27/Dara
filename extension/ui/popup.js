@@ -2,6 +2,9 @@ import { html, render, useState, useMemo, useStore, useTick, Icon, Money, Delta,
 import * as E from '../lib/engine.js';
 import { ago, parseNum } from '../lib/format.js';
 import { act } from './actions.js';
+import { ProposalCard } from './proposals.js';
+import * as AI from '../lib/ai.js';
+import * as A from '../lib/assistant.js';
 import * as U from '../lib/update.js';
 
 const PRICES = [['tgju', 'geram18'], ['tgju', 'sekee'], ['tgju', 'nim'], ['tgju', 'price_dollar_rl'], ['tgju', 'price_eur'], ['nobitex', 'usdt'], ['nobitex', 'btc']];
@@ -28,6 +31,44 @@ function QuickRow({ r, s }) {
     ${r.status === 'stale' && html`<${StatusPill} status="stale" />`}
     <input class="input num-in qin" placeholder="مقدار جدید" value=${txt} onInput=${(e) => setTxt(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && save()} />
     <button class="btn icon sm" disabled=${!txt} onClick=${save}><${Icon} n="check" cls="sm" /></button>
+  </div>`;
+}
+
+/** «ثبت با یک جمله»: one sentence → reviewed changes, applied only after confirmation. */
+function QuickEntry({ st, s }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null); // {proposals, problems, question}
+  const conns = AI.orderedConnections(st.ai);
+  const go = async () => {
+    const t = text.trim(); if (!t || busy) return;
+    if (!conns.length) { toast('برای ثبت با یک جمله، اول یک اتصال هوش مصنوعی اضافه کن'); openApp('#/settings'); return; }
+    setBusy(true); setRes(null);
+    try {
+      const r = await AI.extract({ ai: st.ai, system: A.quickSystem(), prompt: A.quickPrompt(t, st.assets), maxTokens: 900 });
+      const out = A.quickProposals(r.json, st.assets, st.quotes);
+      if (!out.proposals.length && !out.problems.length && !out.question) out.question = 'از این جمله تغییری پیدا نشد؛ مثلاً بنویس «۲ گرم طلا خریدم گرمی ۲۵ میلیون از حساب الف».';
+      setRes(out);
+    } catch (e) { setRes({ proposals: [], problems: [e.message], question: null }); }
+    setBusy(false);
+  };
+  const setStatus = (id, status) => setRes((r) => {
+    const proposals = r.proposals.map((p) => (p.id === id ? { ...p, status } : p));
+    if (proposals.every((p) => p.status)) setTimeout(() => { setRes(null); setText(''); }, 1200);
+    return { ...r, proposals };
+  });
+  return html`<div class="pp-quick">
+    <div class="row" style="gap:6px">
+      <input class="input" placeholder="ثبت با یک جمله: «۲ گرم طلا خریدم گرمی ۲۵ میلیون»" value=${text} disabled=${busy}
+        onInput=${(e) => setText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && go()} />
+      <button class="btn icon sm primary" title="بررسی" disabled=${!text.trim() || busy} onClick=${go}><${Icon} n=${busy ? 'refresh' : 'sparkles'} cls=${'sm' + (busy ? ' spin' : '')} /></button>
+    </div>
+    ${res && html`<div class="col" style="gap:6px;margin-top:4px">
+      ${res.proposals.map((p) => html`<${ProposalCard} key=${p.id} p=${p} st=${st} s=${s} onStatus=${(stt) => setStatus(p.id, stt)} />`)}
+      ${res.problems.map((m) => html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${m}</div></div>`)}
+      ${res.question && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>${res.question}</div></div>`}
+    </div>`}
+    ${!res && !busy && html`<div class="xs faint" style="margin-top:4px">${conns.length ? 'قبل از ثبت، تغییر را برای تأیید نشانت می‌دهد. فقط نام دارایی‌ها فرستاده می‌شود، نه مبلغ‌ها.' : 'برای این قابلیت یک اتصال هوش مصنوعی لازم است.'}</div>`}
   </div>`;
 }
 
@@ -78,6 +119,7 @@ function Popup() {
       <div class="pp-leg">${cats.slice(0, 6).map((c) => html`<span><i style=${'background:' + c.color}></i>${c.short} <b class="num">${pct(c.share, { sign: false, digits: 0 })}</b></span>`)}</div>
     </div>
 
+    <${QuickEntry} st=${st} s=${s} />
     <button class="btn" style="justify-content:flex-start" onClick=${captureCurrent} title="موجودی‌های همین صفحه (بانک، کارگزاری، طلای آنلاین، صرافی) را بخوان"><${Icon} n="scan" cls="sm" />ثبت موجودی از این صفحه<span class="grow"></span><span class="xs muted">${st.ai.connections?.length ? 'با هوش مصنوعی' : 'دستی'}</span></button>
     ${att > 0 && html`<button class="callout warn" style="border:0;cursor:pointer;text-align:right" onClick=${() => setTab('quick')}><${Icon} n="alert" cls="sm" /><div><b class="num">${num(att)}</b> دارایی نیاز به به‌روزرسانی دارد — به‌روزرسانی سریع</div></button>`}
 

@@ -1,0 +1,24 @@
+body.popup { width: 392px; min-height: 540px; background: var(--bg); }
+.pp { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.pp-h { display: flex; align-items: center; gap: 8px; }
+.pp-h .logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(140deg, var(--violet) 10%, var(--cyan) 120%); display: grid; place-items: center; color: #fff; }
+.pp-h .logo svg { width: 16px; height: 16px; }
+.pp-h .nm { font-weight: 800; font-size: 16px; }
+.pp-hero { border-radius: 18px; padding: 14px 16px; color: #fff; position: relative; overflow: hidden;
+  background: radial-gradient(120% 140% at 0% 0%, var(--hero-glow) 0%, transparent 45%), linear-gradient(135deg, var(--hero-a), var(--hero-b)); box-shadow: 0 10px 28px rgba(75,43,209,.28); }
+.pp-hero .l { font-size: 12px; opacity: .75; font-weight: 600; }
+.pp-hero .v { font-size: 28px; font-weight: 800; line-height: 1.25; margin-top: 2px; }
+.pp-hero .v .u { font-size: 13px; opacity: .8; font-weight: 600; margin-inline-start: 4px; }
+.pp-hero .f { font-size: 11.5px; opacity: .7; }
+.pp-hero .r { display: flex; gap: 12px; margin-top: 10px; font-size: 11.5px; flex-wrap: wrap; opacity: .92; }
+.pp-hero .delta.up { color: #7CF5C4; } .pp-hero .delta.down { color: #FFB0C1; } .pp-hero .delta.flat { color: rgba(255,255,255,.7); }
+.pp-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.pp-leg { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; font-size: 11.5px; color: var(--ink-2); }
+.pp-leg span { display: inline-flex; align-items: center; gap: 5px; }
+.pp-leg i { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+.pp-row { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-bottom: 1px solid var(--line); font-size: 13px; min-width: 0; }
+.pp-row:last-child { border-bottom: 0; }
+.pp-tabs { display: flex; }
+.pp-tabs .seg { width: 100%; } .pp-tabs .seg button { flex: 1; }
+.pp-f { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted); padding: 0 2px; }
+.qin { height: 30px; width: 130px; font-size: 12px; }

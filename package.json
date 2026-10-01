@@ -1,0 +1,2 @@
+{ "name": "dara-asset-manager", "version": "1.1.0", "private": true, "type": "module",
+  "scripts": { "test": "node --test dev/tests/engine.test.mjs" } }

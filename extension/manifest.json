@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "دارا — مدیریت هوشمند دارایی",
+  "short_name": "دارا",
+  "version": "1.2.0",
+  "description": "ردیاب دارایی شخصی با قیمت زنده طلا، سکه، ارز، نقره و مس، بورس، صندوق و رمزارز؛ سود روزشمار و جریان‌های ماهانه خودکار؛ دستیار هوش مصنوعی.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "دارا",
+    "default_popup": "ui/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "ui/app.html#/settings",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "declarativeNetRequestWithHostAccess",
+    "activeTab",
+    "scripting",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "https://call1.tgju.org/*",
+    "https://api.tgju.org/*",
+    "https://cdn.tsetmc.com/*",
+    "https://fund.fipiran.ir/*",
+    "https://api.nobitex.ir/*",
+    "https://api.coingecko.com/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ]
+}

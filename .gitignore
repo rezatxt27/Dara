@@ -1,0 +1,7 @@
+node_modules/
+*.zip
+# personal financial data must never be committed
+*backup*.json
+dev/qa/.seed.json
+*.csv
+shots/

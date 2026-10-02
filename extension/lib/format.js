@@ -15,16 +15,33 @@ export const toEnDigits = (s) => String(s ?? '')
   .replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c))
   .replace(/[٠-٩]/g, (c) => '٠١٢٣٤٥٦٧٨٩'.indexOf(c));
 
-/** Parse a user-typed number ("۱٬۲۳۴٫۵", "1,234.5", "12 میلیون") */
+const WORD_SCALE = { 'هزار': 1e3, 'میلیون': 1e6, 'ملیون': 1e6, 'میلیارد': 1e9, 'ملیارد': 1e9, 'بیلیون': 1e9, 'تریلیون': 1e12 };
+/**
+ * Parse a user-typed number: "۱٬۲۳۴٫۵", "1,234.5", "12 میلیون", and compound amounts as people say them —
+ * "۱۲ میلیون و ۵۰۰ هزار" (12,500,000), "۲ میلیارد و ۳۰۰ میلیون", "۵ هزار میلیارد" (5e12).
+ */
 export function parseNum(input) {
   if (input === null || input === undefined) return NaN;
   if (typeof input === 'number') return input;
-  let s = toEnDigits(input).trim();
-  let mult = 1;
-  if (/میلیارد/.test(s)) mult = 1e9; else if (/میلیون/.test(s)) mult = 1e6; else if (/هزار/.test(s)) mult = 1e3;
-  s = s.replace(/[٬,\s]/g, '').replace(/٫/g, '.').replace(/[^\d.\-]/g, '');
-  if (!s || s === '-' || s === '.') return NaN;
-  return parseFloat(s) * mult;
+  let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/\u200c/g, ' ').trim();
+  const neg = /^-/.test(s);
+  // thousands separators inside a number go; Persian decimal mark becomes a dot; "12 500 000" joins up
+  s = s.replace(/(\d)[٬,](?=\d)/g, '$1').replace(/٫/g, '.').replace(/(\d)\s+(?=\d{3}(?!\d))/g, '$1');
+  const tokens = s.match(/\d+(?:\.\d+)?|\.\d+|هزار|میلیون|ملیون|میلیارد|ملیارد|بیلیون|تریلیون/g);
+  if (!tokens) return NaN;
+  if (!tokens.some((t) => t in WORD_SCALE)) {
+    const n = parseFloat(tokens.join(''));
+    return isFinite(n) ? (neg ? -n : n) : NaN;
+  }
+  // words: a scale multiplies the number before it ("۵ هزار میلیارد" multiplies twice); a new number after a scale
+  // starts the next part, and the parts add up ("۱۲ میلیون و ۵۰۰ هزار")
+  let total = 0, group = 0, scaled = false;
+  for (const t of tokens) {
+    if (t in WORD_SCALE) { group = (group || 1) * WORD_SCALE[t]; scaled = true; }
+    else { if (scaled) { total += group; group = 0; scaled = false; } group += parseFloat(t); }
+  }
+  total += group;
+  return neg ? -total : total;
 }
 
 export function num(n, digits = 0) {
@@ -46,6 +63,7 @@ export function compact(v) {
   if (a >= 1e12) return { n: nf(2).format(v / 1e12), s: 'هزار میلیارد' };
   if (a >= 1e9) return { n: nf(a >= 1e11 ? 1 : 2).format(v / 1e9), s: 'میلیارد' };
   if (a >= 1e6) return { n: nf(a >= 1e8 ? 0 : 1).format(v / 1e6), s: 'میلیون' };
+  if (a >= 1e4) return { n: nf(a >= 1e5 ? 0 : 1).format(v / 1e3), s: 'هزار' }; // same scale words next to each other
   return { n: nf0.format(v), s: '' };
 }
 

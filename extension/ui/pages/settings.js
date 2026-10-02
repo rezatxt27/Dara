@@ -27,10 +27,17 @@ function ImportPanel({ s, onDone, compact }) {
   const parse = (text) => {
     try {
       if (text.trim().startsWith('{')) {
-        const obj = JSON.parse(text);
-        setRes({ backup: obj, assets: obj.data?.assets || [], notes: [] });
-      } else setRes(importCSVText(text, { unit }));
-    } catch (e) { toast(e.message); }
+        let obj;
+        try { obj = JSON.parse(text); } catch { return toast('این فایل JSON خراب است و خوانده نشد'); }
+        const chk = store.checkBackup(obj);
+        if (!chk.ok) return toast(chk.error);
+        setRes({ backup: obj, assets: store.cleanList('assets', obj.data.assets), notes: chk.dropped ? [`${num(chk.dropped)} ردیف ناقص یا خراب کنار گذاشته شد.`] : [] });
+      } else {
+        const r = importCSVText(text, { unit });
+        if (!r.assets.length) return toast('در این فایل ردیفی که دارایی باشد پیدا نشد؛ ستون‌های «نام» و «مقدار» یا «ارزش» را بررسی کن');
+        setRes(r);
+      }
+    } catch (e) { toast(e.message || 'خواندن فایل ممکن نشد'); }
   };
   const onFile = async (e) => { const f = e.target.files?.[0]; if (!f) return; parse(await readFile(f)); e.target.value = ''; };
   const fromLink = async () => {
@@ -51,13 +58,25 @@ function ImportPanel({ s, onDone, compact }) {
     setBusy(false);
   };
   const commit = async (mode) => {
-    if (res.backup) { await store.importBackup(res.backup, { merge: mode === 'merge' }); }
-    else if (mode === 'replace') await store.save({ assets: res.assets });
-    else await store.update('assets', (l) => l.concat(res.assets));
-    await act.setSettings({ onboarded: true });
-    send('refresh');
-    toast(`${num(res.assets.length)} دارایی وارد شد؛ قیمت‌های آنلاین در حال دریافت است…`);
-    setRes(null); onDone && onDone();
+    try {
+      if (res.backup) await store.importBackup(res.backup, { merge: mode === 'merge' });
+      else {
+        await store.snapshotBeforeImport();
+        await store.mutate(['assets', 'meta'], (st) => {
+          // codes stay unique: imported rows that clash with an existing code get the next free one
+          let n = Math.max(+st.meta.lastCode || 0, ...st.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
+          const keep = mode === 'replace' ? [] : st.assets;
+          const used = new Set(keep.map((x) => x.code));
+          const add = res.assets.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
+          st.assets = keep.concat(add); st.meta = { ...st.meta, lastCode: n };
+        });
+      }
+      await act.setSettings({ onboarded: true });
+      send('refresh');
+      toast(`${num(res.assets.length)} دارایی وارد شد؛ قیمت‌های آنلاین در حال دریافت است…`,
+        { label: 'برگشت', fn: async () => { try { await store.undoImport(); toast('داده‌های قبل از ورود برگشت'); } catch (e) { toast(e.message); } } });
+      setRes(null); onDone && onDone();
+    } catch (e) { toast(e.message || 'ورود اطلاعات انجام نشد'); }
   };
   const pf = res ? E.portfolio(res.assets, {}, s) : null;
   return html`<div class="col" style="gap:12px">
@@ -76,7 +95,7 @@ function ImportPanel({ s, onDone, compact }) {
         <span class="grow"><span class="sb">${r.asset.name}</span> <span class="xs muted">${r.asset.custodian !== r.asset.name ? r.asset.custodian || '' : ''}</span>
           <div class="xs muted">${r.cat.short}، ${r.asset.mode === 'units' ? (r.asset.price?.source === 'market' ? 'قیمت آنلاین: ' + refLabel(r.asset.price.ref) : 'قیمت دستی') : r.asset.mode === 'rate' ? 'نرخ ثابت' : 'مانده'}${r.asset.review ? '، ⚠ ' + r.asset.review : ''}</div></span>
         <span class="small num"><${Money} v=${r.signedValue} s=${s} compact /></span></div>`)}</div></div>
-      <div class="row"><button class="btn primary" onClick=${() => commit('replace')}>جایگزینی دارایی‌های فعلی</button><button class="btn" onClick=${() => commit('merge')}>افزودن به دارایی‌های فعلی</button><span class="grow"></span><button class="btn ghost" onClick=${() => setRes(null)}>انصراف</button></div>
+      <div class="row"><button class="btn primary" onClick=${() => commit('replace')} title="دارایی‌های فعلی کنار می‌روند؛ تا چند ثانیه با «برگشت» قابل بازگشت است">${res.backup ? 'جایگزینی همه داده‌ها با این پشتیبان' : 'جایگزینی دارایی‌های فعلی'}</button><button class="btn" onClick=${() => commit('merge')}>افزودن به دارایی‌های فعلی</button><span class="grow"></span><button class="btn ghost" onClick=${() => setRes(null)}>انصراف</button></div>
     </div>`}
   </div>`;
 }
@@ -90,7 +109,7 @@ function sampleData() {
     { id: uid('a'), code: 'A-002', name: 'طلای آب‌شده', custodian: 'پلتفرم طلای آنلاین', category: 'gold_online', mode: 'units', quantity: 12.5, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: -1, factor: 1 }, liquidity: 'mid', costBasis: 2_400_000_000, createdAt: now, updatedAt: now },
     { id: uid('a'), code: 'A-003', name: 'ربع سکه', custodian: 'صندوق امانات', category: 'gold', mode: 'units', quantity: 3, unit: 'عدد', price: { source: 'market', ref: { provider: 'tgju', key: 'rob' } }, liquidity: 'mid', createdAt: now, updatedAt: now },
     { id: uid('a'), code: 'A-004', name: 'دلار نقد', custodian: 'خانه', category: 'fx', mode: 'units', quantity: 1200, unit: 'دلار', price: { source: 'market', ref: { provider: 'tgju', key: 'price_dollar_rl' } }, liquidity: 'high', createdAt: now, updatedAt: now },
-    { id: uid('a'), code: 'A-005', name: 'سپرده کوتاه‌مدت', custodian: 'بانک نمونه', category: 'fixed', mode: 'rate', rate: { principal: 3_000_000_000, annualPct: 23, start: addDaysIso(t, -40), mode: 'payout', payoutTo: bank.id }, liquidity: 'high', createdAt: now, updatedAt: now },
+    { id: uid('a'), code: 'A-005', name: 'سپرده کوتاه‌مدت', custodian: 'بانک نمونه', category: 'fixed', mode: 'rate', rate: { principal: 3_000_000_000, annualPct: 23, start: addDaysIso(t, -40), mode: 'payout', payoutTo: bank.id, lastPayout: E.prevMonthlyOnOrBefore(addDaysIso(t, -40), t) }, liquidity: 'high', createdAt: now, updatedAt: now },
     { id: uid('a'), code: 'A-006', name: 'تتر', custodian: 'صرافی', category: 'crypto', mode: 'units', quantity: 900, unit: 'USDT', price: { source: 'market', ref: { provider: 'nobitex', key: 'usdt' } }, liquidity: 'high', createdAt: now, updatedAt: now },
   ];
 }
@@ -107,9 +126,9 @@ export function WelcomePage({ st, s, open, inline }) {
       </div>
     </section>
     <div class="grid3">
-      <button class="card mode" style="padding:18px" onClick=${() => setStep('import')}><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="file" /></span><span class="mt" style="font-size:15px;margin-top:8px">ورود از گوگل‌شیت یا اکسل</span><span class="md">فایل CSV، لینک گوگل‌شیت یا پشتیبان دارا</span></button>
       <button class="card mode" style="padding:18px" onClick=${() => { act.setSettings({ onboarded: true }); open(null); }}><span class="ava" style="background:var(--pos-bg);color:var(--pos)"><${Icon} n="plus" /></span><span class="mt" style="font-size:15px;margin-top:8px">شروع از صفر</span><span class="md">اولین دارایی را دستی اضافه کن</span></button>
-      <button class="card mode" style="padding:18px" onClick=${async () => { await store.save({ assets: sampleData() }); await act.setSettings({ onboarded: true }); send('refresh'); toast('داده نمونه بارگذاری شد'); location.hash = '#/overview'; }}><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="sparkles" /></span><span class="mt" style="font-size:15px;margin-top:8px">دیدن با داده نمونه</span><span class="md">برای آشنایی؛ بعداً از تنظیمات پاک کن</span></button>
+      <button class="card mode" style="padding:18px" onClick=${() => setStep('import')}><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="file" /></span><span class="mt" style="font-size:15px;margin-top:8px">ورود از گوگل‌شیت یا اکسل</span><span class="md">فایل CSV، لینک گوگل‌شیت یا پشتیبان دارا</span></button>
+      <button class="card mode" style="padding:18px" onClick=${async () => { await store.locked(() => store.save({ assets: sampleData() })); await act.setSettings({ onboarded: true }); send('refresh'); toast('داده نمونه بارگذاری شد'); location.hash = '#/overview'; }}><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="sparkles" /></span><span class="mt" style="font-size:15px;margin-top:8px">دیدن با داده نمونه</span><span class="md">برای آشنایی؛ بعداً از تنظیمات پاک کن</span></button>
     </div>
     ${step === 'import' && html`<div class="card"><div class="card-h"><h3>ورود اطلاعات</h3></div><${ImportPanel} s=${s} onDone=${() => (location.hash = '#/overview')} /></div>`}
   </div>`;
@@ -198,7 +217,6 @@ export function SettingsPage({ st, pf, s }) {
   };
   const ver = hasChrome ? chrome.runtime.getManifest().version : 'dev';
   return html`<div class="page" style="max-width:900px">
-    <${UpdateCard} s=${s} />
     <div class="card"><div class="card-h"><h3><${Icon} n="eye" cls="sm" />نمایش</h3></div>
       <${Row} t="واحد نمایش مبالغ" d="همه مبالغ داخلی به ریال ذخیره می‌شوند"><${Seg} value=${s.currency} onChange=${(v) => set({ currency: v })} options=${[['toman', 'تومان'], ['rial', 'ریال']]} /></${Row}>
       <${Row} t="ارقام"><${Seg} value=${s.digits} onChange=${(v) => set({ digits: v })} options=${[['fa', '۱۲۳ فارسی'], ['en', '123 لاتین']]} /></${Row}>
@@ -231,6 +249,8 @@ export function SettingsPage({ st, pf, s }) {
       <hr class="sep" />
       <div class="row between"><div><div class="sb neg">پاک‌کردن همه داده‌ها</div><div class="xs muted">غیرقابل برگشت</div></div><button class="btn danger" onClick=${wipe}><${Icon} n="trash" cls="sm" />پاک‌کردن</button></div>
     </div>
+
+    <${UpdateCard} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="lock" cls="sm" />حریم خصوصی و درباره</h3><span class="sub num">نسخه ${ver}</span></div>
       <div class="small ink2" style="line-height:2">همه اطلاعات دارایی‌ها فقط در حافظه همین مرورگر (chrome.storage) ذخیره می‌شود و به هیچ سروری ارسال نمی‌شود. دارا فقط قیمت‌های عمومی را از tgju، TSETMC، فیپیران و نوبیتکس می‌خواند. برای انتقال به دستگاه دیگر از پشتیبان JSON استفاده کن.</div>

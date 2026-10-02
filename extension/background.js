@@ -38,7 +38,10 @@ async function schedule() {
   if (!cur || cur.periodInMinutes !== period) await chrome.alarms.create('refresh', { periodInMinutes: period, delayInMinutes: 0.1 });
   if (!(await chrome.alarms.get('daily'))) await chrome.alarms.create('daily', { periodInMinutes: 60 * 6, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('weekly'))) await chrome.alarms.create('weekly', { periodInMinutes: 60 * 2, delayInMinutes: 3 });
-  if (!(await chrome.alarms.get('selfupdate'))) await chrome.alarms.create('selfupdate', { periodInMinutes: 1, delayInMinutes: 1 });
+  // only a folder install («Load unpacked») updates by copying files; a packed install never needs the 1-minute check
+  let dev = true; try { dev = (await chrome.management.getSelf()).installType === 'development'; } catch (e) { /* unknown: keep checking */ }
+  if (dev && !(await chrome.alarms.get('selfupdate'))) await chrome.alarms.create('selfupdate', { periodInMinutes: 1, delayInMinutes: 1 });
+  if (!dev) await chrome.alarms.clear('selfupdate');
 }
 
 /* ------------------------------ self-update ------------------------------ */
@@ -47,8 +50,9 @@ async function schedule() {
 async function checkSelfUpdate() {
   const v = await U.pendingVersion();
   if (!v) return { pending: null };
-  const tabs = await U.openTabUrls();
-  if (!tabs.length) { await U.applyUpdate(null); return { pending: v, applied: true }; }
+  const tabs = await U.openTabUrls(); const popup = await U.popupOpen();
+  // nothing open (and Chrome could tell): reload now; otherwise the open page or popup applies it on its next load
+  if (tabs && !tabs.length && popup === false) { await U.applyUpdate(null); return { pending: v, applied: true }; }
   chrome.runtime.sendMessage({ type: 'update-available', version: v }).catch(() => {});
   return { pending: v };
 }
@@ -59,7 +63,7 @@ async function afterUpdate(prev) {
   const fresh = updateState && Date.now() - updateState.at < 5 * 60000 ? updateState.reopen || [] : [];
   if (fresh.length) {
     // Reloading closes our pages; bring them back where they were.
-    const open = await U.openTabUrls();
+    const open = (await U.openTabUrls()) || [];
     for (const [i, url] of fresh.entries()) if (!open.includes(url)) chrome.tabs.create({ url, active: i === fresh.length - 1 });
   } else if (prev && prev !== cur) {
     chrome.notifications?.create('dara-update', { type: 'basic', iconUrl: 'icons/icon128.png', title: 'دارا به‌روز شد', message: `نسخه ${cur} نصب شد؛ داده‌هایت سر جایشان است.`, priority: 0 });

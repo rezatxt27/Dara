@@ -9,6 +9,17 @@ import { CAT, EXPOSURES, LIQUIDITY, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } fro
 import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
 import { num } from './format.js';
 
+/**
+ * How much the market moved your net worth over `days` (money you added, moved or recorded is left out), plus the raw
+ * total. One definition used by the dashboard, the sidebar and the popup. Falls back to today's live estimate.
+ */
+export function marketMove(st, pf, days = 1) {
+  const att = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, days, todayIso(), pf);
+  if (!att) return days === 1 ? { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true } : null;
+  const base = Math.abs(att.base) || 0;
+  return { abs: att.market, pct: base ? att.market / base : 0, total: att.total, moved: att.total - att.market };
+}
+
 const MODE_NAME = { payout: 'روزشمار، سود ماهانه واریز می‌شود', compound: 'روزشمار مرکب', simple: 'روزشمار ساده' };
 const basisName = (b) => (b === 'actual' ? 'طول واقعی سال شمسی' : `${b || 365} روز`);
 

@@ -1,6 +1,7 @@
 // Dara assistant: system prompt, portfolio tools, weekly report and page-capture prompts.
 import * as E from './engine.js';
 import * as I from './insights.js';
+import * as AI from './ai.js';
 import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
@@ -296,8 +297,8 @@ export function captureSystem() {
 }
 export function capturePrompt(page, assets, quotesUnitHint) {
   const list = assets.filter((a) => !a.archived).map((a) => ({ id: a.id, name: a.name, symbol: refSymbol(a) || undefined, custodian: a.custodian || '', category: CAT[a.category]?.short, mode: a.mode, unit: a.unit || (a.mode === 'balance' ? 'ریال' : '') }));
-  return `صفحه: ${page.title || ''} — ${page.url || ''}
-${page.selection ? `متن انتخاب‌شده توسط کاربر (اولویت با این است):\n${page.selection}\n` : ''}
+  return `صفحه: ${AI.maskSensitive(page.title || '')} — ${AI.safeUrl(page.url || '')}
+${page.selection ? `متن انتخاب‌شده توسط کاربر (اولویت با این است):\n${AI.maskSensitive(page.selection)}\n` : ''}
 دارایی‌های فعلی کاربر (برای تطبیق):
 ${JSON.stringify(list)}
 

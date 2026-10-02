@@ -57,7 +57,7 @@ async def main():
             txt = await pg.inner_text(D + '.grid3')
             check('editor shows the bank-formula installment', '9' in txt.translate(FA) and 'قسط ماهانه' in txt, txt.replace('\n', ' | ')[:120])
             await pg.select_option(D + '.field:has-text("قسط‌ها از کدام حساب") select', 'bankA')
-            await pg.click(D + '.seg >> text=به یکی از حساب‌هایم واریز شد'); await pg.wait_for_timeout(200)
+            await pg.click(D + '.seg >> text=به حسابم واریز شد'); await pg.wait_for_timeout(200)
             await pg.select_option(D + '.field:has-text("واریز به حساب") select', 'bankB')
             await pg.screenshot(path=f'{SH}/loan-editor-{THEME}.png', full_page=True)
             await pg.click(D + 'button:has-text("افزودن")'); await pg.wait_for_timeout(800)
@@ -73,7 +73,6 @@ async def main():
 
         async def t_schedule_and_pay():
             await pg.click('tr.r:has-text("وام آزمایشی")'); await pg.wait_for_timeout(400)
-            await pg.click('tr.xrow button:has-text("جدول اقساط")'); await pg.wait_for_timeout(300)
             n = await pg.locator('tr.xrow .sched tbody tr').count()
             check('schedule lists every installment', n == 12, n)
             await pg.screenshot(path=f'{SH}/loan-row-{THEME}.png', full_page=True)
@@ -82,7 +81,7 @@ async def main():
             await pg.click('tr.xrow button:has-text("پرداخت اضافه یا تسویه")'); await pg.wait_for_timeout(300)
             await pg.fill('.modal .field:has-text("مبلغ") input >> nth=0', '10,000,000'); await pg.wait_for_timeout(200)
             hint = await pg.inner_text('.modal')
-            check('pay modal previews fewer installments', 'قسط باقی می‌ماند' in hint, hint[-120:].replace('\n', ' '))
+            check('pay modal previews fewer installments', 'قسط می‌ماند' in hint and 'به‌جای' in hint, hint[-120:].replace('\n', ' '))
             await pg.select_option('.modal select', 'bankA'); await pg.click('.modal button:has-text("ثبت")'); await pg.wait_for_timeout(700)
             v1 = (await pf(pg))['rows'][id_]['v']; a1 = next(x for x in await get(pg, 'assets') if x['id'] == 'bankA')['balance']
             ev = (await get(pg, 'events'))[0]
@@ -124,7 +123,7 @@ async def main():
             await pg.click(D + '.opt:has-text("ربع سکه")'); await pg.wait_for_timeout(300)
             await pg.fill(D + '.field:has-text("نام دارایی") input', 'ربع سکه آزمایشی')
             await pg.fill(D + '.field:has-text("مقدار") input', '2'); await pg.wait_for_timeout(300)
-            await pg.click(D + '.seg >> text=از یکی از حساب‌هایم پرداخت کردم'); await pg.wait_for_timeout(200)
+            await pg.click(D + '.seg >> text=از حسابم پرداختم'); await pg.wait_for_timeout(200)
             await pg.select_option(D + '.field:has-text("پرداخت از حساب") select', 'bankB'); await pg.wait_for_timeout(200)
             amt = await pg.input_value(D + '.field:has-text("مبلغ پرداختی") input')
             check('amount paid defaults to today\'s value', amt.translate(FA).replace(',', '') == '146000000', amt)
@@ -164,7 +163,7 @@ async def main():
             await pg.fill(D + '.field:has-text("نرخ سود سالانه") input', '0')
             await pg.fill(D + '.field:has-text("تعداد اقساط") input', '6')
             await pg.select_option(D + '.field:has-text("قسط‌ها به کدام حساب") select', 'bankA')
-            await pg.click(D + '.seg >> text=از یکی از حساب‌هایم پرداخت کردم'); await pg.select_option(D + '.field:has-text("پرداخت از حساب") select', 'bankA')
+            await pg.click(D + '.seg >> text=از حسابم پرداختم'); await pg.select_option(D + '.field:has-text("پرداخت از حساب") select', 'bankA')
             await pg.click(D + 'button:has-text("افزودن")'); await pg.wait_for_timeout(800)
             a = await by_name(pg, 'قرض قسطی به دوست'); a1 = next(x for x in await get(pg, 'assets') if x['id'] == 'bankA')['balance']
             P = await pf(pg)

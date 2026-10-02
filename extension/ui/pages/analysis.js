@@ -11,7 +11,7 @@ import { act } from '../actions.js';
 /* Plain-language help for each section (for people new to these ideas). */
 const TIPS = {
   perf: ['واقعاً پولدارتر شدم؟', 'نشان می‌دهد دارایی‌هایت در این دوره واقعاً چقدر رشد کرده‌اند. پولی که خودت اضافه کرده‌ای (مثل حقوق یا واریز) سود حساب نمی‌شود. بعد همان پول، با همان تاریخ‌ها، در سه حالت دیگر هم حساب می‌شود: اگر همه را طلا، دلار یا سپرده نگه داشته بودی. «جلوتری» یعنی ترکیب دارایی‌هایت از آن حالت بهتر عمل کرده.', 'اگر طلا در این مدت ۲۰٪ رشد کرده و دارایی تو ۱۵٪، از «طلا» عقب‌تری.'],
-  deposit: ['نرخ سپرده برای مقایسه', 'سود سالانه‌ای که بانک یا صندوق درآمد ثابت واقعاً به تو می‌دهد. برای مقایسه منصفانه، نرخی را بگذار که خودت به آن دسترسی داری.'],
+  deposit: ['نرخ سپرده برای مقایسه', 'سود سالانه‌ای که بانک یا صندوق درآمد ثابت واقعاً به تو می‌دهد. برای مقایسه منصفانه، نرخی را بگذار که خودت به آن دسترسی داری. این نرخ مثل سپرده بانکی حساب می‌شود: سود هر ماه دوباره سپرده می‌شود؛ پس سپرده ۲۵٪ در عمل حدود ۲۸٪ در سال رشد می‌کند. بازدهی که صندوق‌ها «سالانه مؤثر» اعلام می‌کنند از قبل همین را دارد.'],
   scenario: ['شبیه‌ساز سناریو', 'می‌بینی اگر قیمت‌ها تغییر کنند، ارزش دارایی‌هایت چه می‌شود. لغزنده‌ها را جابه‌جا کن، یکی از سناریوهای آماده را بزن، یا اتفاق را با یک جمله بنویس تا فرض‌ها خودکار ساخته شوند. این پیش‌بینی نیست؛ فقط حساب «اگر … شود» است.', '«اگر دلار ۳۰٪ گران شود» را امتحان کن و ببین کدام دارایی‌ها بیشتر اثر می‌گیرند.'],
   terms: ['بر حسب دلار و طلا', 'ارزش دارایی‌هایت را با دلار یا طلا می‌سنجد، نه تومان. اگر ارزش تومانی بالا برود ولی این عدد منفی شود، یعنی با پولت دلار یا طلای کمتری می‌توانی بخری؛ قدرت خریدت کم شده.'],
   ounce: ['انس جهانی طلا', 'قیمت جهانی هر اونس (حدود ۳۱ گرم) طلا به دلار. قیمت طلای داخل ایران تقریباً برابر است با انس × نرخ دلار؛ پس هر دو روی طلای تو اثر دارند.'],
@@ -35,7 +35,7 @@ const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲�
 function Performance({ st, pf, s }) {
   const [days, setDays] = useState(90);
   const dep = I.defaultDepositPct(st);
-  const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st, pf, days, dep]);
+  const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
     <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="توضیح بده" />`}
@@ -149,7 +149,7 @@ function Critique({ st, pf, s }) {
       const res = await AI.extract({ ai: st.ai, system: A.critiqueSystem(), prompt: A.critiquePrompt(facts), maxTokens: 1200 });
       const points = A.parseCritique(res.json);
       if (!points.length) throw new Error('پاسخ مدل نکته‌ای نداشت؛ دوباره امتحان کن');
-      await store.save({ critique: { at: Date.now(), points, by: `${res.conn.name}، ${res.model}` } });
+      await store.locked(() => store.save({ critique: { at: Date.now(), points, by: `${res.conn.name}، ${res.model}` } }));
     } catch (e) { setErr(e.message); }
     setBusy(false);
   };
@@ -249,7 +249,7 @@ function Scenario({ st, pf, s }) {
     setNlBusy(false);
   };
   const shocks = Object.fromEntries(Object.entries(sh).map(([k, v]) => [k, v / 100]));
-  const r = useMemo(() => E.simulate(st.assets, st.quotes, s, shocks, pf), [st, pf, JSON.stringify(sh)]);
+  const r = useMemo(() => E.simulate(st.assets, st.quotes, s, shocks, pf), [st.assets, st.quotes, pf, JSON.stringify(sh)]);
   const set = (k) => (v) => { setPreset(null); setSh((x) => ({ ...x, [k]: v })); };
   const pick = (sc) => { setPreset(sc.id); setSh({ ...ZERO, ...Object.fromEntries(Object.entries(sc.shocks).map(([k, v]) => [k, Math.round(v * 100)])) }); };
   const goldLocal = ((1 + sh.usd / 100) * (1 + sh.gold / 100) - 1) * 100;

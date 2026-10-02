@@ -1,7 +1,7 @@
-import { html, useState, useTick, Icon, Money, Ava, Modal, Seg, NumField, MoneyField, JDateField, Toggle, toast, num, pct, fmtJ } from '../components.js';
+import { html, useState, useTick, Icon, Money, Ava, Modal, Seg, NumField, MoneyField, JDateField, Toggle, StatusPill, toast, num, pct, fmtJ } from '../components.js';
 import { CAT, FLOW_TEMPLATES } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
-import { todayIso, isoToJ, addDaysIso } from '../../lib/jalali.js';
+import { todayIso, isoToJ, addDaysIso, isoFromDate } from '../../lib/jalali.js';
 import { uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
 
@@ -35,6 +35,8 @@ function FlowModal({ st, s, flow, onClose }) {
   const [confirmPast, setConfirmPast] = useState(false);
   const save = async () => {
     if (!f.title.trim() || !(f.amount > 0) || (!f.fromId && !f.toId)) return toast('عنوان، مبلغ و دست‌کم یکی از حساب‌های مبدأ/مقصد لازم است');
+    if (f.fromId && f.fromId === f.toId) return toast('حساب مبدأ و مقصد یکی است');
+    if (f.end && f.start && f.end < f.start) return toast('تاریخ پایان باید بعد از تاریخ شروع باشد');
     const out = { ...f, fromId: f.fromId || null, toId: f.toId || null };
     if (!flow && past > 0 && !confirmPast) { out.lastRun = todayIso(); out.done = past; } // don't back-apply old occurrences unless asked
     await act.saveFlow(out); onClose();
@@ -75,7 +77,8 @@ export function AutomationPage({ st, pf, s, open }) {
   const sugg = suggestions(st, pf);
   const up = E.upcoming(st.assets, st.flows, 45);
   const auto = E.monthlyAuto(st.assets, st.flows);
-  const events = st.events.slice(0, 40);
+  const [moreEv, setMoreEv] = useState(false);
+  const events = st.events.slice(0, moreEv ? 200 : 12);
   const nm = (id) => (id && byId[id] ? byId[id].name : null);
 
   return html`<div class="page">
@@ -112,11 +115,13 @@ export function AutomationPage({ st, pf, s, open }) {
         })}</div>`}
         ${rates.length ? html`<div class="list">${rates.map((r) => {
           const a = r.asset, rt = a.rate;
-          const accrued = rt.mode === 'payout' ? r.value - rt.principal : r.value - rt.principal;
-          const next = rt.mode === 'payout' ? E.nextMonthlyAfter(rt.start, rt.start > todayIso() ? rt.start : todayIso()) : null;
+          const accrued = r.value - rt.principal;
+          const matured = r.status === 'matured';
+          const next = rt.mode === 'payout' && !matured ? E.nextMonthlyAfter(rt.start, rt.start > todayIso() ? rt.start : todayIso()) : null;
           return html`<div class="it" style="cursor:pointer;align-items:flex-start" onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
             <div class="grow"><div class="sb">${a.name}</div>
               <div class="xs muted">روزشمار ${num(rt.annualPct, 2)}٪، ${rt.mode === 'payout' ? 'واریز ماهانه' : rt.mode === 'compound' ? 'مرکب' : 'ساده'}، سود هر روز <${Money} v=${E.rateDaily(rt, r.value)} s=${s} compact />، اصل <${Money} v=${rt.principal} s=${s} compact />${rt.maturity ? '، سررسید ' + fmtJ(rt.maturity) : ''}</div>
+              ${matured && html`<div class="xs" style="margin-top:3px"><${StatusPill} status="matured" /> از ${fmtJ(rt.maturity)} سودی نمی‌گیرد؛ در صفحه دارایی‌ها منتقل یا تمدیدش کن.</div>`}
               ${rt.mode === 'payout' && next && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(next, 'dm')} — حدود <${Money} v=${E.rateMonthly(rt, r.value)} s=${s} compact /> به ${rt.payoutTo && rt.payoutTo !== 'self' ? (nm(rt.payoutTo) || 'حساب حذف‌شده') : 'خود دارایی'}</div>`}</div>
             <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${accrued} s=${s} unit=${false} /> سود ${rt.mode === 'payout' ? 'این دوره' : 'تاکنون'}</div></div></div>`;
         })}</div>` : !banks.length ? html`<div class="empty small">سپرده، صندوق درآمد ثابت یا شراکتی که سود سالانه مشخص دارد را اضافه کن؛ سودش هر روز حساب و به ارزش اضافه می‌شود. برای حساب کوتاه‌مدت بانکی، «سود روزشمار» را در خود حساب روشن کن.</div>` : ''}
@@ -129,21 +134,25 @@ export function AutomationPage({ st, pf, s, open }) {
           <div class="grow" style="cursor:pointer" onClick=${() => setFlowEdit({ flow: f })}><div class="sb">${f.title}</div>
             <div class="xs muted">${f.freq === 'monthly' ? `ماهانه، روز ${num(f.day)}` : f.freq === 'weekly' ? 'هفتگی' : 'سالانه'}، ${nm(f.fromId) || 'بیرون'} ← ${nm(f.toId) || 'بیرون'}${f.count ? `، ${num(f.done || 0)} از ${num(f.count)}` : ''}${f.lastRun ? '، آخرین: ' + fmtJ(f.lastRun, 'dm') : ''}</div></div>
           <span class="small sb"><${Money} v=${f.amount} s=${s} compact /></span>
-          <${Toggle} on=${f.active} onChange=${(v) => act.saveFlow({ ...f, active: v, lastRun: v && !f.active ? todayIso() : f.lastRun })} title="فعال/غیرفعال" /></div>`)}</div>`
+          <${Toggle} on=${f.active} onChange=${(v) => {
+            // turned back on: what fell while it was off isn't replayed, but today's (if due) still runs
+            const y = addDaysIso(todayIso(), -1);
+            act.saveFlow({ ...f, active: v, ...(v && !f.active && (f.lastRun || '') < y ? { resetFrom: y } : {}) });
+          }} title=${f.active ? 'فعال؛ برای توقف بزن' : 'متوقف؛ برای فعال کردن بزن'} /></div>`)}</div>`
           : html`<div class="empty small">حقوق ماهانه، قسط وام، اجاره، یا «هر ماه ۵ میلیون طلا بخر» را تعریف کن تا خودکار روی حساب‌ها اعمال شود.</div>`}
       </div>
     </div>
 
     ${loans.length > 0 && html`<div class="card">
       <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />وام‌ها و طلب‌های قسطی</h3><span class="sub">قسط‌ها در موعد خودکار ثبت می‌شوند</span></div>
-      <div class="list">${loans.map((r) => {
+      <div class="list">${loans.slice().sort((x, y) => (E.loanState(x.asset.loan).done ? 1 : 0) - (E.loanState(y.asset.loan).done ? 1 : 0)).map((r) => {
         const a = r.asset; const ls = E.loanState(a.loan); const liab = r.cat.liability;
-        return html`<div class="it" style="cursor:pointer;align-items:flex-start" onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
+        return html`<div class="it" style=${'cursor:pointer;align-items:flex-start' + (ls.done ? ';opacity:.6' : '')} onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
           <div class="grow"><div class="sb">${a.name}</div>
             <div class="xs muted">${ls.done ? 'تسویه شده' : html`قسط <${Money} v=${ls.next.payment} s=${s} compact />، ${num(ls.paid)} از ${num(ls.n)} پرداخت شده، سود ${num(+a.loan.annualPct || 0, 2)}٪`}</div>
             ${!ls.done && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> قسط بعدی ${fmtJ(ls.next.date, 'dm')} — ${liab ? 'از' : 'به'} ${a.loan.account ? nm(a.loan.account) || 'حساب حذف‌شده' : 'حسابی ثبت نشده'}</div>`}
             ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round(ls.paid / ls.n * 100)}%;background:${r.cat.color}`}></i></div>`}</div>
-          <div style="text-align:left"><div class="sb"><${Money} v=${liab ? -r.value : r.value} s=${s} /></div><div class="xs muted">${liab ? 'مانده بدهی' : 'مانده طلب'}</div></div></div>`;
+          <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></div><div class="xs muted">${liab ? 'مانده بدهی' : 'مانده طلب'}</div></div></div>`;
       })}</div>
     </div>`}
 
@@ -157,10 +166,11 @@ export function AutomationPage({ st, pf, s, open }) {
       <div class="card"><div class="card-h"><h3><${Icon} n="clock" cls="sm" />گزارش رویدادها</h3><span class="sub">قابل برگشت</span></div>
         ${events.length ? html`<div class="list">${events.map((e) => html`<div class="it" style=${e.undone ? 'opacity:.45' : ''}>
           <span class="ava" style="background:var(--surface-3);color:var(--ink-2)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'loan' ? 'calendar' : e.kind === 'trade' ? 'swap' : e.kind === 'capture' ? 'scan' : e.kind === 'adjust' || e.kind === 'edit' ? 'edit' : 'repeat'} /></span>
-          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${fmtJ(e.date)}، ${ago(e.at)}${e.undone ? '، برگشت داده شد' : e.reversedBy ? '، برگشت خورد' : ''}</div></div>
+          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${fmtJ(e.date)}${e.at && isoFromDate(new Date(e.at)) !== e.date ? ` (ثبت: ${ago(e.at)})` : ''}${e.undone ? '، برگشت داده شد' : e.reversedBy ? '، برگشت خورد' : ''}</div></div>
           ${e.amount ? html`<span class="small"><${Money} v=${e.amount} s=${s} compact /></span>` : ''}
           ${!e.undone && !e.noUndo && !e.reversedBy && (e.changes?.length || e.restore) ? html`<button class="btn icon sm ghost" title="برگشت" onClick=${() => act.undoEvent(e)}><${Icon} n="undo" cls="sm" /></button>` : ''}</div>`)}</div>`
           : html`<div class="empty small">هنوز رویدادی ثبت نشده.</div>`}
+        ${st.events.length > events.length && html`<button class="btn sm ghost" style="margin-top:6px" onClick=${() => setMoreEv(true)}>نمایش بیشتر (${num(Math.min(200, st.events.length) - events.length)} مورد)</button>`}
       </div>
     </div>
     ${flowEdit && html`<${FlowModal} st=${st} s=${s} flow=${flowEdit.flow} onClose=${() => setFlowEdit(null)} />`}

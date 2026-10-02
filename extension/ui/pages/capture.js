@@ -5,7 +5,7 @@ import * as A from '../../lib/assistant.js';
 import * as E from '../../lib/engine.js';
 import { CAT } from '../../lib/catalog.js';
 import { parseNum, toEnDigits, uid, ago } from '../../lib/format.js';
-import { act } from '../actions.js';
+import { act, doneToast } from '../actions.js';
 
 const hostOf = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch { return ''; } };
 
@@ -101,11 +101,12 @@ export function CapturePage({ st, s }) {
     if (!chosen.length) return toast('موردی برای ثبت انتخاب نشده');
     const updates = chosen.filter((r) => !r.create);
     const where = meta?.site && !/^https?:/.test(meta.site) ? meta.site : site;
-    const news = chosen.filter((r) => r.create).map((r) => A.newAssetFromCapture(r, { site: where, category: r.category, id: uid('a') }));
-    await act.applyCapture(updates, news, where);
+    // numbers picked by hand are in the unit the app shows (toman or rial)
+    const news = chosen.filter((r) => r.create).map((r) => A.newAssetFromCapture(r.manual && !r.moneyUnit ? { ...r, moneyUnit: s.currency === 'rial' ? 'rial' : 'toman' } : r, { site: where, category: r.category, id: uid('a') }));
+    const ev = await act.applyCapture(updates, news, where);
     await chrome.storage.session.remove('capture');
     const priced = news.filter((n) => n.price?.source === 'market').length;
-    toast(`${num(updates.length + news.length)} مورد ثبت شد${priced ? `؛ قیمت ${num(priced)} دارایی جدید خودکار گرفته می‌شود` : ''}`);
+    doneToast(`${num(updates.length + news.length)} مورد ثبت شد${priced ? `؛ قیمت ${num(priced)} دارایی جدید خودکار گرفته می‌شود` : ''}`, ev);
     if (priced) send('refresh');
     location.hash = '#/assets';
   };
@@ -158,7 +159,7 @@ export function CapturePage({ st, s }) {
               ${r.manual && a && a.mode === 'units' && html`<select class="input" value=${r.field} onChange=${(e) => setRow(r.key, { field: e.target.value })}><option value="quantity">مقدار</option>${a.price?.source !== 'market' ? html`<option value="unit_price">قیمت واحد</option>` : ''}</select>`}
             </div>
             <span class="small">${r.create ? html`<span class="muted">جدید</span>` : fmtV(r.current)}</span>
-            <span class="small sb">${r.create ? (r.kind === 'quantity' ? `${num(r.amount, 'auto')} ${r.unit || ''}` : html`<${Money} v=${(r.moneyUnit === 'toman' ? 10 : 1) * r.amount} s=${s} compact />`) : fmtV(r.value)}
+            <span class="small sb">${r.create ? (r.kind === 'quantity' ? `${num(r.amount, 'auto')} ${r.unit || ''}` : html`<${Money} v=${((r.moneyUnit || (r.manual && s.currency !== 'rial' ? 'toman' : 'rial')) === 'toman' ? 10 : 1) * r.amount} s=${s} compact />`) : fmtV(r.value)}
               ${!r.create && r.current !== null && r.value !== null && Math.abs(r.value - r.current) > 1e-9 ? html`<div class=${'xs ' + (r.value >= r.current ? 'pos' : 'neg')}>${r.value >= r.current ? '▲' : '▼'} ${r.current ? num(Math.abs(r.value / r.current - 1) * 100, 1) + '٪' : ''}</div>` : !r.create && r.assetId ? html`<div class="xs muted">بدون تغییر</div>` : ''}</span>
           </div>`;
         })}

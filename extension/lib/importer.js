@@ -165,7 +165,12 @@ export function importRows(rows, opts = {}) {
 export function importCSVText(text, opts) { return importRows(parseCSV(text), opts); }
 
 /* --------------------------- export --------------------------- */
-const esc = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+// a text cell that a spreadsheet would run as a formula (=, +, -, @) gets a leading apostrophe; plain numbers stay numbers
+const esc = (v) => {
+  let s = String(v ?? '');
+  if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s) && !/^-?\d[\d.,]*$/.test(s)) s = "'" + s;
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
 export function toCSV(rows) {
   const head = ['کد', 'دسته', 'نام', 'محل نگهداری', 'روش ارزش‌گذاری', 'مقدار', 'واحد', 'قیمت واحد (ریال)', 'ارزش روز (ریال)', 'بهای تمام‌شده (ریال)', 'سود/زیان (ریال)', 'منبع قیمت', 'وضعیت', 'یادداشت'];
   const lines = [head.map(esc).join(',')];

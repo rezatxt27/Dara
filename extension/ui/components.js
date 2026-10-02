@@ -34,9 +34,10 @@ export function useStore() {
   const [st, setSt] = useState(null);
   useEffect(() => {
     let alive = true;
-    store.loadAll().then((s) => { if (alive) { applyTheme(s.settings); setSt(s); } });
+    // the price-history cache isn't shown anywhere and the chat page keeps its own copy: their writes don't re-render
+    store.loadAll().then((s) => { if (alive) { delete s.history; applyTheme(s.settings); setSt(s); } });
     const off = store.onChanged(async (changes) => {
-      const keys = Object.keys(changes).filter((k) => store.KEYS.includes(k));
+      const keys = Object.keys(changes).filter((k) => store.KEYS.includes(k) && k !== 'history' && k !== 'chat');
       if (!keys.length) return;
       const fresh = await store.load(...keys);
       setSt((prev) => { const n = { ...prev, ...fresh }; if (fresh.settings) applyTheme(n.settings); return n; });
@@ -119,10 +120,10 @@ export function refLabel(ref) {
 export const providerName = (p) => PROVIDERS[p]?.name || p;
 
 export function Toggle({ on, onChange, title }) {
-  return html`<button type="button" class=${'toggle' + (on ? ' on' : '')} title=${title} aria-pressed=${!!on} onClick=${() => onChange(!on)}></button>`;
+  return html`<button type="button" class=${'toggle' + (on ? ' on' : '')} title=${title} role="switch" aria-checked=${on ? 'true' : 'false'} aria-label=${title || undefined} onClick=${() => onChange(!on)}></button>`;
 }
 export function Seg({ value, options, onChange, cls = '' }) {
-  return html`<div class=${'seg ' + cls}>${options.map(([v, l]) => html`<button type="button" class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${l}</button>`)}</div>`;
+  return html`<div class=${'seg ' + cls} role="radiogroup">${options.map(([v, l]) => html`<button type="button" role="radio" aria-checked=${v === value ? 'true' : 'false'} class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${l}</button>`)}</div>`;
 }
 
 /* ---------------- inputs ---------------- */
@@ -139,6 +140,8 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
   useEffect(() => { if (document.activeElement !== ref.current) setTxt(fmtVal(value)); }, [value]);
   const onIn = (e) => {
     const el = e.target; const raw = el.value; const caret = el.selectionStart ?? raw.length;
+    // words like «۱۲ میلیون و ۵۰۰ هزار» are kept while typing and turned into digits when leaving the field
+    if (/[آ-ی]/.test(raw)) { setTxt(raw); const v = parseNum(raw); onInput(isFinite(v) ? v : null); return; }
     const sig = toEnDigits(raw.slice(0, caret)).replace(/[^\d.\-]/g, '').length;
     const g = localSep(groupTyping(raw));
     setTxt(g);
@@ -158,8 +161,9 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
   return html`<div class="field">
     ${label && html`<label>${label}</label>`}
     <div class="input-wrap">
-      <input ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn} />
-      ${suffix && html`<span class="suffix">${suffix}</span>`}
+      <input ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn}
+        onBlur=${() => { if (/[آ-ی]/.test(txt)) { const v = parseNum(txt); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
+      ${suffix && html`<span class=${'suffix' + (String(suffix).length <= 2 ? ' short' : '')}>${suffix}</span>`}
     </div>
     ${!compact && (w || hint || warn) && html`<span class="hint">
       ${w && html`<span class="words">${w}</span>`}
@@ -174,7 +178,7 @@ export function MoneyField({ label, rial, onRial, s, hint, autoFocus, err, prev 
   const k = s?.currency === 'rial' ? 1 : 10;
   const unit = s?.currency === 'rial' ? 'ریال' : 'تومان';
   return html`<${NumField} label=${label} value=${rial === null || rial === undefined || rial === '' ? '' : Math.round(rial / k)} onInput=${(v) => onRial(v === null ? null : v * k)}
-    suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} />`;
+    placeholder=${'مثلاً ۱۲ میلیون و ۵۰۰ هزار'} suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} />`;
 }
 
 const WD = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
@@ -214,7 +218,7 @@ export function JCalendar({ value, onPick, onClear, onClose }) {
   </div>`;
 }
 
-export function JDateField({ label, iso, onIso, hint, allowEmpty }) {
+export function JDateField({ label, iso, onIso, hint, allowEmpty, err }) {
   const [txt, setTxt] = useState(iso ? fmtJ(iso, 'short') : '');
   const [bad, setBad] = useState(false);
   const [open, setOpen] = useState(false);
@@ -222,7 +226,7 @@ export function JDateField({ label, iso, onIso, hint, allowEmpty }) {
   return html`<div class="field" style="position:relative">
     ${label && html`<label>${label}</label>`}
     <div class="input-wrap">
-      <input class=${'input num-in' + (bad ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
+      <input class=${'input num-in' + (bad || err ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
         onFocus=${() => setOpen(true)}
         onInput=${(e) => { setTxt(e.target.value); const v = parseJ(e.target.value); setBad(!v && !!e.target.value); if (v) onIso(v); else if (!e.target.value && allowEmpty) onIso(null); }} />
       <button type="button" class="cal-btn" aria-label="تقویم" onClick=${() => setOpen(!open)}><${Icon} n="calendar" cls="sm" /></button>
@@ -268,19 +272,27 @@ export function Markdown({ text }) {
 export function Drawer({ title, onClose, children, footer, icon }) {
   useEffect(() => { const h = (e) => e.key === 'Escape' && onClose(); addEventListener('keydown', h); return () => removeEventListener('keydown', h); }, []);
   return html`<div class="scrim" onClick=${onClose}></div>
-  <aside class="drawer" role="dialog" aria-label=${title}>
+  <aside class="drawer" role="dialog" aria-modal="true" aria-label=${title}>
     <div class="dh">${icon}<h2>${title}</h2><button class="btn icon ghost" onClick=${onClose} aria-label="بستن"><${Icon} n="x" /></button></div>
     <div class="db">${children}</div>
     ${footer && html`<div class="df">${footer}</div>`}
   </aside>`;
 }
+let modalSeq = 0;
 export function Modal({ title, onClose, children, footer }) {
-  useEffect(() => { const h = (e) => e.key === 'Escape' && onClose(); addEventListener('keydown', h); return () => removeEventListener('keydown', h); }, []);
+  const box = useRef(); const [hid] = useState(() => 'mdl' + ++modalSeq);
+  useEffect(() => {
+    const h = (e) => e.key === 'Escape' && onClose(); addEventListener('keydown', h);
+    // keyboard users land in the first field (or button)
+    setTimeout(() => { if (!box.current?.contains(document.activeElement)) box.current?.querySelector('input,select,textarea,button:not(.btn.icon)')?.focus({ preventScroll: true }); }, 0);
+    return () => removeEventListener('keydown', h);
+  }, []);
+  // the main action sits first (right), the same as in the side drawer
   return html`<div class="scrim" onClick=${onClose}></div>
-  <div class="modal" role="dialog">
-    <div class="row between" style="margin-bottom:14px"><h3 style="margin:0;font-size:16px">${title}</h3><button class="btn icon ghost sm" onClick=${onClose}><${Icon} n="x" /></button></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby=${hid} ref=${box}>
+    <div class="row between" style="margin-bottom:14px"><h3 id=${hid} style="margin:0;font-size:16px">${title}</h3><button class="btn icon ghost sm" onClick=${onClose} aria-label="بستن"><${Icon} n="x" /></button></div>
     <div class="col" style="gap:14px">${children}</div>
-    ${footer && html`<div class="row end" style="margin-top:18px">${footer}</div>`}
+    ${footer && html`<div class="row" style="margin-top:18px;flex-direction:row-reverse;justify-content:flex-end">${footer}</div>`}
   </div>`;
 }
 

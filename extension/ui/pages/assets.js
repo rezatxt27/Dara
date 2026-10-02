@@ -1,10 +1,10 @@
 import { isoFromDate, todayIso } from '../../lib/jalali.js';
-import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, Seg, AreaChart, toast, send, num, pct, fmtJ, money, Explain, AskBtn } from '../components.js';
+import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, JDateField, Seg, AreaChart, toast, send, num, pct, fmtJ, money, Explain, AskBtn } from '../components.js';
 import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, toEnDigits } from '../../lib/format.js';
-import { act } from '../actions.js';
+import { act, doneToast } from '../actions.js';
 
 /** Quantity column for an installment loan: installment amount and progress. */
 function loanCell(a, s) {
@@ -24,7 +24,7 @@ function SourceLine({ r }) {
   }
   if (a.mode === 'rate' && r.status === 'matured') return html`<div class="src warn"><${Icon} n="alert" cls="sm" />سررسید ${fmtJ(a.rate.maturity)}</div>`;
   if (a.mode === 'rate') return html`<div class="src"><${Icon} n="percent" cls="sm" />روزشمار ${num(a.rate?.annualPct, 2)}٪، ${a.rate?.mode === 'payout' ? 'سود ماهانه' : a.rate?.mode === 'compound' ? 'مرکب' : 'ساده'}</div>`;
-  if (a.mode === 'balance') return html`<div class="src"><${Icon} n=${a.interest?.on ? 'percent' : 'edit'} cls="sm" />${a.interest?.on ? `مانده + سود روزشمار ${num(a.interest.annualPct, 2)}٪` : 'مانده دستی'}، ${ago(r.at)}</div>`;
+  if (a.mode === 'balance') return html`<div class="src"><${Icon} n=${a.interest?.on ? 'percent' : 'edit'} cls="sm" />${a.interest?.on ? `مانده + سود روزشمار ${num(a.interest.annualPct, 2)}٪` : E.APPRAISED.has(a.category) ? 'برآورد دستی' : 'مانده دستی'}، ${ago(r.at)}</div>`;
   if (a.price?.source === 'market') {
     const ref = a.price.ref || {};
     const pending = ref.provider === 'tsetmc' && !ref.key;
@@ -41,10 +41,12 @@ function InlineMoney({ value, s, onSave, children }) {
   const ref = useRef();
   const sep = (g) => (getDigits() === 'fa' ? g.replace(/,/g, '٬') : g);
   useEffect(() => { if (ed) { ref.current?.focus(); ref.current?.select(); } }, [ed]);
-  if (!ed) return html`<span class="editable" title="برای ویرایش کلیک کن" onClick=${(e) => { e.stopPropagation(); setTxt(sep(groupTyping(String(Math.round(value / k))))); setEd(true); }}>${children}</span>`;
-  const commit = () => { const v = parseNum(txt); if (isFinite(v) && v >= 0 && Math.round(v * k) !== Math.round(value)) onSave(v * k); setEd(false); };
+  const [start, setStart] = useState('');
+  if (!ed) return html`<span class="editable" title="برای ویرایش کلیک کن" onClick=${(e) => { e.stopPropagation(); const t0 = sep(groupTyping(String(Math.round(value / k)))); setTxt(t0); setStart(t0); setEd(true); }}>${children}</span>`;
+  // leaving the field without typing a different number changes nothing (no rounding of rials into a fake edit)
+  const commit = () => { const v = parseNum(txt); if (txt !== start && isFinite(v) && v >= 0 && Math.round(v) !== Math.round(parseNum(start))) onSave(v * k); setEd(false); };
   return html`<input ref=${ref} class="input num-in" style="height:30px;width:160px" value=${txt} onClick=${(e) => e.stopPropagation()}
-    onInput=${(e) => setTxt(sep(groupTyping(e.target.value)))} onKeyDown=${(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEd(false); }} onBlur=${commit} />`;
+    onInput=${(e) => setTxt(/[آ-ی]/.test(e.target.value) ? e.target.value : sep(groupTyping(e.target.value)))} onKeyDown=${(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEd(false); }} onBlur=${commit} />`;
 }
 
 function TradeModal({ st, s, asset, onClose }) {
@@ -61,17 +63,19 @@ function TradeModal({ st, s, asset, onClose }) {
   const save = async () => {
     if (!(qty > 0) || !(price > 0)) return toast('مقدار و قیمت را وارد کن');
     if (tooMuch) return toast('مقدار فروش بیشتر از موجودی است');
-    await act.trade({ assetId: asset.id, side, qty, price, cashId: cashId || null });
-    toast(`${side === 'buy' ? 'خرید' : 'فروش'} ثبت شد`); onClose();
+    const ev = await act.trade({ assetId: asset.id, side, qty, price, cashId: cashId || null });
+    doneToast(`${side === 'buy' ? 'خرید' : 'فروش'} ثبت شد`, ev); onClose();
   };
-  return html`<${Modal} title=${`خرید یا فروش — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت</button>`}>
+  const q1 = (+asset.quantity || 0) + (side === 'buy' ? 1 : -1) * (qty || 0);
+  return html`<${Modal} title=${`خرید یا فروش — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${side === 'buy' ? 'ثبت خرید' : 'ثبت فروش'}</button>`}>
     <${Seg} value=${side} onChange=${setSide} options=${[['buy', 'خرید'], ['sell', 'فروش']]} />
     <div class="grid2"><${NumField} label=${`مقدار (${asset.unit || 'واحد'})`} value=${qty} onInput=${setQty} autoFocus err=${tooMuch} hint=${side === 'sell' ? `موجودی: ${num(asset.quantity, 'auto')}` : ''} />
     <${MoneyField} label="قیمت هر واحد" rial=${price} onRial=${setPrice} s=${s} prev=${unitPrice} /></div>
     <div class="field"><label>${side === 'buy' ? 'پرداخت از حساب' : 'واریز به حساب'} (اختیاری)</label>
       <select class="input" value=${cashId} onChange=${(e) => setCashId(e.target.value)}><option value="">— ثبت نشود —</option>${cashes.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
       ${short && html`<span class="hint warn">مانده این حساب (<${Money} v=${cash.balance} s=${s} />) کافی نیست؛ اگر ثبت کنی منفی می‌شود.</span>`}</div>
-    <div class="preview"><span class="muted">مبلغ معامله</span><span class="v"><${Money} v=${amount} s=${s} /></span></div>
+    <div class="preview outcome"><div class="row between"><span class="muted">مبلغ معامله</span><span class="v"><${Money} v=${amount} s=${s} /></span></div>
+      ${qty > 0 && !tooMuch && html`<div class="row between small"><span class="muted">بعد از این</span><span class="sb">${num(q1, 'auto')} ${asset.unit || ''}${cash ? html` · مانده «${cash.name}»: <${Money} v=${(+cash.balance || 0) + (side === 'buy' ? -amount : amount)} s=${s} compact />` : ''}</span></div>`}</div>
   </${Modal}>`;
 }
 
@@ -84,12 +88,16 @@ function AdjustModal({ s, asset, onClose }) {
   const save = async () => {
     if (!(amt > 0)) return toast('مبلغ را وارد کن');
     if (tooMuch && rate) return toast('برداشت بیشتر از ارزش فعلی است');
-    await act.adjust({ assetId: asset.id, delta: dir === 'in' ? amt : -amt, note }); toast('ثبت شد'); onClose();
+    const ev = await act.adjust({ assetId: asset.id, delta: dir === 'in' ? amt : -amt, note }); doneToast('ثبت شد', ev); onClose();
   };
-  return html`<${Modal} title=${`${rate ? 'افزایش یا برداشت اصل' : 'واریز یا برداشت'} — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت</button>`}>
+  const label = liab ? (dir === 'in' ? 'ثبت پرداخت' : 'ثبت افزایش بدهی') : dir === 'in' ? 'ثبت واریز' : 'ثبت برداشت';
+  const after = cur + (liab ? -1 : 1) * (dir === 'in' ? 1 : -1) * (amt || 0);
+  return html`<${Modal} title=${`${rate ? 'افزایش یا برداشت اصل' : 'واریز یا برداشت'} — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${label}</button>`}>
     <${Seg} value=${dir} onChange=${setDir} options=${[['in', liab ? 'پرداخت بدهی' : 'واریز'], ['out', liab ? 'افزایش بدهی' : 'برداشت']]} />
     <${MoneyField} label="مبلغ" rial=${amt} onRial=${setAmt} s=${s} autoFocus />
-    <div class=${'xs ' + (tooMuch ? 'neg' : 'muted')}>${rate ? 'ارزش فعلی' : liab ? 'مانده بدهی' : 'مانده فعلی'}: <${Money} v=${cur} s=${s} />${rate ? '. سود مبلغ جدید از امروز حساب می‌شود.' : ''}</div>
+    <div class="preview outcome"><div class="row between small"><span class="muted">${rate ? 'ارزش فعلی' : liab ? 'مانده بدهی' : 'مانده فعلی'}</span><${Money} v=${cur} s=${s} /></div>
+      ${amt > 0 && html`<div class="row between"><span class="muted">بعد از این</span><span class=${'big ' + (tooMuch ? 'neg' : '')}><${Money} v=${after} s=${s} /></span></div>`}
+      ${rate && html`<span class="xs muted">سود مبلغ جدید از همین امروز حساب می‌شود.</span>`}</div>
     <div class="field"><label>توضیح (اختیاری)</label><input class="input" value=${note} onInput=${(e) => setNote(e.target.value)} placeholder="مثلاً: واریز حقوق مهر" /></div>
   </${Modal}>`;
 }
@@ -113,30 +121,36 @@ function LoanPayModal({ st, s, asset, onClose }) {
   const save = async () => {
     if (!(pay > 0)) return toast('مبلغ را وارد کن');
     if (tooMuch) return toast(liab ? 'بیشتر از مانده وام است' : 'بیشتر از مانده طلب است');
-    const amount = kind === 'all' ? E.loanState(asset.loan, todayIso(), Date.now()).value : amt; // settlement: to this very moment
-    const note = kind === 'all' ? `تسویه «${asset.name}»` : `${liab ? 'پرداخت اضافه' : 'دریافت اضافه'} «${asset.name}»`;
-    if (accObj) await act.transfer(liab ? { fromId: accObj.id, toId: asset.id, amount, note } : { fromId: asset.id, toId: accObj.id, amount, note });
-    else await act.adjust({ assetId: asset.id, delta: liab ? amount : -amount, note });
-    toast(kind === 'all' ? 'تسویه ثبت شد' : 'ثبت شد'); onClose();
+    let ev;
+    // settlement: what is owed at the moment it's recorded (an installment that fell meanwhile is counted first)
+    if (kind === 'all') ev = await act.settleLoan({ loanId: asset.id, accountId: accObj?.id || null });
+    else {
+      const note = `${liab ? 'پرداخت اضافه' : 'دریافت اضافه'} «${asset.name}»`;
+      ev = accObj ? await act.transfer(liab ? { fromId: accObj.id, toId: asset.id, amount: amt, note } : { fromId: asset.id, toId: accObj.id, amount: amt, note })
+        : await act.adjust({ assetId: asset.id, delta: liab ? amt : -amt, note });
+    }
+    doneToast(kind === 'all' ? 'تسویه ثبت شد' : 'ثبت شد', ev); onClose();
   };
-  return html`<${Modal} title=${`${liab ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'} — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت</button>`}>
+  return html`<${Modal} title=${`${liab ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'} — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${kind === 'all' ? 'ثبت تسویه' : liab ? 'ثبت پرداخت' : 'ثبت دریافت'}</button>`}>
     <${Seg} value=${kind} onChange=${setKind} options=${[['part', liab ? 'پرداخت بخشی از وام' : 'دریافت بخشی از طلب'], ['all', 'تسویه کامل']]} />
     ${kind === 'part' ? html`<${MoneyField} label="مبلغ" rial=${amt} onRial=${setAmt} s=${s} autoFocus err=${tooMuch} />`
       : html`<div class="preview"><span class="muted">مبلغ تسویه امروز (مانده اصل + سود روزهای گذشته)</span><span class="v"><${Money} v=${ls.value} s=${s} /></span></div>`}
     <div class="field"><label>${liab ? 'از حساب' : 'به حساب'} (اختیاری)</label>
       <select class="input" value=${acc} onChange=${(e) => setAcc(e.target.value)}><option value="">— ثبت نشود —</option>${accounts.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
       ${short && html`<span class="hint warn">مانده این حساب کافی نیست؛ اگر ثبت کنی منفی می‌شود.</span>`}</div>
-    <div class=${'xs ' + (tooMuch ? 'neg' : 'muted')}>مانده امروز: <${Money} v=${ls.value} s=${s} />${after ? html`. بعد از این، قسط همان <${Money} v=${after.A} s=${s} compact /> می‌ماند و ${num(after.n - after.paid)} قسط باقی می‌ماند.` : ''}</div>
+    <div class="preview outcome"><div class="row between small"><span class=${tooMuch ? 'neg' : 'muted'}>مانده امروز</span><${Money} v=${ls.value} s=${s} /></div>
+      ${after && html`<div class="big">بعد از این: ${num(after.n - after.paid)} قسط می‌ماند (به‌جای ${num(ls.n - ls.paid)})</div><span class="xs muted">قسط ماهانه همان <${Money} v=${after.A} s=${s} compact /> می‌ماند؛ فقط تعداد قسط‌ها کم می‌شود.</span>`}
+      ${kind === 'all' && html`<span class="xs muted">بعد از ثبت، این ${liab ? 'وام' : 'طلب'} «تسویه شده» می‌شود و قسط دیگری ثبت نمی‌شود.</span>`}</div>
   </${Modal}>`;
 }
 
 /** Full installment table: paid ones greyed out. */
 function LoanSchedule({ asset, s }) {
   const ls = E.loanState(asset.loan);
-  return html`<div class="sched"><table class="tbl small">
+  return html`<div class="sched"><div class="xs muted" style="padding:6px 10px">مبالغ به ${s.currency === 'rial' ? 'ریال' : 'تومان'}</div><table class="tbl small">
     <thead><tr><th>#</th><th>تاریخ</th><th class="n">قسط</th><th class="n">سود</th><th class="n">اصل</th><th class="n">مانده</th></tr></thead>
     <tbody>${ls.rows.map((x) => html`<tr class=${x.k < ls.paid ? 'paid' : x.k === ls.paid ? 'next' : ''}>
-      <td class="num">${num(x.k + 1)}</td><td>${fmtJ(x.date, 'dm')} <span class="xs muted">${fmtJ(x.date).split(' ').pop()}</span></td>
+      <td class="num">${x.k < ls.paid ? html`<${Icon} n="check" cls="sm" />` : num(x.k + 1)}</td><td>${fmtJ(x.date, 'dm')} <span class="xs muted">${fmtJ(x.date).split(' ').pop()}</span></td>
       <td class="n"><${Money} v=${x.payment} s=${s} unit=${false} /></td><td class="n"><${Money} v=${x.interest} s=${s} unit=${false} /></td>
       <td class="n"><${Money} v=${x.principal} s=${s} unit=${false} /></td><td class="n"><${Money} v=${x.balance} s=${s} unit=${false} /></td></tr>`)}</tbody></table></div>`;
 }
@@ -146,13 +160,39 @@ function ValueModal({ s, asset, onClose }) {
   const [v, setV] = useState(null); const [why, setWhy] = useState('reval');
   const save = async () => {
     if (!(v >= 0) || v === null) return toast('ارزش جدید را وارد کن');
-    await act.patchAsset(asset.id, { balance: v, balanceAt: Date.now() }, { reval: why === 'reval' });
-    toast('ارزش جدید ثبت شد'); onClose();
+    const ev = await act.patchAsset(asset.id, { balance: v, balanceAt: Date.now() }, { reval: why === 'reval' });
+    doneToast('ارزش جدید ثبت شد', ev); onClose();
   };
-  return html`<${Modal} title=${`ارزش جدید — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت</button>`}>
+  const b0 = +asset.balance || 0;
+  return html`<${Modal} title=${`ارزش جدید — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت ارزش</button>`}>
+    <div class="preview outcome"><div class="row between small"><span class="muted">ارزش قبلی${asset.balanceAt ? ` (${ago(asset.balanceAt)})` : ''}</span><${Money} v=${b0} s=${s} /></div>
+      ${v > 0 && b0 > 0 && html`<div class="row between small"><span class="muted">تغییر</span><b class=${v >= b0 ? 'pos' : 'neg'}><span class="ltr">${pct(v / b0 - 1)}</span></b></div>`}</div>
     <${MoneyField} label="ارزش امروز" rial=${v} onRial=${setV} s=${s} autoFocus prev=${asset.balance} />
     <div class="field"><label>چرا تغییر کرد؟</label><${Seg} value=${why} onChange=${setWhy} options=${[['reval', 'قیمت بازارش عوض شد'], ['money', 'بخشی را خریدم یا فروختم']]} />
       <span class="hint">${why === 'reval' ? 'در «چرا تغییر کرد» و بازده واقعی، سود یا زیان بازار حساب می‌شود.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'}</span></div>
+  </${Modal}>`;
+}
+
+/** A deposit past its maturity: move it all to an account (and close it), or renew it. */
+function MaturedModal({ st, s, asset, onClose }) {
+  const accounts = st.assets.filter((x) => x.id !== asset.id && !x.archived && x.mode === 'balance' && !CAT[x.category]?.liability);
+  const [kind, setKind] = useState(accounts.length ? 'move' : 'renew');
+  const [acc, setAcc] = useState(asset.rate.payoutTo && accounts.some((x) => x.id === asset.rate.payoutTo) ? asset.rate.payoutTo : accounts[0]?.id || '');
+  const [mat, setMat] = useState(null); const [rate, setRate] = useState(asset.rate.annualPct);
+  const v = E.valueOf(asset, st.quotes, s).value;
+  const save = async () => {
+    if (kind === 'move') { if (!acc) return toast('حساب مقصد را انتخاب کن'); doneToast('به حساب منتقل شد', await act.closeDeposit({ assetId: asset.id, accountId: acc })); }
+    else { if (mat && mat <= todayIso()) return toast('سررسید جدید باید بعد از امروز باشد'); doneToast('سپرده تمدید شد', await act.renewDeposit({ assetId: asset.id, maturity: mat, annualPct: rate })); }
+    onClose();
+  };
+  return html`<${Modal} title=${`سررسید — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${kind === 'move' ? 'انتقال و بستن' : 'ثبت تمدید'}</button>`}>
+    <div class="preview outcome"><div class="row between"><span class="muted">ارزش در سررسید</span><span class="big"><${Money} v=${v} s=${s} /></span></div></div>
+    <${Seg} value=${kind} onChange=${setKind} options=${[...(accounts.length ? [['move', 'انتقال به حساب']] : []), ['renew', 'تمدید سپرده']]} />
+    ${kind === 'move' ? html`<div class="field"><label>به حساب</label><select class="input" value=${acc} onChange=${(e) => setAcc(e.target.value)}>${accounts.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
+        <span class="hint">همه مبلغ به این حساب می‌رود و سپرده بسته می‌شود؛ ارزش خالص تغییری نمی‌کند.</span></div>`
+      : html`<div class="grid2"><${JDateField} label="سررسید جدید (اختیاری)" iso=${mat} onIso=${setMat} allowEmpty hint="خالی = بدون سررسید" />
+        <${NumField} label="نرخ سود جدید" suffix="٪" value=${rate} onInput=${setRate} digits=${2} /></div>
+        <span class="hint">ارزش امروز، اصل سپرده جدید می‌شود و سود از امروز با نرخ جدید حساب می‌شود.</span>`}
   </${Modal}>`;
 }
 
@@ -161,7 +201,6 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   const a = r.asset;
   const isMarket = a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key;
   const [view, setView] = useState('value');
-  const [sched, setSched] = useState(false);
   const ls = a.mode === 'loan' ? E.loanState(a.loan) : null;
   const [priceSeries, setPriceSeries] = useState(null);
   const valueSeries = useMemo(() => Object.keys(st.snapshots).sort().slice(-180).map((d) => ({ date: d, value: Math.abs(st.snapshots[d].v?.[a.id] ?? NaN), est: !!st.snapshots[d].est })).filter((p) => isFinite(p.value)), [st.snapshots, a.id]);
@@ -172,49 +211,61 @@ function Expanded({ st, r, s, pf, open, onModal }) {
       setPriceSeries(res?.ok ? (res.points || []).map(([d, v]) => ({ date: d, value: v * adj })) : []);
     });
   }, [view]);
-  const evs = st.events.filter((e) => !e.undone && (e.toId === a.id || e.fromId === a.id || e.changes?.some((c) => c.assetId === a.id))).slice(0, 5);
+  // installments are in the schedule; the short list shows everything else
+  const evs = st.events.filter((e) => !e.undone && e.kind !== 'loan' && (e.toId === a.id || e.fromId === a.id || e.changes?.some((c) => c.assetId === a.id))).slice(0, 5);
   const series = view === 'price' ? priceSeries : valueSeries;
-  const facts = [
-    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : a.mode === 'loan' ? 'جدول اقساط (خودکار)' : 'مانده دستی'],
-    ['آخرین به‌روزرسانی', r.status === 'auto' ? 'هر لحظه (خودکار)' : r.status === 'matured' ? `سررسید ${fmtJ(a.rate.maturity)}` : r.at ? `${fmtJ(isoFromDate(new Date(r.at)))}، ${ago(r.at)}` : '—'],
+  const loan = a.mode === 'loan';
+  const showChart = !loan && (isMarket || valueSeries.length >= 2);
+  const facts = loan ? [] : [
+    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : E.APPRAISED.has(a.category) ? 'برآورد دستی' : 'مانده دستی'],
+    [r.status === 'matured' ? 'سررسید' : 'آخرین به‌روزرسانی', r.status === 'auto' ? 'هر لحظه (خودکار)' : r.status === 'matured' ? fmtJ(a.rate.maturity) : r.at ? `${fmtJ(isoFromDate(new Date(r.at)))}، ${ago(r.at)}` : '—'],
     ...(a.mode === 'units' ? [['مقدار', `${num(a.quantity, 'auto')} ${a.unit || ''}`], ['قیمت واحد', html`<${Money} v=${r.unitPrice} s=${s} />`]] : []),
     ...(a.mode === 'rate' ? [['اصل', html`<${Money} v=${a.rate.principal} s=${s} />`], ['سود روزانه', html`<${Money} v=${E.rateDaily(a.rate, r.value)} s=${s} />`]] : []),
     ...(a.interest?.on ? [['سود روزشمار انباشته', html`<${Money} v=${r.accrued} s=${s} />`]] : []),
-    ...(ls && !ls.done ? [['مبلغ قسط', html`<${Money} v=${ls.next.payment} s=${s} />`], ['قسط بعدی', `${fmtJ(ls.next.date)} (${num(ls.paid + 1)} از ${num(ls.n)})`],
-      ['سود باقی‌مانده تا آخر', html`<${Money} v=${ls.rows.slice(ls.paid).reduce((t, x) => t + x.interest, 0) - ls.accrued} s=${s} compact />`],
-      [CAT[a.category]?.liability ? 'پرداخت از' : 'واریز به', a.loan.account ? (st.assets.find((x) => x.id === a.loan.account)?.name || 'حساب حذف‌شده') : 'ثبت نمی‌شود']] : []),
     ...(r.pnl !== null ? [['سود / زیان', html`<span class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign /> <span class="ltr">(${pct(r.ret)})</span></span>`]] : []),
-    ['سهم از کل', r.cat.liability ? '—' : pct(r.value / (pf.gross || 1), { sign: false })],
-    ['مواجهه / نقدشوندگی', `${EXPOSURES[r.exposure]?.name || '—'}، ${LIQUIDITY[a.liquidity || r.cat.liquidity]}`],
+    ...(r.cat.liability ? [] : [['سهم از کل', pct(r.value / (pf.gross || 1), { sign: false })], ['نوع دارایی / سرعت نقد شدن', `${EXPOSURES[r.exposure]?.name || '—'}، ${LIQUIDITY[a.liquidity || r.cat.liquidity]}`]]),
   ];
-  return html`<div class="xpanel-wrap"><div class="xpanel">
-    <div class="card flat" style="padding:14px">
+  if (loan) {
+    const liabL = r.cat.liability;
+    facts.push([liabL ? 'مانده بدهی' : 'مانده طلب', html`<${Money} v=${r.value} s=${s} cls=${liabL ? 'debt' : ''} />`]);
+    if (ls.done) facts.push(['وضعیت', 'تسویه شده']);
+    else facts.push(['قسط ماهانه', html`<${Money} v=${ls.next.payment} s=${s} />`], ['قسط بعدی', `${fmtJ(ls.next.date)} (${num(ls.paid + 1)} از ${num(ls.n)})`],
+      ['سود باقی‌مانده تا آخر', html`<${Money} v=${ls.rows.slice(ls.paid).reduce((t, x) => t + x.interest, 0) - ls.accrued} s=${s} compact />`],
+      [liabL ? 'قسط‌ها از' : 'قسط‌ها به', a.loan.account ? (st.assets.find((x) => x.id === a.loan.account)?.name || 'حساب حذف‌شده') : 'ثبت نمی‌شود']);
+  }
+  const mainAct = a.mode === 'units' ? ['trade', 'swap', 'خرید یا فروش']
+    : r.status === 'matured' ? ['matured', 'clock', 'انتقال یا تمدید']
+    : a.mode === 'rate' ? ['adjust', 'swap', 'افزایش یا برداشت اصل']
+    : loan ? (ls.done ? null : ['loanpay', 'swap', r.cat.liability ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'])
+    : E.APPRAISED.has(a.category) && !a.interest?.on ? ['value', 'target', 'ثبت ارزش جدید']
+    : ['adjust', 'swap', r.cat.liability ? 'پرداخت یا افزایش بدهی' : 'واریز یا برداشت'];
+  return html`<div class="xpanel-wrap"><div class=${'xpanel' + (showChart || loan ? '' : ' solo')}>
+    ${loan && html`<div class="card flat" style="padding:0;overflow:hidden">
+      ${!ls.done && html`<div style="padding:12px 14px 0"><div class="row between small"><span class="sb">${num(ls.paid)} از ${num(ls.n)} قسط پرداخت شد</span><span class="muted">${pct(ls.paid / ls.n, { sign: false, digits: 0 })}</span></div>
+        <div class="progress" style="margin-top:6px"><i style=${`width:${Math.round(ls.paid / ls.n * 100)}%;background:${r.cat.color}`}></i></div></div>`}
+      <${LoanSchedule} asset=${a} s=${s} /></div>`}
+    ${showChart && html`<div class="card flat" style="padding:14px">
       <div class="row between" style="margin-bottom:6px"><span class="sb small row" style="gap:4px">${view === 'price' ? 'قیمت واحد (۱۲۰ روز)' : html`${r.cat.liability ? 'مانده این بدهی' : 'ارزش این دارایی'}: <${Money} v=${r.value} s=${s} compact /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} />`}</span>
         ${isMarket && html`<${Seg} value=${view} onChange=${setView} options=${[['value', 'ارزش'], ['price', 'قیمت']]} />`}</div>
       ${series === null ? html`<div class="muted small" style="height:150px;display:grid;place-items:center">در حال دریافت…</div>`
         : html`<${AreaChart} points=${series} height=${150} fmt=${(v) => money(v, s, { compact: true })} color=${r.cat.color} emptyText="هنوز تاریخچه‌ای برای این دارایی ثبت نشده" />`}
-    </div>
+    </div>`}
     <div class="col">
+      ${!showChart && !loan && html`<div class="sb small row" style="gap:4px">${r.cat.liability ? 'مانده این بدهی' : 'ارزش این دارایی'}: <${Money} v=${r.value} s=${s} /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} /></div>`}
+      ${r.status === 'matured' && html`<div class="callout warn"><${Icon} n="clock" cls="sm" /><div class="grow">سررسید شده و دیگر سود نمی‌گیرد.</div><button class="btn sm primary" onClick=${() => onModal({ t: 'matured', a })}>انتقال یا تمدید</button></div>`}
       <div class="xfacts">${facts.map(([k, v]) => html`<div class="pcell"><span class="n">${k}</span><span class="small sb">${v}</span></div>`)}</div>
-      ${r.error && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${r.error}</div></div>`}
+      ${r.error && r.status !== 'matured' && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${r.error}</div></div>`}
       ${a.note && html`<div class="xs muted">${a.note}</div>`}
       ${evs.length > 0 && html`<div class="list">${evs.map((e) => html`<div class="it" style="padding:6px 2px"><span class="xs muted" style="width:70px">${fmtJ(e.date, 'dm')}</span><span class="grow small">${e.title}</span>${e.amount ? html`<span class="xs"><${Money} v=${e.amount} s=${s} compact /></span>` : ''}</div>`)}</div>`}
       <div class="row wrap">
-        <button class="btn sm primary" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" />ویرایش</button>
-        ${a.mode === 'units' && html`<button class="btn sm" onClick=${() => onModal({ t: 'trade', a })}><${Icon} n="swap" cls="sm" />خرید یا فروش</button>`}
-        ${a.mode === 'balance' && (E.APPRAISED.has(a.category) && !a.interest?.on
-          ? html`<button class="btn sm" onClick=${() => onModal({ t: 'value', a })}><${Icon} n="edit" cls="sm" />ثبت ارزش جدید</button>`
-          : html`<button class="btn sm" onClick=${() => onModal({ t: 'adjust', a })}><${Icon} n="swap" cls="sm" />${r.cat.liability ? 'پرداخت یا افزایش بدهی' : 'واریز یا برداشت'}</button>`)}
-        ${a.mode === 'rate' && html`<button class="btn sm" onClick=${() => onModal({ t: 'adjust', a })}><${Icon} n="swap" cls="sm" />افزایش یا برداشت اصل</button>`}
-        ${ls && !ls.done && html`<button class="btn sm" onClick=${() => onModal({ t: 'loanpay', a })}><${Icon} n="swap" cls="sm" />${r.cat.liability ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'}</button>`}
-        ${ls && html`<button class="btn sm ghost" onClick=${() => setSched(!sched)} aria-expanded=${sched}><${Icon} n="calendar" cls="sm" />جدول اقساط</button>`}
+        ${mainAct && html`<button class="btn sm primary" onClick=${() => onModal({ t: mainAct[0], a })}><${Icon} n=${mainAct[1]} cls="sm" />${mainAct[2]}</button>`}
+        <button class="btn sm" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" />ویرایش</button>
         <${AskBtn} q=${`درباره «${a.name}» توضیح بده: ارزشش چطور حساب شده، اخیراً چرا تغییر کرده و چه ریسکی در پرتفوی من دارد؟`} label="درباره‌اش بپرس" />
         <span class="grow"></span>
         <button class="btn sm ghost danger" onClick=${() => act.deleteAsset(a.id)}><${Icon} n="trash" cls="sm" />حذف</button>
       </div>
     </div>
-  </div>
-    ${sched && ls && html`<${LoanSchedule} asset=${a} s=${s} />`}</div>`;
+  </div></div>`;
 }
 
 export function AssetsPage({ st, pf, s, open, route, q }) {
@@ -236,7 +287,10 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
   let rows = pf.rows.filter((r) => (fCat === 'all' || r.asset.category === fCat) && (!fAtt || E.needsAttention(r.status)) &&
     (!term || [r.asset.name, r.asset.custodian, r.asset.code, r.asset.note, r.cat.name, r.cat.short, r.asset.unit, r.asset.price?.ref?.symbol, r.asset.price?.ref?.label, r.asset.price?.ref?.name, r.asset.price?.ref?.sym].some((x) => norm(x).includes(term))));
   const sorter = { value: (a, b) => Math.abs(b.value) - Math.abs(a.value), name: (a, b) => a.asset.name.localeCompare(b.asset.name, 'fa'), change: (a, b) => Math.abs(b.dayChange) - Math.abs(a.dayChange), updated: (a, b) => (a.at || 0) - (b.at || 0) }[sort];
-  rows = rows.slice().sort(sorter);
+  // paid-off loans and closed items go to the end of their group
+  const settled = (r) => (r.asset.mode === 'loan' && E.loanState(r.asset.loan).done ? 1 : 0);
+  rows = rows.slice().sort((a, b) => settled(a) - settled(b) || sorter(a, b));
+  const hasPnl = rows.some((r) => r.pnl !== null);
   const groups = [];
   if (group === 'none') groups.push({ key: 'all', title: null, rows });
   else {
@@ -267,37 +321,38 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
       </div>
     </div>
     <div class="card" style="padding:6px 6px 2px">
-      ${rows.length ? html`<table class="tbl">
-        <thead><tr><th>دارایی</th><th class="n">مقدار</th><th class="n">قیمت واحد</th><th class="n">ارزش روز</th><th class="n">امروز</th><th class="n">سود / زیان</th><th>وضعیت</th><th></th></tr></thead>
+      ${rows.length ? html`<table class="tbl assets">
+        <thead><tr><th>دارایی</th><th class="n">مقدار</th><th class="n c-price">قیمت واحد</th><th class="n">ارزش روز</th><th class="n c-today">امروز</th>${hasPnl && html`<th class="n c-pnl">سود / زیان</th>`}<th>وضعیت</th><th></th></tr></thead>
         <tbody>${groups.map((g) => html`
           ${g.title && html`<tr class="grp"><td colspan="3"><span class="row">${g.cat ? html`<span class="dot" style=${`width:9px;height:9px;border-radius:3px;background:${g.cat.color}`}></span>` : html`<${Icon} n=${g.icon} cls="sm" />`}${g.title}<span class="muted xs num">${num(g.rows.length)} مورد${!g.cat?.liability && pf.gross && g.owned ? '، ' + pct(g.owned / pf.gross, { sign: false }) + ' از کل' : ''}</span></span></td>
-            <td class="n num"><${Money} v=${g.cat?.liability ? -g.total : g.total} s=${s} compact /></td><td colspan="4"></td></tr>`}
+            <td class="n num"><${Money} v=${g.total} s=${s} compact cls=${g.cat?.liability || g.total < 0 ? 'debt' : ''} /></td><td colspan=${hasPnl ? 4 : 3}></td></tr>`}
           ${g.rows.map((r) => {
             const a = r.asset; const liab = r.cat.liability; const isOpen = openId === a.id;
             const share = !liab && pf.gross ? r.value / pf.gross : 0;
             const manualPrice = a.mode === 'units' && a.price?.source !== 'market';
-            return html`<tr class=${'r' + (isOpen ? ' open' : '')} style="cursor:pointer" onClick=${() => setOpenId(isOpen ? null : a.id)} aria-expanded=${isOpen}>
+            return html`<tr class=${'r' + (isOpen ? ' open' : '') + (settled(r) ? ' settled' : '')} style="cursor:pointer" tabindex="0" onClick=${() => setOpenId(isOpen ? null : a.id)}
+              onKeyDown=${(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); setOpenId(isOpen ? null : a.id); } }} aria-expanded=${isOpen}>
               <td><div class="row" style="gap:10px"><${Ava} cat=${a.category} size=${34} /><div style="min-width:0">
                 <div class="sb ellipsis" style="max-width:240px">${a.name}${a.review ? html` <span title=${a.review} class="warn"><${Icon} n="info" cls="sm" /></span>` : ''}</div>
-                <div class="xs muted ellipsis" style="max-width:240px">${[(a.custodian || '').trim() !== a.name ? (a.custodian || '').trim() : '', a.code].filter(Boolean).join('، ')}</div></div></div></td>
-              <td class="n num small">${a.mode === 'units' ? html`${num(a.quantity, 'auto')} <span class="muted">${a.unit || ''}</span>` : a.mode === 'rate' ? html`<span class="muted">اصل: </span><${Money} v=${a.rate?.principal} s=${s} compact unit=${false} />` : a.mode === 'loan' ? loanCell(a, s) : html`<span class="muted">—</span>`}</td>
-              <td class="n small">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${(v) => act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } })}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
-              <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${(v) => act.patchAsset(a.id, { balance: v, balanceAt: Date.now() })}><${Money} v=${liab ? -r.value : r.value} s=${s} /></${InlineMoney}>` : html`<${Money} v=${liab ? -r.value : r.value} s=${s} />`}</div>
+                <div class="xs muted ellipsis" style="max-width:240px">${(a.custodian || '').trim() !== a.name ? (a.custodian || '').trim() : ''}</div><div class="src-narrow"><${SourceLine} r=${r} /></div></div></div></td>
+              <td class="n num small">${a.mode === 'units' ? html`<span class="priv">${num(a.quantity, 'auto')}</span> <span class="muted">${a.unit || ''}</span>` : a.mode === 'rate' ? html`<span class="muted">اصل: </span><${Money} v=${a.rate?.principal} s=${s} compact unit=${false} />` : a.mode === 'loan' ? loanCell(a, s) : html`<span class="muted">—</span>`}</td>
+              <td class="n small c-price">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${async (v) => doneToast('قیمت ثبت شد', await act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } }))}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
+              <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${async (v) => doneToast('ثبت شد', await act.patchAsset(a.id, { balance: v, balanceAt: Date.now() }))}><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></${InlineMoney}>` : html`<${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} />`}</div>
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
-              <td class="n small">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
-              <td class="n small">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>
+              <td class="n small c-today">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
+              ${hasPnl && html`<td class="n small c-pnl">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>`}
               <td><${StatusPill} status=${r.status} title=${r.error || ''} /><div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
               <td onClick=${(e) => e.stopPropagation()}><div class="row" style="gap:2px;justify-content:flex-end">
                 <button class="btn icon sm ghost acts" title="ویرایش" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" /></button>
                 <button class="btn icon sm ghost" title=${isOpen ? 'بستن جزئیات' : 'جزئیات'} onClick=${() => setOpenId(isOpen ? null : a.id)}><${Icon} n="chevronDown" cls="sm chev" /></button>
               </div></td>
             </tr>
-            ${isOpen && html`<tr class="xrow"><td colspan="8"><${Expanded} st=${st} r=${r} s=${s} pf=${pf} open=${open} onModal=${setModal} /></td></tr>`}`;
+            ${isOpen && html`<tr class="xrow"><td colspan=${hasPnl ? 8 : 7}><${Expanded} st=${st} r=${r} s=${s} pf=${pf} open=${open} onModal=${setModal} /></td></tr>`}`;
           })}`)}
         </tbody>
-        <tfoot><tr><td class="b" style="padding:14px 12px">جمع ${fCat !== 'all' || fAtt || term ? 'فیلترشده' : 'ارزش خالص'}</td><td colspan="2"></td>
+        <tfoot><tr><td class="b" style="padding:14px 12px">جمع ${fCat !== 'all' || fAtt || term ? 'فیلترشده' : 'ارزش خالص'}</td><td></td><td class="c-price"></td>
           <td class="n b" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + r.signedValue, 0)} s=${s} /></td>
-          <td class="n small" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + r.dayChange, 0)} s=${s} compact sign /></td><td colspan="3"></td></tr></tfoot>
+          <td class="n small c-today" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + r.dayChange, 0)} s=${s} compact sign /></td><td colspan=${hasPnl ? 3 : 2}></td></tr></tfoot>
       </table>` : html`<div class="empty"><div class="ico"><${Icon} n="assets" /></div>${pf.rows.length ? 'موردی با این فیلتر پیدا نشد.' : 'هنوز دارایی‌ای ثبت نشده.'}
         <div class="row" style="margin-top:10px;justify-content:center">${pf.rows.length > 0 && (fCat !== 'all' || fAtt) && html`<button class="btn" onClick=${() => { setCat('all'); setOnlyAtt(false); }}>نمایش همه</button>`}<button class="btn primary" onClick=${() => open(null)}><${Icon} n="plus" />افزودن دارایی</button></div></div>`}
     </div>
@@ -306,5 +361,6 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
     ${modal?.t === 'adjust' && html`<${AdjustModal} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'value' && html`<${ValueModal} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'loanpay' && html`<${LoanPayModal} st=${st} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
+    ${modal?.t === 'matured' && html`<${MaturedModal} st=${st} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
   </div>`;
 }

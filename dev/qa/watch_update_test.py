@@ -90,7 +90,7 @@ async def main():
         await pg.goto(f'chrome-extension://{ext}/ui/app.html#/analysis'); await pg.wait_for_timeout(800)
         ctx_urls = await pg.evaluate("async () => (await chrome.runtime.getContexts({contextTypes:['TAB']})).map(c => c.documentUrl)")
         print('   contexts:', ctx_urls)
-        m = json.load(open(f'{EXT}/manifest.json')); m['version'] = '1.2.99'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
+        m = json.load(open(f'{EXT}/manifest.json')); m['version'] = '9.1.1'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
         before = len(ctx.pages)
         try: await pg.reload()
         except Exception: pass
@@ -101,7 +101,7 @@ async def main():
                 if t.url.endswith('#/analysis') and not t.is_closed():
                     try:
                         v = await t.evaluate("() => chrome.runtime.getManifest().version")
-                        if v == '1.2.99': newp = t
+                        if v == '9.1.1': newp = t
                     except Exception: pass
             if newp: break
         check('refresh applied the new version and reopened the same page', newp is not None, [t.url for t in ctx.pages])
@@ -118,9 +118,9 @@ async def main():
         sp = await ctx.new_page(); sp.on('pageerror', lambda e: errors.append(str(e)))
         await sp.goto(f'chrome-extension://{ext}/ui/app.html#/settings'); await sp.wait_for_timeout(1200)
         vt = await sp.inner_text('#version')
-        check('settings: shows installed version and «latest»', '1.2.99' in vt.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789')) and 'آخرین نسخه را داری' in vt, vt[:120].replace('\n', ' | '))
+        check('settings: shows installed version and «latest»', '9.1.1' in vt.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789')) and 'آخرین نسخه را داری' in vt, vt[:120].replace('\n', ' | '))
         check('settings: changelog listed', await sp.locator('#version .changelog li').count() >= 0)
-        m['version'] = '1.2.150'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
+        m['version'] = '9.1.2'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
         await sp.click('#version button:has-text("بررسی نسخه جدید")'); await sp.wait_for_timeout(800)
         vt = await sp.inner_text('#version')
         check('settings: new files detected as ready to install', 'آماده است' in vt and 'نصب نسخه' in vt, vt[:160].replace('\n', ' | '))
@@ -133,7 +133,7 @@ async def main():
             for t in ctx.pages:
                 if t.url.endswith('#/settings') and not t.is_closed():
                     try:
-                        if await t.evaluate("() => chrome.runtime.getManifest().version") == '1.2.150': newp = t
+                        if await t.evaluate("() => chrome.runtime.getManifest().version") == '9.1.2': newp = t
                     except Exception: pass
             if newp: break
         check('settings: «نصب» installs and reopens settings', newp is not None)
@@ -145,7 +145,7 @@ async def main():
         # --- worker-side: with no Dara tab open, it updates by itself
         for t in list(ctx.pages):
             if '/ui/app.html' in t.url: await t.close()
-        m['version'] = '1.2.200'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
+        m['version'] = '9.1.3'; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False, indent=2)
         pp = await ctx.new_page()
         try: await pp.goto(f'chrome-extension://{ext}/ui/popup.html')
         except Exception: pass
@@ -155,7 +155,7 @@ async def main():
             for w in ctx.service_workers:
                 if ext in w.url:
                     try:
-                        if await w.evaluate("() => chrome.runtime.getManifest().version") == '1.2.200': ok = True
+                        if await w.evaluate("() => chrome.runtime.getManifest().version") == '9.1.3': ok = True
                     except Exception: pass
             if ok: break
             await asyncio.sleep(0.5)

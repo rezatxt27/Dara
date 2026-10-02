@@ -46,10 +46,13 @@ export function CryptoPicker({ st, s, isOn, onPick, autoFocus = true }) {
   const timer = useRef(0);
   const t = q.trim().toLowerCase();
   const local = NOBITEX.filter((c) => !t || c.key.includes(t) || c.sym.toLowerCase().includes(t) || c.name.includes(q.trim()) || (c.cg || '').includes(t));
+  const seq = useRef(0);
   const run = async (text) => {
-    if (!text || /[؀-ۿ]/.test(text)) { setRemote(null); setErr(''); return; }
+    const my = ++seq.current;
+    if (!text || /[؀-ۿ]/.test(text)) { setRemote(null); setErr(''); setLoading(false); return; }
     setLoading(true);
     const r = await send('search', { provider: 'crypto', q: text });
+    if (my !== seq.current) return; // an older search answering late doesn't replace a newer one
     setLoading(false);
     setErr(r?.error || '');
     setRemote((r?.items || []).filter((c) => !c.catalog));

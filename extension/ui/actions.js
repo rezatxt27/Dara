@@ -309,12 +309,14 @@ export const act = {
       const a = st.assets.find((x) => x.id === id);
       if (!a) { msg = 'این دارایی دیگر وجود ندارد'; return; }
       const acc = st.assets.find((x) => x.id === ev.fund.accountId);
+      // the money has to go back somewhere: with its account deleted, bring the account back first
+      if (!acc) { msg = 'حسابی که پول از آن آمده بود حذف شده؛ اول آن را از «گزارش رویدادها» برگردان'; return; }
       const changes = [{ assetId: id, field: 'remove', delta: 0, value: -E.valueOf(a, st.quotes, {}).signedValue }];
       if (acc) changes.push(...E.applyDelta(acc, E.isLiability(a) ? -ev.fund.amount : ev.fund.amount, st.quotes));
       const rev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `برگشت افزودن «${a.name}»`, amount: ev.fund.amount, restore: a, reversalOf: ev.id, changes };
       st.assets = st.assets.filter((x) => x.id !== id);
       st.events = [rev, ...st.events.map((e) => (e.id === ev.id ? { ...e, reversedBy: rev.id } : e))].slice(0, EVENTS_MAX);
-      msg = acc ? (E.isLiability(a) ? 'افزودن برگشت داده شد و مبلغ از حساب کم شد' : 'افزودن برگشت داده شد و پول به حساب برگشت') : 'افزودن برگشت داده شد؛ حساب پرداخت دیگر وجود ندارد';
+      msg = E.isLiability(a) ? 'افزودن برگشت داده شد و مبلغ از حساب کم شد' : 'افزودن برگشت داده شد و پول به حساب برگشت';
     });
     toast(msg);
   },
@@ -370,6 +372,57 @@ export const act = {
       const changes = [...E.applyDelta(f, -amount, st.quotes), ...E.applyDelta(t, amount, st.quotes)];
       f.updatedAt = t.updatedAt = Date.now();
       ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: note || `انتقال از «${f.name}» به «${t.name}»`, amount, fromId, toId, changes };
+      logEv(st, ev);
+    });
+    return ev;
+  },
+
+  /** Pay off (or collect) an installment loan in full: the amount is what is owed at this very moment. */
+  async settleLoan({ loanId, accountId }) {
+    let ev = null;
+    await catchUp();
+    await store.mutate(['assets', 'events', 'quotes'], (st) => {
+      const a = st.assets.find((x) => x.id === loanId); if (!a || a.mode !== 'loan') return;
+      const liab = E.isLiability(a);
+      const amount = Math.round(E.loanState(a.loan, todayIso(), Date.now()).value); if (!(amount > 0)) return;
+      const acc = accountId ? st.assets.find((x) => x.id === accountId) : null;
+      const changes = [...(acc ? E.applyDelta(acc, liab ? -amount : amount, st.quotes) : []), ...E.applyDelta(a, liab ? amount : -amount, st.quotes)];
+      ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: `تسویه «${a.name}»`, amount,
+        fromId: liab ? acc?.id || null : a.id, toId: liab ? a.id : acc?.id || null, changes };
+      logEv(st, ev);
+    });
+    return ev;
+  },
+
+  /** A matured deposit: move everything to an account and close it (undo brings it back as it was). */
+  async closeDeposit({ assetId, accountId }) {
+    let ev = null;
+    await catchUp();
+    await store.mutate(['assets', 'events', 'quotes'], (st) => {
+      const a = st.assets.find((x) => x.id === assetId); const acc = st.assets.find((x) => x.id === accountId);
+      if (!a || !acc || a.mode !== 'rate') return;
+      const prev = structuredClone(a);
+      const amount = Math.round(E.valueOf(a, st.quotes, {}).value);
+      // a removal worth nothing (its money just moved): what it earned up to now stays a market gain
+      const changes = [...E.applyDelta(acc, amount, st.quotes), { assetId: a.id, field: 'remove', delta: 0, value: 0 }];
+      a.rate = { ...a.rate, principal: 0, offset: 0 }; a.archived = true; a.updatedAt = Date.now();
+      ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: `انتقال «${a.name}» به «${acc.name}» و بستن آن`, amount, fromId: a.id, toId: acc.id, changes, prev };
+      logEv(st, ev);
+    });
+    return ev;
+  },
+
+  /** Renew a deposit: what it is worth today becomes the new principal, from today to the new maturity (no jump in value). */
+  async renewDeposit({ assetId, maturity, annualPct }) {
+    let ev = null;
+    await catchUp();
+    await store.mutate(['assets', 'events', 'quotes'], (st) => {
+      const a = st.assets.find((x) => x.id === assetId); if (!a || a.mode !== 'rate') return;
+      const prev = structuredClone(a); const today = todayIso();
+      const v = E.rateValue(a.rate, today, Date.now());
+      a.rate = { ...a.rate, principal: v, start: today, maturity: maturity || null, annualPct: annualPct ?? a.rate.annualPct, lastPayout: undefined, offset: 0, offsetFrom: undefined };
+      a.updatedAt = Date.now();
+      ev = { id: uid('e'), kind: 'edit', date: today, at: Date.now(), title: `تمدید «${a.name}»`, amount: 0, prev, changes: [{ assetId: a.id, field: 'value', delta: 0, value: 0 }] };
       logEv(st, ev);
     });
     return ev;

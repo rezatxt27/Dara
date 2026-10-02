@@ -783,3 +783,32 @@ test('installment loans: extra payment, settlement and undo keep the books strai
   close(r0 - E.loanState(rcv.loan, iso, t).value, 5_000_000, 1);
   assert.ok(E.valueOf(rcv, {}, {}).signedValue > 0);
 });
+
+test('amounts typed the way people say them', () => {
+  const cases = { '۱۲ میلیون و ۵۰۰ هزار': 12_500_000, '۲ میلیارد و ۳۰۰ میلیون': 2_300_000_000, '۵ هزار میلیارد': 5e12, '۱۲٬۵۰۰٬۰۰۰': 12_500_000,
+    '12 500 000': 12_500_000, '۱٫۵': 1.5, '1.5 میلیون': 1_500_000, '−۳۰۰ هزار': -300_000, '۱ میلیون و ۲۰۰ هزار و ۵۰۰': 1_200_500, '۱۲ میلیون تومان': 12e6 };
+  for (const [t, v] of Object.entries(cases)) assert.equal(parseNum(t), v, t);
+  assert.ok(Number.isNaN(parseNum('abc')));
+});
+
+test('page text sent to AI hides ids but keeps amounts and dates', async () => {
+  const { maskSensitive, safeUrl } = await import('../../extension/lib/ai.js');
+  const t = maskSensitive('کارت ٦٠٣٧ ٩٩٧٥ ٩٩٤٥ ١٢٣٤ شبا ۱۲۰۱۲۰۰۰۰۰۰۰۰۰۰۱۲۳۴۵۶۷۸۹ موبایل +98 912 345 6789 شماره حساب: 0101-1234567-1 کد ملی ۰۰۱۲۳۴۵۶۷۸ تاریخ ۱۴۰۵/۰۷/۰۹ موجودی ۱۲٬۵۰۰٬۰۰۰ ریال');
+  for (const leak of ['6037', '1234567', '912', '0012345678', '120120']) assert.ok(!t.includes(leak), leak + ' leaked: ' + t);
+  assert.ok(t.includes('1405/07/09') && t.includes('12٬500٬000'));
+  assert.equal(safeUrl('https://x.example/a?token=1#y'), 'https://x.example/a');
+});
+
+test('monthly automation: debts cost interest, matured deposits earn nothing, a flow paying a debt is money out', () => {
+  const assets = [
+    { id: 'b', category: 'bank', mode: 'balance', balance: 1e9 },
+    { id: 'd', category: 'fixed', mode: 'rate', rate: { principal: 1200, annualPct: 10, start: J.addDaysIso(iso, -100), mode: 'simple' } },
+    { id: 'm', category: 'fixed', mode: 'rate', rate: { principal: 1200, annualPct: 10, start: J.addDaysIso(iso, -400), maturity: J.addDaysIso(iso, -30), mode: 'simple' } },
+    { id: 'l', category: 'debt', mode: 'rate', rate: { principal: 1200, annualPct: 20, start: J.addDaysIso(iso, -10), mode: 'simple' } },
+    { id: 'x', category: 'debt', mode: 'balance', balance: 500 },
+  ];
+  const flows = [{ id: 'f', active: true, amount: 50, freq: 'monthly', fromId: 'b', toId: 'x' }];
+  const m = E.monthlyAuto(assets, flows, iso);
+  close(m.interest, 10, 1e-9); close(m.debtInterest, 20, 1e-9); close(m.outflow, 50, 1e-9);
+  close(m.net, 10 - 50 - 20, 1e-9);
+});

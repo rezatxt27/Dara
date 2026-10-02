@@ -49,29 +49,32 @@ export function AssistantPage({ st, s, route }) {
   const active = conns[0];
   useEffect(() => { logRef.current?.scrollTo({ top: 1e9, behavior: 'smooth' }); }, [msgs.length, busy?.steps?.length]);
   useEffect(() => { if (route.q.tab === 'reports') document.getElementById('reports')?.scrollIntoView({ behavior: 'smooth' }); }, []);
-  const persist = (m) => { setMsgs(m); act.saveChat(m); };
+  // always update from the latest list (an approval made while an answer is pending must not be overwritten)
+  const msgsRef = useRef(msgs);
+  const persist = (fn) => { const next = typeof fn === 'function' ? fn(msgsRef.current) : fn; msgsRef.current = next; setMsgs(next); act.saveChat(next); };
 
   const ask = async (q) => {
     q = (q ?? text).trim();
     if (!q || busy) return;
     setText('');
-    const userMsg = { id: uid('m'), role: 'user', content: q, at: Date.now() };
-    const base = [...msgs, userMsg];
-    persist(base);
+    const privacy = stRef.current.ai.privacy;
+    const userMsg = { id: uid('m'), role: 'user', content: q, at: Date.now(), privacy };
+    persist((m) => [...m, userMsg]);
+    const base = msgsRef.current;
     const proposals = [];
     const steps = [];
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
-    const privacy = stRef.current.ai.privacy;
     try {
       const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p) });
-      const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error)).map((m) => ({ role: m.role, content: m.content }));
+      // in «only percentages» mode, earlier answers written with full amounts are not sent again
+      const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));
       const res = await AI.runAgent({ ai: stRef.current.ai, system: A.systemPrompt(stRef.current, privacy), messages: history, tools, signal: ctl.signal,
         onStep: (st2) => { if (st2.type === 'tool') { steps.push(st2.name); setBusy((b) => ({ ...b, steps: [...steps] })); } if (st2.type === 'conn') setBusy((b) => ({ ...b, conn: st2.conn })); },
         onConnUpdate: (id, patch) => act.patchConnection(id, patch) });
-      persist([...base, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, by: `${res.conn.name}، ${res.model}` }]);
+      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, privacy, by: `${res.conn.name}، ${res.model}` }]);
     } catch (e) {
-      persist([...base, { id: uid('m'), role: 'assistant', error: true, content: e.message + (e.detail ? `\n\n${String(e.detail).slice(0, 200)}` : ''), at: Date.now() }]);
+      persist((m) => [...m, { id: uid('m'), role: 'assistant', error: true, content: e.message + (e.detail ? `\n\n${String(e.detail).slice(0, 200)}` : ''), at: Date.now() }]);
     }
     setBusy(null); ctlRef.current = null;
   };
@@ -82,7 +85,7 @@ export function AssistantPage({ st, s, route }) {
     history.replaceState(null, '', '#/assistant');
     if (active) ask(q); else setText(q);
   }, [route.q.ask]);
-  const setPropStatus = (mid, pid, status) => persist(msgs.map((m) => (m.id === mid ? { ...m, proposals: m.proposals.map((p) => (p.id === pid ? { ...p, status } : p)) } : m)));
+  const setPropStatus = (mid, pid, status) => persist((list) => list.map((m) => (m.id === mid ? { ...m, proposals: m.proposals.map((p) => (p.id === pid ? { ...p, status } : p)) } : m)));
 
   return html`<div class="page">
     <div class="asst">

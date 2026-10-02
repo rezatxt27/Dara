@@ -70,11 +70,17 @@ async function post(conn, url, body, signal, timeout = 90000) {
   try {
     r = await _fetch(url, { method: 'POST', headers: headersFor(conn), body: JSON.stringify(body), signal: ctl.signal, credentials: 'omit', cache: 'no-store' });
   } catch (e) {
+    clearTimeout(t); signal?.removeEventListener?.('abort', onAbort);
     if (signal?.aborted) throw new AIError('لغو شد', { retryable: false });
     if (e.name === 'AbortError') throw new AIError('پاسخ سرویس بیش از حد طول کشید');
     throw new AIError('اتصال به سرویس برقرار نشد', { detail: String(e.message || e) });
+  }
+  // the timeout and the Stop button keep working while the body is read (some services send headers early)
+  let text;
+  try { text = await r.text(); } catch (e) {
+    if (signal?.aborted) throw new AIError('لغو شد', { retryable: false });
+    throw new AIError(e.name === 'AbortError' ? 'پاسخ سرویس بیش از حد طول کشید' : 'خواندن پاسخ سرویس ممکن نشد');
   } finally { clearTimeout(t); signal?.removeEventListener?.('abort', onAbort); }
-  const text = await r.text();
   let j = null; try { j = JSON.parse(text); } catch { /* not json */ }
   if (!r.ok) {
     const detail = j?.error?.message || j?.message || j?.detail || text.slice(0, 300);
@@ -284,10 +290,21 @@ export async function extract({ ai, system, prompt, signal, maxTokens = 2500 }) 
 }
 
 /** Mask card numbers, IBANs and phone numbers before sending page text to an AI service. */
+/**
+ * Hide identifying numbers before page text goes to an AI service: card numbers, IBAN/sheba (with or without «IR»),
+ * mobile numbers, account numbers written with separators, and any number right after «شماره حساب/کارت/شبا/کد ملی/…».
+ * Persian and Arabic digits are read too (they're turned into Latin digits first). Amounts with thousands separators stay.
+ */
 export function maskSensitive(text) {
-  return String(text || '')
-    .replace(/\bIR\s?\d{2}(?:[\s-]?\d{4}){5}[\s-]?\d{2}\b/gi, 'IR••••')
-    .replace(/\b(?:\d{4}[\s-]?){3}\d{4}\b/g, '•••• •••• •••• ••••')
-    .replace(/(?:\+98|0)9\d{9}\b/g, '09•••••••••')
-    .replace(/[۰-۹]{4}[\s-]?[۰-۹]{4}[\s-]?[۰-۹]{4}[\s-]?[۰-۹]{4}/g, '•••• •••• •••• ••••');
+  let s = String(text || '').replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٠-٩]/g, (c) => '٠١٢٣٤٥٦٧٨٩'.indexOf(c));
+  s = s.replace(/((?:شماره\s*)?(?:حساب|کارت|شبا|کد\s*ملی|شناسه\s*ملی|موبایل|تلفن\s*همراه|تلفن|شماره\s*همراه)\s*[:：]?\s*)((?:IR)?[\d][\d\s\-\/.]{5,}\d)/gi, (m, k) => k + '••••');
+  s = s.replace(/(?<![\d,٬])(?:IR\s?)?\d{2}(?:[\s-]?\d{4}){5}[\s-]?\d{2}(?![\d,٬])/gi, 'IR••••');
+  s = s.replace(/(?<![\d,٬])\d{4}([\s-]?)\d{4}\1\d{4}\1\d{4}(?![\d,٬])/g, '•••• •••• •••• ••••');
+  s = s.replace(/(?:\+98|0098|(?<!\d)0)\s?9\d{2}[\s-]?\d{3}[\s-]?\d{4}(?!\d)/g, '09•••••••••');
+  s = s.replace(/(?<![\d,٬.])\d{16,}(?![\d,٬.])/g, '••••'); // a bare 16+ digit run is an id, not an amount
+  // account-like numbers with dashes or slashes (dates like 1405/07/09 are kept)
+  s = s.replace(/(?<![\d,٬])\d{2,8}(?:[-\/.]\d{2,12}){2,}(?![\d,٬])/g, (m) => (/^\d{2,4}[\/.-]\d{1,2}[\/.-]\d{1,2}$/.test(m) || /^\d+\.\d+$/.test(m) ? m : '••••'));
+  return s;
 }
+/** Drop a URL's query and fragment (tokens, account ids) before it goes anywhere. */
+export const safeUrl = (u) => { try { const x = new URL(u); return x.origin + x.pathname; } catch { return ''; } };

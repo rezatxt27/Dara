@@ -127,12 +127,12 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
 
     // 3–5) Automations, today's snapshot and alerts on the freshest state, under the shared lock: a page saving at the
     //      same moment waits instead of being overwritten (or overwriting an installment that was just applied).
-    let autos, pf, snapshots, quotes, fired, meta;
+    let autos, pf, snapshots, quotes, fired, meta, events;
     await store.mutate(['assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings'], (cur) => {
       quotes = E.mergeQuotes(cur.quotes, fresh, errors);
       autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
       E.rememberLastPrices(autos.assets, quotes);
-      const events = autos.events.concat(cur.events).slice(0, E.EVENTS_MAX);
+      events = autos.events.concat(cur.events).slice(0, E.EVENTS_MAX);
       E.settlePending(autos.assets, events, quotes);
       pf = E.portfolio(autos.assets, quotes, cur.settings);
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });

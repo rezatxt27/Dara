@@ -290,7 +290,7 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
     value = ls.value; source = 'loan'; at = now; status = 'auto';
     dayChange = asOf ? 0 : ls.daily;
     if (ls.done) { status = 'settled'; at = null; dayChange = 0; }
-    else if (asset.loan?.paused) { status = 'error'; error = 'حساب قسط‌ها حذف شده و قسط‌ها متوقف است؛ ویرایش کن و حساب دیگری انتخاب کن'; }
+    else if (asset.loan?.paused) { status = 'error'; error = 'حساب قسط‌ها حذف شده؛ ویرایش کن و حساب دیگری انتخاب کن'; } // installments still follow the schedule
   } else if (asset.mode === 'rate') {
     value = rateValue(asset.rate, nowIso, liveMs);
     status = 'auto'; source = 'rate'; at = now;
@@ -607,6 +607,7 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
       if (off) changes.push({ assetId: a.id, field: 'rate.offset', delta: -off });
       // undoing this payout brings the interest back into the deposit (it's due again), instead of losing it
       changes.push({ assetId: a.id, field: 'rate.lastPayout', prev: prevPayout, next: r.lastPayout });
+      if (!(interest >= 1)) continue; // nothing left in it (withdrawn to zero): no empty «واریز سود» lines
       // a scheduled payout is a fact, like an installment: undoing it would only make the next run pay it again
       events.push({ id: uid('e'), kind: 'interest', date: d, at, title: `${isLiability(a) ? 'سود اضافه‌شده به' : 'واریز سود'} «${a.name}»`, amount: interest,
         fromId: a.id, toId: target ? target.id : a.id, changes, noUndo: true, ...(isLiability(a) ? { owed: true } : {}) });
@@ -616,7 +617,7 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
       if (job.kind === 'loan') {
         const { a } = job; const L = a.loan; const liab = isLiability(a);
         // the schedule may have changed earlier in this run (an extra payment, a settlement): use it as it is now
-        if (a.archived || L.paused || (L.settledAt && d >= L.settledAt) || (L.lastRun && d <= L.lastRun)) continue; // paused: its account was removed
+        if (a.archived || (L.settledAt && d >= L.settledAt) || (L.lastRun && d <= L.lastRun)) continue;
         const plan = loanPlan(L); const row = plan.rows.find((x) => x.date === d);
         if (!row) continue;
         job.n = plan.n;

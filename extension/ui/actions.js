@@ -86,7 +86,7 @@ export const act = {
             if (acc >= 1) { rec.balance = num(rec.balance) + acc; paidIn = acc; }
             rec.interest.accrued = 0;
           }
-          if (!x.interest.on && rec.interest.on) rec.interest = { ...rec.interest, since: today, lastAccrual: null, accrued: 0 };
+          if (!x.interest.on && rec.interest.on) rec.interest = { ...rec.interest, since: today, sinceMs: Date.now(), lastAccrual: null, accrued: 0 };
         }
         if (x.price && rec.price) rec.price = { ...rec.price, ...(E.quoteId(x.price.ref || {}) === E.quoteId(rec.price.ref || {}) ? { last: x.price.last ?? rec.price.last } : {}), pendingFix: x.price.pendingFix };
         if (rec.mode === 'loan' && rec.loan?.paused && opts.orig) { rec.loan = { ...rec.loan }; delete rec.loan.paused; }
@@ -281,7 +281,7 @@ export const act = {
     });
     if (!ev) return null;
     // what depended on it is said out loud: installments wait for a new account, payouts stay in the deposit
-    const deps = (ev.unlinked || []).map((u) => u.f === 'loan.account' ? `قسط‌های «${u.name}» تا انتخاب حساب دیگر متوقف شد` : `سود «${u.name}» از این به بعد در خودش می‌ماند`);
+    const deps = (ev.unlinked || []).map((u) => u.f === 'loan.account' ? `قسط‌های «${u.name}» دیگر از حسابی کم نمی‌شود؛ برایش حساب دیگری انتخاب کن` : `سود «${u.name}» از این به بعد در خودش می‌ماند`);
     if (ev.flowIds?.length) deps.push(`${ev.flowIds.length} جریان تکراری متوقف شد`);
     toast(`«${ev.restore.name}» حذف شد${deps.length ? '؛ ' + deps.join('؛ ') : ''}`, { label: 'برگشت', fn: () => act.undoEvent(ev) }, { replace: true });
     return ev;
@@ -386,7 +386,8 @@ export const act = {
       const amount = (side === 'buy' ? qty : sellQ) * price;
       if (side === 'buy') {
         a.quantity = q0 + qty; changes.push({ assetId, field: 'quantity', delta: qty });
-        a.costBasis = cb0 + amount; changes.push({ assetId, field: 'costBasis', delta: amount });
+        // the cost grows only if the cost of what was already held is known (else the profit shown would be made up)
+        if (cb0 > 0 || q0 <= 0) { a.costBasis = cb0 + amount; changes.push({ assetId, field: 'costBasis', delta: amount }); }
       } else {
         a.quantity = q0 - sellQ; changes.push({ assetId, field: 'quantity', delta: -sellQ });
         const dc = q0 ? -cb0 * (sellQ / q0) : 0;

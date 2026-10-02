@@ -34,6 +34,7 @@ export function parseNum(input, { lenient = false, unit = null } = {}) {
   if (typeof input === 'number') return input;
   let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/‌/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
   const neg = /^-/.test(s);
+  if (/^-?\d{1,3}(\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, ''); // «2.500.000»: dots as thousands separators
   // thousands separators inside a number go; Persian decimal mark (and «/» between digits) becomes a dot; "12 500 000" joins up
   s = s.replace(/(\d)[٬,](?=\d)/g, '$1').replace(/٫/g, '.').replace(/(\d)\/(\d)/g, '$1.$2').replace(/(\d)\s+(?=\d{3}(?!\d))/g, '$1');
   if (lenient) s = s.replace(/[a-z]+/gi, ' '); // spreadsheet cells: «12 گرم», «120 USD»
@@ -172,7 +173,7 @@ export function numToWordsFa(value, { approx = true } = {}) {
 
 /** Group digits while typing: keeps a single decimal point, strips other chars. */
 export function groupTyping(raw) {
-  let s = toEnDigits(raw).replace(/[٫\/]/g, '.').replace(/[٬,\s]/g, '');
+  let s = toEnDigits(raw).replace(/[−–]/g, '-').replace(/[٫\/]/g, '.').replace(/[٬,\s]/g, '');
   const neg = s.startsWith('-');
   s = s.replace(/[^\d.]/g, '');
   const dot = s.indexOf('.');

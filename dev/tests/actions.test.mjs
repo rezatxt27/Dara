@@ -89,16 +89,20 @@ test('review fixes (1.5): rate change applies from today, undo with a deleted as
   await act.deleteAsset('c');
   await act.undoEvent(ev);
   close((await store.load('assets')).assets.find((a) => a.id === 'b').balance, 400e6, 1, 'the transfer was not half-undone');
-  // deleting the account a loan pays from pauses the installments (no money from nowhere)
+  // deleting the account a loan pays from: flagged, and installments no longer touch any account
   const loan = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { amount: 1e8, annualPct: 18, months: 12, firstDue: J.addJMonthsIso(iso, -2), start: J.addJMonthsIso(iso, -3), account: 'b' } };
   await reset({ assets: [{ ...bank }, loan] });
   await act.deleteAsset('b');
   const s = await store.load('assets', 'flows', 'quotes');
   const L = s.assets.find((a) => a.id === 'l');
   assert.equal(L.loan.paused, 'account');
-  const before = E.loanState(L.loan, iso).value;
+  // the schedule goes on (the debt shrinks as the bank collects), but no account of ours is debited for it
   const r = E.applyAutomations(s.assets, [], {}, J.addDaysIso(iso, 40));
-  assert.equal(r.events.filter((e) => e.kind === 'loan').length, 0, 'no installment while paused');
-  close(E.loanState(r.assets.find((a) => a.id === 'l').loan, iso).value, before, 1);
+  const inst = r.events.filter((e) => e.kind === 'loan' && e.date > iso);
+  assert.equal(inst.length, 1, 'the installment due in the next 40 days is logged');
+  assert.equal(inst[0].changes.length, 0, 'no account is debited');
+  assert.equal(inst[0].fromId, null);
+  const L2 = r.assets.find((a) => a.id === 'l');
+  close(E.loanState(L2.loan, J.addDaysIso(iso, 40)).owed, E.loanPlan(L2.loan).rows.find((x) => x.date > iso).balance, 1, 'value follows the schedule');
   assert.equal(E.valueOf(L, {}, {}).status, 'error', 'shows up in «needs attention»');
 });

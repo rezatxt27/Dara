@@ -17,6 +17,8 @@ export function marketMove(st, pf, days = 1) {
   const att = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, days, todayIso(), pf);
   // «today» after the browser was closed for a while: the last snapshot is days old, so it would show many days' change
   // as today's. Use today's price moves instead.
+  // (a longer view whose start is far older than its label says nothing honest either)
+  if (att && days > 1 && daysBetween(att.from, todayIso()) > days + 3) return null;
   if (att && days === 1 && daysBetween(att.from, todayIso()) > 3) return { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true };
   if (!att) return days === 1 ? { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true } : null;
   const base = Math.abs(att.base) || 0;

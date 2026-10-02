@@ -194,7 +194,8 @@ export async function importBackup(obj, { merge = false } = {}) {
         const id = 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
         const changes = incoming.map((a) => ({ assetId: a.id, field: 'add', delta: 0, value: valueOf(a, quotes, {}).signedValue || 0 }));
         const back = new Set(incoming.map((a) => a.id));
-        cur.events = (cur.events || []).map((e) => (e.restore && back.has(e.restore.id) && !e.undone ? { ...e, reversedBy: id } : e)); // a deleted asset that came back
+        // a deleted asset that came back: its deletion counts as undone (no «removed» money, no undo button left)
+        cur.events = (cur.events || []).map((e) => (e.restore && back.has(e.restore.id) && !e.undone ? { ...e, undone: true, undoneBy: id } : e));
         cur.events = [{ id, kind: 'edit', date: todayIso(), at: Date.now(), title: `ورود ${incoming.length} دارایی از فایل پشتیبان`, amount: 0, noUndo: true, changes }, ...cur.events];
       }
     });

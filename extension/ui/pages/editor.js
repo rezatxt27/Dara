@@ -327,7 +327,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
           <span class="hint">${why === 'reval' ? 'سود یا زیان بازار حساب می‌شود.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'}</span></div>`}
         ${!cat.liability && ['bank', 'fixed', 'receivable', 'other'].includes(a.category) && html`<div class="sec" style="padding:12px;gap:10px;background:var(--surface-2)">
           <div class="row between"><div><div class="sb small">${LT('سود روزشمار روی همین مانده', 'interest')}</div><div class="xs muted">${a.category === 'bank' ? 'برای حساب کوتاه‌مدت: سود هر روز روی مانده همان روز حساب و ماهانه به همین حساب واریز می‌شود.' : 'وقتی مبلغ مدام عوض می‌شود و سود روی مانده هر روز حساب می‌شود. اگر اصل ثابت است، روش «سود با نرخ ثابت» ساده‌تر است.'}</div></div>
-            <${Toggle} on=${!!a.interest?.on} onChange=${(v) => set({ interest: v ? { basis: 365, payDay: 1, ...(a.interest || {}), on: true, since: todayIso(), lastAccrual: null, accrued: 0 } : { ...(a.interest || {}), on: false } })} /></div>
+            <${Toggle} on=${!!a.interest?.on} onChange=${(v) => set({ interest: v ? { basis: 365, payDay: 1, ...(a.interest || {}), on: true, since: todayIso(), sinceMs: Date.now(), lastAccrual: null, accrued: 0 } : { ...(a.interest || {}), on: false } })} /></div>
           ${a.interest?.on && html`<div class="grid2">
             <${NumField} label=${LT('نرخ سود سالانه', 'rpct')} suffix="٪" value=${a.interest.annualPct} onInput=${(v) => set({ interest: { ...a.interest, annualPct: v } })} digits=${2} err=${E_('irate')} />
             <div class="field"><label>${LT('روز واریز سود در ماه', 'payDay')}</label><select class="input" value=${a.interest.payDay ?? 1} onChange=${(e) => set({ interest: { ...a.interest, payDay: +e.target.value } })}>
@@ -390,7 +390,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
               <option value="">— ثبت نشود —</option>${balanceTargets.map((x) => html`<option value=${x.id}>${x.name}${x.custodian && x.custodian !== x.name ? ' — ' + x.custodian : ''}</option>`)}
             </select></div>
         </div>
-        ${asset?.loan?.paused && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>حسابی که قسط‌ها از آن ${liabCat ? 'کم' : 'واریز'} می‌شد حذف شده و قسط‌ها متوقف است. حساب دیگری انتخاب کن (یا «ثبت نشود») و ذخیره کن؛ قسط‌های عقب‌افتاده همان موقع اعمال می‌شوند.</div></div>`}
+        ${asset?.loan?.paused && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>حسابی که قسط‌ها ${liabCat ? 'از آن کم' : 'به آن واریز'} می‌شد حذف شده؛ قسط‌ها دیگر به حسابی وصل نیست. حساب دیگری انتخاب کن (یا «ثبت نشود») و ذخیره کن.</div></div>`}
         <div class="callout"><${Icon} n="info" cls="sm" /><div>${liabCat ? 'وامی را که از قبل داری' : 'قرضی را که از قبل داده‌ای'} هم همین‌جا ثبت کن: یا مبلغ و تاریخ اولین قسط اصلی را بنویس تا قسط‌های گذشته پرداخت‌شده حساب شوند، یا مانده فعلی، تعداد قسط‌های باقی‌مانده و تاریخ قسط بعدی را.</div></div>
         ${plan && html`<div class="grid3">
           <div class="pcell"><span class="n">قسط ماهانه</span><span class="v"><${Money} v=${plan.A} s=${s} compact /></span></div>

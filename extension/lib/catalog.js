@@ -102,6 +102,17 @@ export const METAL_PRESETS = [
   { id: 'palladium', name: 'پالادیوم', hint: 'قیمت جهانی، تبدیل به گرم', unit: 'گرم', ref: { provider: 'tgju', key: 'palladium' }, factor: 1 / 31.1035 },
 ];
 
+/** Quick picks for physical gold and coins: a coin is priced per piece, gold per gram. */
+export const GOLD_PRESETS = [
+  { id: 'sekee', name: 'سکه امامی', hint: 'قیمت هر عدد', unit: 'عدد', ref: { provider: 'tgju', key: 'sekee' }, factor: 1 },
+  { id: 'sekeb', name: 'سکه بهار آزادی', hint: 'قیمت هر عدد', unit: 'عدد', ref: { provider: 'tgju', key: 'sekeb' }, factor: 1 },
+  { id: 'nim', name: 'نیم سکه', hint: 'قیمت هر عدد', unit: 'عدد', ref: { provider: 'tgju', key: 'nim' }, factor: 1 },
+  { id: 'rob', name: 'ربع سکه', hint: 'قیمت هر عدد', unit: 'عدد', ref: { provider: 'tgju', key: 'rob' }, factor: 1 },
+  { id: 'gerami', name: 'سکه گرمی', hint: 'قیمت هر عدد', unit: 'عدد', ref: { provider: 'tgju', key: 'retail_gerami' }, factor: 1 },
+  { id: 'g18', name: 'طلای ۱۸ عیار', hint: 'زیورآلات؛ قیمت هر گرم', unit: 'گرم', ref: { provider: 'tgju', key: 'geram18' }, factor: 1 },
+  { id: 'g24', name: 'شمش / طلای ۲۴ عیار', hint: 'قیمت هر گرم', unit: 'گرم', ref: { provider: 'tgju', key: 'geram24' }, factor: 1 },
+];
+
 /** Gold ETFs on the Tehran exchange: their exposure is gold, not equity. */
 export const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گوهر', 'آلتون', 'نفیس', 'لیان', 'تابان', 'زرفام', 'جواهر', 'گنج', 'قیراط', 'درخشان', 'ناب', 'زرین', 'رز', 'آتش', 'نهال'];
 

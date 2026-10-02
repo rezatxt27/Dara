@@ -54,11 +54,12 @@ export function useTick(ms = 5000) {
 
 /* ---------------- toasts ---------------- */
 let pushToast = () => {};
-export function toast(msg, action) { pushToast({ id: Math.random(), msg, action }); }
+/** replace: clear earlier toasts first (a success shouldn't sit next to a stale «fill in the fields» warning) */
+export function toast(msg, action, { replace = false } = {}) { pushToast({ id: Math.random(), msg, action, replace }); }
 export function Toasts() {
   const [list, setList] = useState([]);
   useEffect(() => {
-    pushToast = (t) => { setList((l) => [...l, t]); setTimeout(() => setList((l) => l.filter((x) => x.id !== t.id)), t.action ? 7000 : 3500); };
+    pushToast = (t) => { setList((l) => (t.replace ? [t] : [...l, t])); setTimeout(() => setList((l) => l.filter((x) => x.id !== t.id)), t.action ? 7000 : 3500); };
   }, []);
   return html`<div class="toasts">${list.map((t) => html`<div class="toast" key=${t.id}><span class="grow">${t.msg}</span>${t.action && html`<button onClick=${() => { t.action.fn(); setList((l) => l.filter((x) => x.id !== t.id)); }}>${t.action.label}</button>`}</div>`)}</div>`;
 }
@@ -134,26 +135,28 @@ const localSep = (g) => (getDigits() === 'fa' ? g.replace(/,/g, '٬') : g);
  * Number input with live thousand separators, caret preservation, Persian words underneath
  * and a sanity warning when the new value is ~10× off the previous one.
  */
-export function NumField({ label, value, onInput, suffix, hint, placeholder, digits = 'auto', autoFocus, err, words = false, wordsUnit = '', prev = null, compact = false }) {
+export function NumField({ label, value, onInput, suffix, hint, placeholder, digits = 'auto', autoFocus, err, words = false, wordsUnit = '', prev = null, compact = false, unit = null }) {
   const [txt, setTxt] = useState(fmtVal(value));
   const ref = useRef();
   useEffect(() => { if (document.activeElement !== ref.current) setTxt(fmtVal(value)); }, [value]);
   const onIn = (e) => {
     const el = e.target; const raw = el.value; const caret = el.selectionStart ?? raw.length;
     // words like «۱۲ میلیون و ۵۰۰ هزار» are kept while typing and turned into digits when leaving the field
-    if (hasWords(raw)) { setTxt(raw); const v = parseNum(raw); onInput(isFinite(v) ? v : null); return; }
-    const sig = toEnDigits(raw.slice(0, caret)).replace(/[^\d.\-]/g, '').length;
+    if (hasWords(raw)) { setTxt(raw); const v = parseNum(raw, { unit }); onInput(isFinite(v) ? v : null); return; }
+    // count digits and the decimal mark («٫», «.» or «/») before the caret, to put the caret back after regrouping
+    const norm = (x) => toEnDigits(x).replace(/[٫\/]/g, '.');
+    const sig = norm(raw.slice(0, caret)).replace(/[^\d.\-]/g, '').length;
     const g = localSep(groupTyping(raw));
     setTxt(g);
     requestAnimationFrame(() => {
-      let i = 0, c = 0; const t = toEnDigits(g);
+      let i = 0, c = 0; const t = norm(g);
       while (i < t.length && c < sig) { if (/[\d.\-]/.test(t[i])) c++; i++; }
       try { el.setSelectionRange(i, i); } catch { /* ignore */ }
     });
     const v = parseNum(g);
     onInput(g !== '' && isFinite(v) ? v : null);
   };
-  const v = parseNum(txt);
+  const v = parseNum(txt, { unit });
   const has = txt !== '' && isFinite(v);
   const w = words && has ? numToWordsFa(v) + (wordsUnit ? ' ' + wordsUnit : '') : '';
   const ratio = has && prev > 0 && v > 0 ? v / prev : 1;
@@ -162,7 +165,7 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
     ${label && html`<label>${label}</label>`}
     <div class="input-wrap">
       <input ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn}
-        onBlur=${() => { if (hasWords(txt)) { const v = parseNum(txt); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
+        onBlur=${() => { if (hasWords(txt)) { const v = parseNum(txt, { unit }); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
       ${suffix && html`<span class=${'suffix' + (String(suffix).length <= 2 ? ' short' : '')}>${suffix}</span>`}
     </div>
     ${!compact && (w || hint || warn) && html`<span class="hint stack">
@@ -178,7 +181,7 @@ export function MoneyField({ label, rial, onRial, s, hint, autoFocus, err, prev 
   const k = s?.currency === 'rial' ? 1 : 10;
   const unit = s?.currency === 'rial' ? 'ریال' : 'تومان';
   return html`<${NumField} label=${label} value=${rial === null || rial === undefined || rial === '' ? '' : Math.round(rial / k)} onInput=${(v) => onRial(v === null ? null : v * k)}
-    placeholder=${'مثلاً ۱۲ میلیون و ۵۰۰ هزار'} suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} />`;
+    placeholder=${'مثلاً ۲۰۰ میلیون'} suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} unit=${s?.currency === 'rial' ? 'rial' : 'toman'} />`;
 }
 
 const WD = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];
@@ -219,21 +222,35 @@ export function JCalendar({ value, onPick, onClear, onClose }) {
   </div>`;
 }
 
-export function JDateField({ label, iso, onIso, hint, allowEmpty, err }) {
+export function JDateField({ label, iso, onIso, hint, allowEmpty, err, onBad }) {
   const [txt, setTxt] = useState(iso ? fmtJ(iso, 'short') : '');
   const [bad, setBad] = useState(false);
   const [open, setOpen] = useState(false);
-  useEffect(() => { setTxt(iso ? fmtJ(iso, 'short') : ''); setBad(false); }, [iso]);
+  const ref = useRef();
+  const mark = (b) => { setBad(b); onBad?.(b); };
+  // the stored date only rewrites the text when the owner isn't typing in it (else «۱۴۰۶/۰۴/۳» becomes «۰۳» mid-typing)
+  useEffect(() => { if (document.activeElement !== ref.current) { setTxt(iso ? fmtJ(iso, 'short') : ''); mark(false); } }, [iso]);
+  const commit = (t, final) => {
+    const raw = toEnDigits(t).trim();
+    if (!raw) { mark(!allowEmpty && final); if (allowEmpty) onIso(null); return; }
+    const v = parseJ(t);
+    // while typing, a one-digit day may still be growing («۱۴۰۶/۰۴/۳» → «۳۱»): wait for the second digit or for leaving the field
+    const complete = /^\d{4}\D\d{1,2}\D\d{2}$/.test(raw);
+    if (v && (complete || final)) { mark(false); onIso(v); if (final) setTxt(fmtJ(v, 'short')); }
+    else mark(final || (!v && complete));
+  };
   return html`<div class="field" style="position:relative">
     ${label && html`<label>${label}</label>`}
     <div class="input-wrap">
-      <input class=${'input num-in' + (bad || err ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
+      <input ref=${ref} class=${'input num-in' + (bad || err ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
+        aria-invalid=${bad || err ? 'true' : undefined}
         onFocus=${() => setOpen(true)}
-        onInput=${(e) => { setTxt(e.target.value); const v = parseJ(e.target.value); setBad(!v && !!e.target.value); if (v) onIso(v); else if (!e.target.value && allowEmpty) onIso(null); }} />
+        onInput=${(e) => { setTxt(e.target.value); commit(e.target.value, false); }}
+        onBlur=${(e) => commit(e.target.value, true)} />
       <button type="button" class="cal-btn" aria-label="تقویم" onClick=${() => setOpen(!open)}><${Icon} n="calendar" cls="sm" /></button>
     </div>
-    ${open && html`<${JCalendar} value=${iso} onPick=${(v) => onIso(v)} onClear=${allowEmpty ? () => onIso(null) : null} onClose=${() => setOpen(false)} />`}
-    <span class="hint">${bad ? 'به شکل ۱۴۰۵/۰۷/۰۹ وارد کن یا از تقویم انتخاب کن' : iso ? fmtJ(iso) : hint || ''}</span>
+    ${open && html`<${JCalendar} value=${iso} onPick=${(v) => { mark(false); setTxt(fmtJ(v, 'short')); onIso(v); }} onClear=${allowEmpty ? () => { mark(false); setTxt(''); onIso(null); } : null} onClose=${() => setOpen(false)} />`}
+    <span class=${'hint' + (bad ? ' err-msg' : '')}>${bad ? 'تاریخ درست نیست؛ به شکل ۱۴۰۵/۰۷/۰۹ بنویس یا از تقویم انتخاب کن' : iso ? fmtJ(iso) : hint || ''}</span>
   </div>`;
 }
 
@@ -271,7 +288,8 @@ export function Markdown({ text }) {
 
 /* ---------------- overlays ---------------- */
 export function Drawer({ title, onClose, children, footer, icon }) {
-  useEffect(() => { const h = (e) => e.key === 'Escape' && onClose(); addEventListener('keydown', h); return () => removeEventListener('keydown', h); }, []);
+  const close = useRef(onClose); close.current = onClose; // Escape always calls the latest onClose (it may ask first)
+  useEffect(() => { const h = (e) => e.key === 'Escape' && close.current(); addEventListener('keydown', h); return () => removeEventListener('keydown', h); }, []);
   return html`<div class="scrim" onClick=${onClose}></div>
   <aside class="drawer" role="dialog" aria-modal="true" aria-label=${title}>
     <div class="dh">${icon}<h2>${title}</h2><button class="btn icon ghost" onClick=${onClose} aria-label="بستن"><${Icon} n="x" /></button></div>
@@ -443,8 +461,9 @@ export function Explain({ get, s, title = 'این عدد از کجا آمد؟', 
     if (pos) return setPos(null);
     setData(get());
     const r = btn.current.getBoundingClientRect();
-    const w = Math.min(360, innerWidth - 24);
-    const right = Math.min(Math.max(12, innerWidth - r.right - 8), innerWidth - w - 12);
+    const vw = document.documentElement.clientWidth || innerWidth; // without the scrollbar
+    const w = Math.min(360, vw - 24);
+    const right = Math.min(Math.max(12, vw - r.right - 8), vw - w - 12);
     const below = innerHeight - r.bottom > 280 || r.top < 300;
     setPos({ right, w, top: below ? r.bottom + 6 : null, bottom: below ? null : innerHeight - r.top + 6 });
   };
@@ -473,8 +492,9 @@ export function Tip({ title, text, example }) {
   const btn = useRef(); const hideT = useRef(0);
   const place = (pinned) => {
     const r = btn.current.getBoundingClientRect();
-    const w = Math.min(320, innerWidth - 24);
-    const right = Math.min(Math.max(12, innerWidth - r.right - 8), innerWidth - w - 12);
+    const vw = document.documentElement.clientWidth || innerWidth; // without the scrollbar
+    const w = Math.min(320, vw - 24);
+    const right = Math.min(Math.max(12, vw - r.right - 8), vw - w - 12);
     const below = innerHeight - r.bottom > 220 || r.top < 220;
     setPos({ right, w, top: below ? r.bottom + 6 : null, bottom: below ? null : innerHeight - r.top + 6, pinned });
   };

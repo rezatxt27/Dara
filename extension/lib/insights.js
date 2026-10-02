@@ -15,6 +15,9 @@ import { num } from './format.js';
  */
 export function marketMove(st, pf, days = 1) {
   const att = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, days, todayIso(), pf);
+  // «today» after the browser was closed for a while: the last snapshot is days old, so it would show many days' change
+  // as today's. Use today's price moves instead.
+  if (att && days === 1 && daysBetween(att.from, todayIso()) > 3) return { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true };
   if (!att) return days === 1 ? { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true } : null;
   const base = Math.abs(att.base) || 0;
   return { abs: att.market, pct: base ? att.market / base : 0, total: att.total, moved: att.total - att.market };
@@ -91,7 +94,7 @@ export function explainAsset(a, quotes = {}, settings = {}, now = Date.now()) {
     lines.push({ t: liab ? 'مبلغ وام' : 'مبلغ قرض', v: st.P, k: 'money' });
     lines.push({ t: 'نرخ سود سالانه', v: (+L.annualPct || 0) / 100, k: 'pct' });
     lines.push({ t: 'مبلغ هر قسط', v: st.A, k: 'money' });
-    lines.push({ t: 'اقساط پرداخت‌شده', v: `${num(st.paid)} از ${num(st.n)}`, k: 'text' });
+    lines.push({ t: 'اقساط پرداخت‌شده', v: `${num(st.paid + st.before)} از ${num(st.n + st.before)}`, k: 'text' });
     if (st.done) { lines.push({ t: 'وضعیت', v: 'تسویه شده', k: 'text' }); formula = 'تسویه شده؛ دیگر از ارزش خالص کم نمی‌شود'; }
     else {
       lines.push({ t: 'مانده اصل بعد از آخرین قسط', v: st.owed, k: 'money' });

@@ -44,7 +44,7 @@ ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» ف
 function loanLine(a, settings) {
   const st = E.loanState(a.loan);
   if (st.done) return 'وام قسطی، تسویه شده';
-  return `${E.isLiability(a) ? 'وام' : 'طلب'} قسطی ${a.loan.annualPct}٪، ${st.paid} از ${st.n} قسط پرداخت شده، قسط بعدی ${fmtJ(st.next.date)}${settings ? `، مبلغ قسط ${disp(st.next.payment, settings)}` : ''}`;
+  return `${E.isLiability(a) ? 'وام' : 'طلب'} قسطی ${a.loan.annualPct}٪، ${st.paid + st.before} از ${st.n + st.before} قسط پرداخت شده، قسط بعدی ${fmtJ(st.next.date)}${settings ? `، مبلغ قسط ${disp(st.next.payment, settings)}` : ''}`;
 }
 
 export function makeTools(ctx) {
@@ -59,10 +59,11 @@ export function makeTools(ctx) {
       schema: { type: 'object', properties: {}, required: [] },
       run: () => {
         const s = st(); const pf = pfOf(); const g = pf.gross || 1;
-        const ch = (d) => { const c = E.changeSince(s.snapshots, d, pf.net); return c ? { pct: pct(c.pct), ...(P() ? {} : { amount: disp(c.abs, s.settings) }) } : null; };
+        const mmv = (d) => { const c = I.marketMove(s, pf, d); return c ? { pct: pct(c.pct), ...(P() ? {} : { amount: disp(c.abs, s.settings) }) } : null; };
         return {
           unit: unitName(s.settings), ...(P() ? {} : { net: disp(pf.net, s.settings), gross: disp(pf.gross, s.settings), debt: disp(pf.debt, s.settings) }),
-          change: { today: ch(1) || { pct: pct(pf.dayChangePct) }, week: ch(7), month: ch(30) },
+          // market effect only (money added or moved is left out), the same figures the dashboard shows
+          change: { today: mmv(1) || { pct: pct(pf.dayChangePct) }, week: mmv(7), month: mmv(30) },
           categories: pf.cats.map((c) => ({ id: c.id, name: c.name, share_pct: pct(c.value / g), ...money(c.value, pf.net), liability: !!c.liability })),
           exposures: Object.fromEntries(Object.entries(pf.byExposure).map(([k, v]) => [EXPOSURES[k]?.name || k, pct(v / g)])),
           liquidity_pct: { high: pct(pf.byLiquidity.high / g), mid: pct(pf.byLiquidity.mid / g), low: pct(pf.byLiquidity.low / g) },
@@ -233,6 +234,10 @@ export function makeTools(ctx) {
         const s = st(); const a = s.assets.find((x) => x.id === asset_id);
         if (!a) return { error: 'دارایی با این شناسه پیدا نشد؛ اول list_assets را صدا بزن' };
         if (!(new_value >= 0)) return { error: 'مقدار نامعتبر' };
+        // the field must be one this asset is valued by (a deposit has no «balance»; a bank account has no unit price)
+        const fits = field === 'balance' ? a.mode === 'balance' : field === 'quantity' ? a.mode === 'units' : field === 'unit_price' ? a.mode === 'units' && a.price?.source === 'manual' : false;
+        if (!fits) return { error: a.mode === 'rate' || a.mode === 'loan' ? 'ارزش این دارایی خودکار حساب می‌شود (سود یا قسط)؛ مستقیم عوض نمی‌شود. اگر لازم است، کاربر از ویرایش دارایی شرایطش را عوض کند.'
+          : field === 'unit_price' ? 'قیمت این دارایی خودکار از بازار می‌آید و دستی عوض نمی‌شود' : `این دارایی با «${a.mode === 'units' ? 'مقدار' : 'مانده'}» به‌روز می‌شود، نه «${field}»` };
         const k = s.settings.currency === 'rial' ? 1 : 10;
         const p = { id: uid('p'), type: 'update', assetId: a.id, assetName: a.name, field, value: field === 'quantity' ? new_value : new_value * k, unit: a.unit, reason: reason || '' };
         ctx.onProposal?.(p);

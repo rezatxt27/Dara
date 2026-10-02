@@ -71,3 +71,34 @@ test('a new recurring flow keeps the count of runs it skipped', async () => {
   await act.saveFlow({ id: 'f1', title: 'قسط', amount: 1, fromId: null, toId: null, freq: 'monthly', day: 1, start: J.addJMonthsIso(iso, -4), count: 6, done: 4, lastRun: iso, active: true });
   assert.equal((await store.load('flows')).flows[0].done, 4);
 });
+
+test('review fixes (1.5): rate change applies from today, undo with a deleted asset is refused, deleting an account pauses its loan', async () => {
+  // a new rate on a running deposit doesn't rewrite the interest already earned
+  for (const mode of ['compound', 'simple', 'payout']) {
+    const dep = { id: 'd', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 20, start: J.addDaysIso(iso, -200), mode } };
+    await reset({ assets: [dep] });
+    const n0 = await net();
+    await act.saveAsset({ ...structuredClone(dep), rate: { ...dep.rate, annualPct: 30 } }, { orig: dep });
+    close(await net(), n0, 5000, `${mode}: today's value doesn't jump`);
+  }
+  // transfer, delete the target, undo the transfer: refused (else money appears)
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 500e6 };
+  const box = { id: 'c', name: 'صندوق خانه', category: 'bank', mode: 'balance', balance: 0 };
+  await reset({ assets: [bank, box] });
+  const ev = await act.transfer({ fromId: 'b', toId: 'c', amount: 100e6 });
+  await act.deleteAsset('c');
+  await act.undoEvent(ev);
+  close((await store.load('assets')).assets.find((a) => a.id === 'b').balance, 400e6, 1, 'the transfer was not half-undone');
+  // deleting the account a loan pays from pauses the installments (no money from nowhere)
+  const loan = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { amount: 1e8, annualPct: 18, months: 12, firstDue: J.addJMonthsIso(iso, -2), start: J.addJMonthsIso(iso, -3), account: 'b' } };
+  await reset({ assets: [{ ...bank }, loan] });
+  await act.deleteAsset('b');
+  const s = await store.load('assets', 'flows', 'quotes');
+  const L = s.assets.find((a) => a.id === 'l');
+  assert.equal(L.loan.paused, 'account');
+  const before = E.loanState(L.loan, iso).value;
+  const r = E.applyAutomations(s.assets, [], {}, J.addDaysIso(iso, 40));
+  assert.equal(r.events.filter((e) => e.kind === 'loan').length, 0, 'no installment while paused');
+  close(E.loanState(r.assets.find((a) => a.id === 'l').loan, iso).value, before, 1);
+  assert.equal(E.valueOf(L, {}, {}).status, 'error', 'shows up in «needs attention»');
+});

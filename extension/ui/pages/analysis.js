@@ -5,7 +5,7 @@ import * as I from '../../lib/insights.js';
 import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import * as store from '../../lib/store.js';
-import { ago } from '../../lib/format.js';
+import { ago, parseNum } from '../../lib/format.js';
 import { act } from '../actions.js';
 
 /* Plain-language help for each section (for people new to these ideas). */
@@ -23,7 +23,7 @@ const TIPS = {
   newmoney: ['پول جدید را کجا بگذارم؟', 'اگر پول تازه‌ای داری (مثلاً پاداش یا پس‌انداز)، این بخش آن را طوری بین دسته‌ها پخش می‌کند که به درصدهای هدفت نزدیک‌تر شوی، بدون اینکه چیزی را بفروشی.'],
   breakeven: ['نقطه سربه‌سر', 'سرمایه‌گذاری در یک دارایی را با گذاشتن همان پول در سپرده مقایسه می‌کند. نشان می‌دهد قیمت آن دارایی تا پایان مدت باید به چه عددی برسد تا سودش از سپرده بیشتر شود. اگر فکر می‌کنی به آن قیمت نمی‌رسد، سپرده انتخاب امن‌تری است.', 'سپرده ۲۵٪ در ۶ ماه حدود ۱۳٪ سود می‌دهد؛ پس طلا باید بیش از ۱۳٪ (به‌علاوه کارمزد) گران شود.'],
   fee: ['کارمزد خرید و فروش', 'هزینه‌ای که در خرید و فروش از دست می‌دهی: اختلاف قیمت خرید و فروش، کارمزد پلتفرم یا اجرت طلا. برای طلای آب‌شده معمولاً کم و برای طلای زینتی بیشتر است.'],
-  pnl: ['سود و زیان دارایی‌ها', 'برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
+  pnl: ['سود و زیان دارایی‌ها', 'فقط برای آنچه الان داری (سود فروش‌های گذشته اینجا حساب نمی‌شود)، و برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
   critique: ['نگاه دستیار', 'هوش مصنوعی با نگاه به درصدهای ترکیب دارایی‌ات، سه نقطه ضعف مهم را پیدا می‌کند و برای هرکدام یک بررسی ساده پیشنهاد می‌دهد. توصیه خرید یا فروش نمی‌کند.'],
 };
 const T = (k) => html`<${Tip} title=${TIPS[k][0]} text=${TIPS[k][1]} example=${TIPS[k][2]} />`;
@@ -214,7 +214,7 @@ function Targets({ pf, s, assets }) {
       <td><div class="row"><${Ava} cat=${r.id} size=${28} /><span class="sb">${r.cat.short}</span></div></td>
       <td class="n small"><${Money} v=${r.current} s=${s} compact unit=${false} /></td>
       <td class="n small num">${pct(r.currentShare, { sign: false })}</td>
-      <td><input class="input num-in" style="height:32px" value=${t[r.id] ?? ''} placeholder="—" onInput=${(e) => setT({ ...t, [r.id]: e.target.value === '' ? undefined : parseFloat(e.target.value.replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c))) || 0 })} /></td>
+      <td><input class="input num-in" style="height:32px" value=${t[r.id] ?? ''} placeholder="—" onInput=${(e) => setT({ ...t, [r.id]: e.target.value === '' ? undefined : (parseNum(e.target.value) || 0) })} /></td>
       <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
       <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span class=${r.diff > 0 ? 'pos' : 'neg'}>${r.diff > 0 ? 'خرید' : 'فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
     </tr>`)}</tbody></table>

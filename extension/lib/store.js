@@ -2,6 +2,8 @@
 // so the background worker and UI pages don't overwrite each other's unrelated data.
 
 import { normalizeConnection } from './ai.js';
+import { valueOf } from './engine.js';
+import { todayIso } from './jalali.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -175,16 +177,27 @@ export async function importBackup(obj, { merge = false } = {}) {
   for (const k of LISTS) if (k in d) d[k] = cleanList(k, d[k]);
   await snapshotBeforeImport();
   if (merge) {
-    const cur = await loadAll();
-    const ids = new Set(cur.assets.map((a) => a.id));
-    // codes stay unique: an incoming code that is already taken gets the next free one
-    const used = new Set(cur.assets.map((a) => a.code));
-    let n = Math.max(+cur.meta?.lastCode || 0, ...cur.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
-    const incoming = (d.assets || []).filter((a) => !ids.has(a.id)).map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
-    const assets = cur.assets.concat(incoming);
-    const fids = new Set(cur.flows.map((a) => a.id));
-    const flows = cur.flows.concat((d.flows || []).filter((a) => !fids.has(a.id)));
-    await locked(() => save({ assets, flows, meta: { ...cur.meta, lastCode: n } }));
+    // inside the lock: a background run or another tab can't write in between and get overwritten
+    await mutate(['assets', 'flows', 'meta', 'events', 'quotes'], (cur) => {
+      const ids = new Set(cur.assets.map((a) => a.id));
+      // codes stay unique: an incoming code that is already taken gets the next free one
+      const used = new Set(cur.assets.map((a) => a.code));
+      let n = Math.max(+cur.meta?.lastCode || 0, ...cur.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
+      const incoming = (d.assets || []).filter((a) => !ids.has(a.id)).map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
+      cur.assets = cur.assets.concat(incoming);
+      const fids = new Set(cur.flows.map((a) => a.id));
+      cur.flows = cur.flows.concat((d.flows || []).filter((a) => !fids.has(a.id)));
+      cur.meta = { ...cur.meta, lastCode: n };
+      if (incoming.length) {
+        // what came in is recorded as added (money brought in), so «today» doesn't show it as a market gain
+        const quotes = { ...(d.quotes || {}), ...(cur.quotes || {}) };
+        const id = 'e' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+        const changes = incoming.map((a) => ({ assetId: a.id, field: 'add', delta: 0, value: valueOf(a, quotes, {}).signedValue || 0 }));
+        const back = new Set(incoming.map((a) => a.id));
+        cur.events = (cur.events || []).map((e) => (e.restore && back.has(e.restore.id) && !e.undone ? { ...e, reversedBy: id } : e)); // a deleted asset that came back
+        cur.events = [{ id, kind: 'edit', date: todayIso(), at: Date.now(), title: `ورود ${incoming.length} دارایی از فایل پشتیبان`, amount: 0, noUndo: true, changes }, ...cur.events];
+      }
+    });
     return chk;
   }
   const toSave = {};

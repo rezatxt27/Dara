@@ -304,11 +304,11 @@ function App() {
         <h1>${cur.t}</h1>
         <span class="grow"></span>
         ${page === 'assets' && html`<label class="search"><${Icon} n="search" cls="sm" /><input class="input" placeholder="جست‌وجوی دارایی، بانک، نماد…" value=${q} onInput=${(e) => setQ(e.target.value)} /></label>`}
-        <${StatusChip} st=${st} />
+        <span class="topstatus"><${StatusChip} st=${st} /></span>
         <button class="btn icon" title="به‌روزرسانی قیمت‌ها" onClick=${refresh} disabled=${busy}><${Icon} n="refresh" cls=${busy ? 'spin' : ''} /></button>
         <button class="btn icon" title=${s.privacy ? 'نمایش مبالغ' : 'پنهان‌کردن مبالغ'} onClick=${() => act.setSettings({ privacy: !s.privacy })}><${Icon} n=${s.privacy ? 'eyeOff' : 'eye'} /></button>
         <button class="btn icon" title="تغییر تم" onClick=${() => act.setSettings({ theme: themeNext })}><${Icon} n=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'monitor'} /></button>
-        <button class="btn primary" onClick=${() => setEditing({})}><${Icon} n="plus" />دارایی جدید</button>
+        <button class="btn primary newbtn" aria-label="دارایی جدید" onClick=${() => setEditing({})}><${Icon} n="plus" /><span class="t">دارایی جدید</span></button>
       </div>
       ${page === 'overview' && html`<${Overview} ...${ctx} />`}
       ${page === 'assets' && html`<${AssetsPage} ...${ctx} />`}

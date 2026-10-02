@@ -15,7 +15,7 @@ def check(name, ok, info=''):
     results.append(ok); print(('PASS ' if ok else 'FAIL ') + name + (f' — {info}' if info not in ('', None) else ''), flush=True)
 async def step(name, coro):
     try: await coro
-    except Exception as e: check(name + ' (exception)', False, str(e).split('\n')[0][:220])
+    except Exception as e: check(name + ' (exception)', False, ' | '.join(l for l in str(e).split('\n') if 'waiting for' in l or 'Timeout' in l)[:400])
 def first_num(t):
     m = re.search(r'-?[\d,]+(?:\.\d+)?', t.translate(FA)); return float(m.group().replace(',', '')) if m else None
 

@@ -29,7 +29,7 @@ function relink(st, ev) {
   for (const u of ev.unlinked || []) {
     const x = st.assets.find((y) => y.id === u.id); if (!x) continue;
     const back = (ev.restore || ev.prev).id;
-    if (u.f === 'loan.account' && x.loan && !x.loan.account) x.loan = { ...x.loan, account: back };
+    if (u.f === 'loan.account' && x.loan && !x.loan.account) { x.loan = { ...x.loan, account: back }; delete x.loan.paused; }
     if (u.f === 'rate.payoutTo' && x.rate && (!x.rate.payoutTo || x.rate.payoutTo === 'self')) x.rate = { ...x.rate, payoutTo: back };
   }
 }
@@ -89,6 +89,7 @@ export const act = {
           if (!x.interest.on && rec.interest.on) rec.interest = { ...rec.interest, since: today, lastAccrual: null, accrued: 0 };
         }
         if (x.price && rec.price) rec.price = { ...rec.price, ...(E.quoteId(x.price.ref || {}) === E.quoteId(rec.price.ref || {}) ? { last: x.price.last ?? rec.price.last } : {}), pendingFix: x.price.pendingFix };
+        if (rec.mode === 'loan' && rec.loan?.paused && opts.orig) { rec.loan = { ...rec.loan }; delete rec.loan.paused; }
         // new terms: installments / payouts that fell before they were entered are history, not something to pay again
         if (rec.mode === 'loan' && rec.loan && (!sameMode || termsChanged)) {
           const nl = { ...rec.loan }; if (x.loan?.firstDue !== nl.firstDue) delete nl.anchor;
@@ -97,6 +98,25 @@ export const act = {
         if (rec.mode === 'rate' && rec.rate?.mode === 'payout' && (!sameMode || x.rate?.start !== rec.rate.start)) {
           const p = E.prevMonthlyOnOrBefore(rec.rate.start, today);
           rec.rate = { ...rec.rate, lastPayout: p > rec.rate.start ? p : undefined, offset: 0, offsetFrom: undefined };
+        }
+        // a new rate (or day basis, or interest method) on a running deposit applies from today: the interest already
+        // earned stays as it was, so today's value doesn't jump
+        if (sameMode && rec.mode === 'rate' && x.rate && o.rate && rec.rate.start === x.rate.start && rec.rate.start < today
+          && (num(o.rate.annualPct) !== num(rec.rate.annualPct) || (o.rate.basis || 365) !== (rec.rate.basis || 365) || o.rate.mode !== rec.rate.mode)) {
+          const oldTerms = { ...rec.rate, annualPct: o.rate.annualPct, basis: o.rate.basis, mode: o.rate.mode };
+          const vOld = E.rateValue(oldTerms, today, now);
+          if (o.rate.mode !== rec.rate.mode) {
+            // another interest method: what it's worth today becomes the principal, earning the new way from today
+            rec.rate = { ...rec.rate, principal: vOld, start: today, offset: 0, offsetFrom: undefined, lastPayout: undefined };
+          } else if (rec.rate.mode === 'compound') {
+            const vNew = E.rateValue(rec.rate, today, now);
+            if (vNew > 0) rec.rate = { ...rec.rate, principal: num(rec.rate.principal) * vOld / vNew };
+          } else {
+            const since = rec.rate.mode === 'payout' ? E.payoutSince(rec.rate, today) : rec.rate.start;
+            const base = { ...rec.rate, ...(rec.rate.mode === 'payout' && rec.rate.offsetFrom !== since ? { offset: 0, offsetFrom: since } : {}) };
+            const vNew = E.rateValue(base, today, now);
+            rec.rate = { ...base, offset: (+base.offset || 0) + (vOld - vNew), ...(rec.rate.mode === 'payout' ? { offsetFrom: since } : {}) };
+          }
         }
         const refChanged = sameMode && rec.mode === 'units' && (x.price?.source !== rec.price?.source
           || (rec.price?.source === 'market' && (E.quoteId(x.price?.ref || {}) !== E.quoteId(rec.price?.ref || {}) || (+x.price?.factor || 1) !== (+rec.price?.factor || 1) || (+x.price?.adjustPct || 0) !== (+rec.price?.adjustPct || 0))));
@@ -163,6 +183,7 @@ export const act = {
 
   async patchAsset(id, patch, opts = {}) {
     let ev = null;
+    await catchUp(); // a salary or interest due today lands first, so the number typed isn't counted again on top of it
     await store.mutate(['assets', 'events', 'quotes'], (st) => {
       const x = st.assets.find((y) => y.id === id); if (!x) return;
       // Manual corrections of balance / quantity are logged so "why did it change" can tell them apart from market moves
@@ -250,8 +271,8 @@ export const act = {
       const flowIds = []; const unlinked = [];
       st.flows = st.flows.map((f) => { if ((f.fromId === id || f.toId === id) && f.active) { flowIds.push(f.id); return { ...f, active: false }; } return f; });
       for (const x of st.assets) {
-        if (x.mode === 'loan' && x.loan?.account === id) { x.loan = { ...x.loan, account: null }; unlinked.push({ id: x.id, f: 'loan.account' }); }
-        if (x.mode === 'rate' && x.rate?.payoutTo === id) { x.rate = { ...x.rate, payoutTo: 'self' }; unlinked.push({ id: x.id, f: 'rate.payoutTo' }); }
+        if (x.mode === 'loan' && x.loan?.account === id) { x.loan = { ...x.loan, account: null, paused: 'account' }; unlinked.push({ id: x.id, f: 'loan.account', name: x.name }); }
+        if (x.mode === 'rate' && x.rate?.payoutTo === id) { x.rate = { ...x.rate, payoutTo: 'self' }; unlinked.push({ id: x.id, f: 'rate.payoutTo', name: x.name }); }
       }
       // Log the value at removal: analysis then keeps the market effect up to now and treats the removal as bookkeeping.
       const v = E.valueOf(removed, st.quotes, {}).signedValue;
@@ -259,7 +280,10 @@ export const act = {
       logEv(st, ev);
     });
     if (!ev) return null;
-    toast(`«${ev.restore.name}» حذف شد`, { label: 'برگشت', fn: () => act.undoEvent(ev) });
+    // what depended on it is said out loud: installments wait for a new account, payouts stay in the deposit
+    const deps = (ev.unlinked || []).map((u) => u.f === 'loan.account' ? `قسط‌های «${u.name}» تا انتخاب حساب دیگر متوقف شد` : `سود «${u.name}» از این به بعد در خودش می‌ماند`);
+    if (ev.flowIds?.length) deps.push(`${ev.flowIds.length} جریان تکراری متوقف شد`);
+    toast(`«${ev.restore.name}» حذف شد${deps.length ? '؛ ' + deps.join('؛ ') : ''}`, { label: 'برگشت', fn: () => act.undoEvent(ev) }, { replace: true });
     return ev;
   },
 
@@ -290,6 +314,16 @@ export const act = {
         const idx = st.events.findIndex((e) => e.id === ev.id); // newest first: earlier in the list = later in time
         if (st.events.slice(0, idx).some((e) => !e.undone && touches(e))) { refused = 'later'; return; }
       }
+      // every asset the change touched must still be here (and valued the same way); else half the undo would create money
+      const restoredId = ev.restore?.id || ev.prev?.id;
+      const FIELD_MODE = { quantity: 'units', 'price.value': 'units', costBasis: null, balance: 'balance', 'interest.accrued': 'balance', 'rate.principal': 'rate', 'rate.offset': 'rate', 'rate.lastPayout': 'rate' };
+      for (const c of ev.changes || []) {
+        if (c.field === 'add' || c.assetId === restoredId) continue;
+        const x = st.assets.find((y) => y.id === c.assetId);
+        if (!x) { refused = 'missing'; return; }
+        const m = FIELD_MODE[c.field];
+        if (m && x.mode !== m) { refused = 'mode'; return; }
+      }
       if (ev.restore) {
         if (!st.assets.some((x) => x.id === ev.restore.id)) st.assets.push(ev.restore);
         E.undoEvent(st.assets, { changes: (ev.changes || []).filter((c) => c.assetId !== ev.restore.id) });
@@ -305,6 +339,8 @@ export const act = {
       st.events = st.events.map((e) => (e.id === ev.id ? { ...e, undone: true } : e));
     });
     if (refused === 'later') return toast('اول تغییرهای بعدیِ همین دارایی را برگردان');
+    if (refused === 'missing') return toast('یکی از دارایی‌های این تغییر حذف شده؛ اول حذف آن را برگردان');
+    if (refused === 'mode') return toast('روش ارزش‌گذاری یکی از دارایی‌ها عوض شده؛ این تغییر دیگر برگشت‌پذیر نیست');
     if (!refused) toast('برگشت داده شد');
   },
 
@@ -425,7 +461,7 @@ export const act = {
       const flowIds = []; const unlinked = [];
       st.flows = st.flows.map((f) => { if ((f.fromId === a.id || f.toId === a.id) && f.active) { flowIds.push(f.id); return { ...f, active: false }; } return f; });
       for (const x of st.assets) {
-        if (x.mode === 'loan' && x.loan?.account === a.id) { x.loan = { ...x.loan, account: null }; unlinked.push({ id: x.id, f: 'loan.account' }); }
+        if (x.mode === 'loan' && x.loan?.account === a.id) { x.loan = { ...x.loan, account: null, paused: 'account' }; unlinked.push({ id: x.id, f: 'loan.account', name: x.name }); }
         if (x.mode === 'rate' && x.rate?.payoutTo === a.id) { x.rate = { ...x.rate, payoutTo: 'self' }; unlinked.push({ id: x.id, f: 'rate.payoutTo' }); }
       }
       ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: liab ? `تسویه «${a.name}» از «${acc.name}»` : `انتقال «${a.name}» به «${acc.name}» و بستن آن`, amount,
@@ -442,10 +478,16 @@ export const act = {
     await store.mutate(['assets', 'events', 'quotes'], (st) => {
       const a = st.assets.find((x) => x.id === assetId); if (!a || a.mode !== 'rate') return;
       const prev = structuredClone(a); const today = todayIso();
-      const v = E.rateValue(a.rate, today, Date.now());
+      // the value at the start of today (today's part is earned again under the new terms, not twice)
+      let v = E.rateValue(a.rate, today);
+      const changes = [{ assetId: a.id, field: 'value', delta: 0, value: 0 }];
+      // interest that belongs to another account is paid there first; only the principal is renewed
+      const to = a.rate.mode === 'payout' && a.rate.payoutTo && a.rate.payoutTo !== 'self' && !E.isLiability(a) ? st.assets.find((x) => x.id === a.rate.payoutTo && !x.archived) : null;
+      const due = to ? Math.round(v - (+a.rate.principal || 0)) : 0;
+      if (to && due >= 1 && E.canTake(to, st.quotes)) { changes.push(...E.applyDelta(to, due, st.quotes)); v -= due; }
       a.rate = { ...a.rate, principal: v, start: today, maturity: maturity || null, annualPct: annualPct ?? a.rate.annualPct, lastPayout: undefined, offset: 0, offsetFrom: undefined };
       a.updatedAt = Date.now();
-      ev = { id: uid('e'), kind: 'edit', date: today, at: Date.now(), title: `تمدید «${a.name}»`, amount: 0, prev, changes: [{ assetId: a.id, field: 'value', delta: 0, value: 0 }] };
+      ev = { id: uid('e'), kind: 'edit', date: today, at: Date.now(), title: `تمدید «${a.name}»`, amount: 0, prev, changes };
       logEv(st, ev);
     });
     return ev;
@@ -459,4 +501,4 @@ export const act = {
 };
 
 /** Toast for a recorded change with a one-tap undo. */
-export function doneToast(msg, ev) { toast(msg, ev && !ev.noUndo ? { label: 'برگشت', fn: () => act.undoEvent(ev) } : undefined); }
+export function doneToast(msg, ev) { toast(msg, ev && !ev.noUndo ? { label: 'برگشت', fn: () => act.undoEvent(ev) } : undefined, { replace: true }); }

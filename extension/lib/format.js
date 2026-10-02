@@ -29,7 +29,7 @@ export const hasWords = (s) => /[آ-غف-يپچژکگی]/.test(String(s || ''));
  * "۱۲ میلیون و ۵۰۰ هزار" (12,500,000), "دو میلیون", "یک میلیون و دویست هزار", "۲ و نیم میلیون", "۵ هزار میلیارد".
  * Any other word makes it NaN, so a typo never turns into a silent wrong amount.
  */
-export function parseNum(input, { lenient = false } = {}) {
+export function parseNum(input, { lenient = false, unit = null } = {}) {
   if (input === null || input === undefined) return NaN;
   if (typeof input === 'number') return input;
   let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/‌/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
@@ -40,27 +40,37 @@ export function parseNum(input, { lenient = false } = {}) {
   else if (/[a-z]/i.test(s)) return NaN;
   const tokens = s.match(/\d+(?:\.\d+)?|\.\d+|[آ-ی]+/g);
   if (!tokens) return NaN;
+  // «۵۰۰ هزار ریال» typed into a toman field (or the other way round) is converted, not taken 10× off
+  const said = tokens.includes('ریال') ? 'rial' : tokens.some((t) => t === 'تومان' || t === 'تومن') ? 'toman' : null;
+  const k = unit && said && said !== unit ? (said === 'rial' ? 0.1 : 10) : 1;
   const known = (t) => t in WORD_SCALE || t in WORD_NUM;
   let words = tokens.filter((t) => !/^[\d.]/.test(t) && !FILLER.has(t));
   if (lenient) { for (let i = tokens.length - 1; i >= 0; i--) if (!/^[\d.]/.test(tokens[i]) && !FILLER.has(tokens[i]) && !known(tokens[i])) tokens.splice(i, 1); words = words.filter(known); }
   if (words.some((t) => !known(t))) return NaN;
   if (!words.length) {
     const n = parseFloat(tokens.filter((t) => /^[\d.]/.test(t)).join(''));
-    return isFinite(n) ? (neg ? -n : n) : NaN;
+    return isFinite(n) ? (neg ? -n : n) * k : NaN;
   }
-  // a scale multiplies what came before it («۵ هزار میلیارد» multiplies twice); a number after a scale starts the next
+  // A scale multiplies what came before it («۵ هزار میلیارد» multiplies twice); a number after a scale starts the next
   // part; the parts add up («۱۲ میلیون و ۵۰۰ هزار»). Word numbers add up within a part («سیصد و پنجاه»).
-  let total = 0, group = 0, scaled = false, unit = 1;
+  // A larger scale after a smaller part covers everything before it: «۲ هزار و ۳۰۰ میلیون» = 2,300 million.
+  // A bare number ending a millions amount is the next step down, as people say it: «۱۲ میلیون و ۵۰۰» = 12.5 million.
+  let total = 0, group = 0, scaled = false, unitW = 1, partUnit = 0;
   for (const t of tokens) {
     if (FILLER.has(t)) continue;
-    if (t in WORD_SCALE) { group = (group || 1) * WORD_SCALE[t]; unit = WORD_SCALE[t]; scaled = true; continue; }
-    if (t === 'نیم' && scaled) { group += unit / 2; continue; } // «۱۰ میلیون و نیم» = 10.5 million
+    if (t in WORD_SCALE) {
+      const S = WORD_SCALE[t];
+      if (!scaled && total > 0 && partUnit && S > partUnit) { total = (total + group) * S; group = 0; partUnit = S; unitW = S; scaled = false; continue; }
+      group = (group || 1) * S; unitW = S; scaled = true; continue;
+    }
+    if (t === 'نیم' && scaled) { group += unitW / 2; continue; } // «۱۰ میلیون و نیم» = 10.5 million
     const v = t in WORD_NUM ? WORD_NUM[t] : parseFloat(t);
-    if (scaled) { total += group; group = 0; scaled = false; }
+    if (scaled) { total += group; group = 0; scaled = false; partUnit = unitW; }
     group += v;
   }
+  if (!scaled && total > 0 && partUnit >= 1e6 && group > 0 && group < 1000) group *= partUnit / 1000;
   total += group;
-  return neg ? -total : total;
+  return (neg ? -total : total) * k;
 }
 
 export function num(n, digits = 0) {
@@ -162,7 +172,7 @@ export function numToWordsFa(value, { approx = true } = {}) {
 
 /** Group digits while typing: keeps a single decimal point, strips other chars. */
 export function groupTyping(raw) {
-  let s = toEnDigits(raw).replace(/٫/g, '.').replace(/[٬,\s]/g, '');
+  let s = toEnDigits(raw).replace(/[٫\/]/g, '.').replace(/[٬,\s]/g, '');
   const neg = s.startsWith('-');
   s = s.replace(/[^\d.]/g, '');
   const dot = s.indexOf('.');

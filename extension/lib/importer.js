@@ -1,6 +1,6 @@
 // Smart import from spreadsheet CSV (e.g. a Google Sheets export) + CSV export.
 import { uid, parseNum } from './format.js';
-import { CAT, METAL_PRESETS } from './catalog.js';
+import { CAT, CATEGORIES, METAL_PRESETS } from './catalog.js';
 
 export function parseCSV(text) {
   const rows = []; let row = []; let f = ''; let q = false;
@@ -29,6 +29,9 @@ const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گ
 
 function detectCategory(catText, name, holder) {
   const t = norm(catText);
+  // Dara's own export: the category's full or short name, as is
+  const exact = CATEGORIES.find((c) => norm(c.name) === t || norm(c.short) === t);
+  if (exact) return exact.id;
   if (has(t, 'بدهی', 'وام')) return 'debt';
   if (has(t, 'حساب بانکی', 'بانک', 'نقد') && !has(t, 'ارز')) return 'bank';
   if (has(t, 'آب‌شده', 'آب شده', 'آبشده')) return 'gold_online';
@@ -101,7 +104,7 @@ export function importRows(rows, opts = {}) {
   const col = (...keys) => H.findIndex((h) => keys.some((k) => h.includes(k)));
   const C = {
     code: col('کد'), cat: col('دسته'), name: col('نام'), holder: col('محل', 'بانک', 'کارگزاری'), qty: col('مقدار', 'تعداد'),
-    unit: col('واحد'), price: col('قیمت هر'), direct: col('مانده', 'ارزش مستقیم'), value: col('ارزش روز'), cost: col('بهای تمام'),
+    unit: col('واحد'), price: col('قیمت هر', 'قیمت واحد'), direct: col('مانده', 'ارزش مستقیم'), value: col('ارزش روز'), cost: col('بهای تمام'),
     liq: col('نقدشوندگی'), note: col('یادداشت'), date: col('آخرین بروزرسانی', 'آخرین به‌روزرسانی'),
   };
   const out = []; const notes = []; const codes = new Set();
@@ -111,15 +114,17 @@ export function importRows(rows, opts = {}) {
     const catText = g('cat'); let name = clean(C.name >= 0 ? r[C.name] : '');
     if (!catText || !name) continue;
     const P = (v) => parseNum(v, { lenient: true }); // cells may carry a unit («۱۲ گرم»)
-    const qty = P(g('qty')); const price = P(g('price')) * mult; const direct = P(g('direct')) * mult;
-    const value = P(g('value')) * mult; const cost = P(g('cost')) * mult;
+    // a money column whose title names its unit («(ریال)», «(تومان)») is read in that unit, whatever was chosen
+    const mul = (k) => { const h = C[k] >= 0 ? H[C[k]] : ''; return /ریال/.test(h) ? 1 : /تومان/.test(h) ? 10 : mult; };
+    const qty = P(g('qty')); const price = P(g('price')) * mul('price'); const direct = P(g('direct')) * mul('direct');
+    const value = Math.abs(P(g('value'))) * mul('value'); const cost = P(g('cost')) * mul('cost');
     let holder = clean(C.holder >= 0 ? r[C.holder] : ''); const unit = g('unit');
     const total = isFinite(value) && value ? value : isFinite(direct) && direct ? direct : (isFinite(qty) && isFinite(price) ? qty * price : NaN);
     if (!isFinite(total) || total === 0) { notes.push(`ردیف «${name}» بدون مقدار بود و وارد نشد.`); continue; }
     const category = detectCategory(catText, name, holder);
     // Friendlier names for generic template rows
     const segs = holder.split(/\s*[-–—]\s*/).filter(Boolean);
-    if (category === 'bank' && /حساب/.test(name) && holder) { name = holder; }
+    if (category === 'bank' && /^حساب(\s*(بانکی|جاری|کوتاه\s*مدت))?(\s*\d+)?$/.test(name) && holder) { name = holder; } // only a generic «حساب» name
     else if ((category === 'gold' || category === 'gold_online') && name.includes('/') && segs.length) {
       name = segs[segs.length - 1]; holder = segs.length > 1 && !/محل نگهداری/.test(segs[0]) ? segs[0] : '';
     }
@@ -180,7 +185,7 @@ export function toCSV(rows) {
     const mode = a.mode === 'units' ? 'تعداد × قیمت' : a.mode === 'rate' ? `نرخ ${a.rate?.annualPct}٪` : a.mode === 'loan' ? `قسطی ${a.loan?.annualPct}٪، ${a.loan?.months} قسط` : 'مانده';
     const src = a.mode === 'units' && a.price?.source === 'market' ? `${a.price.ref?.provider}:${a.price.ref?.symbol || a.price.ref?.key}` : a.mode === 'rate' || a.mode === 'loan' ? 'خودکار' : 'دستی';
     lines.push([a.code, r.cat?.name, a.name, a.custodian, mode, a.mode === 'units' ? a.quantity : '', a.unit || '', r.unitPrice ? Math.round(r.unitPrice) : '',
-      Math.round(r.signedValue), a.costBasis || '', r.pnl !== null && r.pnl !== undefined ? Math.round(r.pnl) : '', src, r.status, a.note || ''].map(esc).join(','));
+      Math.round(r.value), a.costBasis || '', r.pnl !== null && r.pnl !== undefined ? Math.round(r.pnl) : '', src, r.status, a.note || ''].map(esc).join(','));
   }
   return '﻿' + lines.join('\n');
 }

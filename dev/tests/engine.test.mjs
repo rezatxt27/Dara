@@ -893,3 +893,65 @@ test('fipiran: POST to the new host, unique keys for share classes, old refs sti
   assert.match(errors['fipiran:90002:statisticalNav'], /چند صندوق/);
   assert.match(errors['fipiran:99999:cancelNav'], /پیدا نشد/);
 });
+
+test('CSV export → import keeps every asset, debts stay debts, manual prices survive', async () => {
+  const { toCSV, importCSVText } = await import('../../extension/lib/importer.js');
+  const now = Date.now();
+  const assets = [
+    { id: 'b', code: 'A-001', name: 'حساب حقوق', category: 'bank', custodian: 'بانک نمونه', mode: 'balance', balance: 2_000_000_000, liquidity: 'high' },
+    { id: 'd', code: 'A-002', name: 'وام نمونه', category: 'debt', custodian: 'بانک نمونه', mode: 'balance', balance: 800_000_000, liquidity: 'high' },
+    { id: 'p', code: 'A-003', name: 'سهم شرکت نمونه', category: 'private', mode: 'units', quantity: 1000, unit: 'سهم', price: { source: 'manual', value: 50_000, updatedAt: now }, liquidity: 'low' },
+    { id: 'r', code: 'A-004', name: 'طلب از دوست', category: 'receivable', mode: 'balance', balance: 100_000_000, liquidity: 'low' },
+  ];
+  const pf = E.portfolio(assets, {}, {});
+  const back = importCSVText(toCSV(pf.rows).replace(/^﻿/, ''), { unit: 'toman' }).assets; // the wrong unit chosen on purpose: headers say «ریال»
+  const by = Object.fromEntries(back.map((a) => [a.code, a]));
+  assert.equal(back.length, 4);
+  assert.equal(by['A-001'].name, 'حساب حقوق', 'a real account name is kept');
+  assert.equal(by['A-002'].category, 'debt'); assert.equal(by['A-002'].balance, 800_000_000);
+  assert.equal(by['A-003'].category, 'private'); assert.equal(E.valueOf(by['A-003'], {}, {}).value, 50_000_000);
+  assert.equal(by['A-004'].category, 'receivable');
+  close(E.portfolio(back, {}, {}).net, pf.net, 1);
+});
+
+test('review fixes (1.5): cost basis, full withdrawal, payouts, finished flows, grace period, extra payment count', () => {
+  const iso = J.todayIso();
+  // buying more of something with no recorded cost doesn't invent a profit
+  const g = { id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 10, price: { source: 'manual', value: 1e8 } };
+  E.applyDelta(g, 1e8, {});
+  assert.ok(!(+g.costBasis > 0), 'cost stays unknown'); assert.equal(E.valueOf(g, {}, {}).pnl, null);
+  // taking out a deposit's whole value never leaves a negative principal
+  const dep = { id: 'd', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addDaysIso(iso, -40), mode: 'payout', payoutTo: 'self' } };
+  const v = E.rateValue(dep.rate, iso);
+  E.applyDelta(dep, -v, {}, iso);
+  assert.ok(+dep.rate.principal >= 0); close(E.rateValue(dep.rate, iso), 0, 1);
+  // more than the principal but less than the value: the rest stays, exactly
+  const dep2 = { id: 'd2', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addDaysIso(iso, -100), mode: 'simple' } };
+  const now = Date.now();
+  const v2 = E.rateValue(dep2.rate, iso, now);
+  E.applyDelta(dep2, -(1e9 + 1e6), {}, iso);
+  close(E.rateValue(dep2.rate, iso, now), v2 - 1e9 - 1e6, 50);
+  // a deposit payout can't be undone (the next run would only pay it again); interest owed on a debt isn't «received»
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 0 };
+  const d3 = { id: 'd3', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addJMonthsIso(iso, -1), mode: 'payout', payoutTo: 'b' } };
+  const debt = { id: 'x', name: 'بدهی', category: 'debt', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addJMonthsIso(iso, -1), mode: 'payout' } };
+  const r = E.applyAutomations([bank, d3, debt], [], {}, iso);
+  const pays = r.events.filter((e) => e.kind === 'interest');
+  assert.equal(pays.length, 2); assert.ok(pays.every((e) => e.noUndo)); assert.ok(pays.find((e) => e.fromId === 'x').owed);
+  const wf = E.weeklyFacts({ assets: r.assets, quotes: {}, settings: {}, snapshots: {}, events: r.events, flows: [] }, iso, 7);
+  close(wf.interestReceived, pays.find((e) => e.fromId === 'd3').amount, 1);
+  // a flow that has run all its times isn't monthly income any more
+  const m = E.monthlyAuto([bank], [{ id: 'f', amount: 5e7, toId: 'b', freq: 'monthly', active: true, count: 3, done: 3 }], iso);
+  assert.equal(m.inflow, 0);
+  // grace period: installments stay equal (no ballooning last one)
+  const L = { amount: 1e9, annualPct: 18, months: 12, start: '2026-06-22', firstDue: '2026-12-22' };
+  const plan = E.loanPlan(L);
+  const last = plan.rows[plan.rows.length - 1].payment;
+  assert.ok(Math.abs(last - plan.A) < plan.A * 0.02, `last ${last} vs ${plan.A}`);
+  // an extra payment keeps the count of installments already paid
+  const ln = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { amount: 1e8, annualPct: 18, months: 12, firstDue: J.addJMonthsIso(iso, -3) } };
+  const st0 = E.loanState(ln.loan, iso);
+  E.applyDelta(ln, -1e7, {}, iso);
+  const st1 = E.loanState(ln.loan, iso);
+  assert.equal(st1.paid + st1.before, st0.paid);
+});

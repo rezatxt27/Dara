@@ -478,3 +478,22 @@ details.more[open] > summary { margin-bottom: 10px; }
 .catguide .cswitch { color: var(--muted); }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .linkbtn:hover { color: var(--accent-2, var(--accent)); }
+.badge-sug { font-size: 10.5px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 1px 6px; margin-inline-start: 4px; }
+.field .hint.err-msg { color: var(--neg); font-weight: 600; }
+/* narrow windows (phone-sized side panel): nothing wider than the screen */
+@media (max-width: 560px) {
+  .topbar { gap: 6px; height: 58px; }
+  .topbar h1 { font-size: 17px; white-space: nowrap; }
+  .topbar .topstatus, .topbar button[title="تغییر تم"] { display: none; }
+  .newbtn .t { display: none; } .newbtn { padding: 0 10px; }
+  .tbl .c-price, .tbl .c-pnl, .tbl .c-today { display: none; }
+  .tbl.assets .c-qty, .tbl.assets .c-status { display: none; }
+  .shell { grid-template-columns: 52px minmax(0, 1fr); }
+  .main { padding: 0 10px 24px; } .topbar { margin: 0 -10px 8px; padding: 0 10px; }
+  .main .row { flex-wrap: wrap; min-width: 0; }
+  .main .seg { max-width: 100%; overflow-x: auto; }
+  .main .card, .main .col { min-width: 0; max-width: 100%; }
+}
+.mode { position: relative; }
+.mode .badge-sug { position: absolute; top: -9px; left: 10px; margin: 0; background: var(--surface); border: 1px solid var(--accent-line); }
+@media (max-width: 560px) { .kpi .v { font-size: 17px; } .kpi .v .money, .main .money { white-space: normal; } }

@@ -5,6 +5,7 @@ import * as P from './lib/providers.js';
 import * as E from './lib/engine.js';
 import * as AI from './lib/ai.js';
 import * as A from './lib/assistant.js';
+import * as I from './lib/insights.js';
 import { CORE_REFS, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY } from './lib/catalog.js';
 import { todayIso, addDaysIso, isoFromDate } from './lib/jalali.js';
 import { money, pct, uid } from './lib/format.js';
@@ -145,7 +146,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     await notifyAutomations(autos.events, autos.assets, settings);
     await notifyAlerts(fired, settings);
     await maybeStaleNotice(pf, meta, settings);
-    await updateBadge(pf, snapshots, quotes, settings);
+    await updateBadge(pf, { assets: autos.assets, quotes, settings, snapshots, events });
     return { ok: okCount, errors: meta.errCount, events: autos.events.length };
   })().catch(async (e) => {
     console.error('[dara] cycle failed', e);
@@ -164,7 +165,8 @@ function notify(id, title, message) {
 async function notifyAutomations(events, assets, settings) {
   if (!events.length) return;
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const interest = events.filter((e) => e.kind === 'interest');
+  // interest added to a debt is a cost, not interest received
+  const interest = events.filter((e) => e.kind === 'interest' && !e.owed && !E.isLiability(byId[e.fromId] || {}));
   const flows = events.filter((e) => e.kind === 'flow' || e.kind === 'loan');
   const priv = settings.privacy;
   if (interest.length && settings.notify.interest) {
@@ -203,12 +205,14 @@ async function maybeStaleNotice(pf, meta, settings) {
   await store.update('meta', (m) => ({ ...m, lastStaleNotice: Date.now() }));
 }
 
-async function updateBadge(pf, snaps, quotes, settings) {
+async function updateBadge(pf, st) {
+  const { quotes, settings } = st;
+  // «امروز» here is the same number the dashboard and popup show: the market's effect, without money moved or added
+  const mm = (() => { try { return I.marketMove(st, pf, 1); } catch { return null; } })();
   try {
     let text = '', color = '#7A5AF8';
     if (settings.badge === 'change') {
-      const ch = E.changeSince(snaps, 1, pf.net);
-      const p = ch ? ch.pct : pf.dayChangePct;
+      const p = mm ? mm.pct : pf.dayChangePct;
       if (p !== null && isFinite(p) && pf.net) {
         const v = Math.abs(p * 100);
         text = (p >= 0 ? '+' : '-') + (v >= 10 ? Math.round(v) : v.toFixed(1));
@@ -226,7 +230,7 @@ async function updateBadge(pf, snaps, quotes, settings) {
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
     if (chrome.action.setBadgeTextColor) await chrome.action.setBadgeTextColor({ color: '#FFFFFF' });
-    await chrome.action.setTitle({ title: settings.privacy ? 'دارا' : `دارا — ارزش خالص: ${money(pf.net, settings, { compact: true })}${pf.dayChange ? ' (' + pct(pf.dayChangePct) + ' امروز)' : ''}` });
+    await chrome.action.setTitle({ title: settings.privacy ? 'دارا' : `دارا — ارزش خالص: ${money(pf.net, settings, { compact: true })}${mm && Math.abs(mm.pct) >= 0.00005 ? ' (' + pct(mm.pct) + ' امروز)' : ''}` });
   } catch (e) { /* ignore */ }
 }
 
@@ -343,7 +347,10 @@ const handlers = {
     return { events: autos.events.length };
   },
   async quote({ ref }) {
-    const { quotes, errors } = await P.fetchAll([ref], {});
+    // a provider the owner turned off in settings is never contacted, not even for a preview
+    const { settings } = await store.load('settings');
+    if (ref?.provider && settings?.providers?.[ref.provider] === false) return { quote: null, error: 'این منبع قیمت در تنظیمات خاموش است' };
+    const { quotes, errors } = await P.fetchAll([ref], settings?.providers || {});
     const id = P.quoteId(ref);
     if (quotes[id]) await store.update('quotes', (stored) => E.mergeQuotes(stored, { [id]: quotes[id] }, {}));
     return { quote: quotes[id] || null, error: errors[id] || null };
@@ -355,6 +362,8 @@ const handlers = {
     return { items: [] };
   },
   async history({ ref, days = 60 }) {
+    const { settings } = await store.load('settings');
+    if (ref?.provider && settings?.providers?.[ref.provider] === false) return { points: [], error: 'این منبع قیمت در تنظیمات خاموش است' };
     const id = P.quoteId(ref) + ':' + days;
     const { history } = await store.load('history');
     const h = history[id];
@@ -372,7 +381,7 @@ const handlers = {
   async badge() {
     const st = await store.loadAll();
     const pf = E.portfolio(st.assets, st.quotes, st.settings);
-    await updateBadge(pf, st.snapshots, st.quotes, st.settings);
+    await updateBadge(pf, st);
     return { ok: true };
   },
 };

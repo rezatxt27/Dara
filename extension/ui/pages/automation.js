@@ -25,7 +25,8 @@ function FlowModal({ st, s, flow, onClose }) {
   const accounts = st.assets.filter((a) => !a.archived);
   const applyTpl = (t) => {
     const bank = accounts.find((a) => a.category === 'bank');
-    const debt = accounts.find((a) => a.category === 'debt');
+    // a loan entered as «وام قسطی» already pays its own installments: only a plain-balance debt needs a flow
+    const debt = accounts.find((a) => a.category === 'debt' && a.mode !== 'loan');
     const gold = accounts.find((a) => a.category === 'gold_online');
     const fixed = accounts.find((a) => a.category === 'fixed');
     const map = { salary: { toId: bank?.id, fromId: '' }, rent: { toId: bank?.id, fromId: '' }, installment: { fromId: bank?.id, toId: debt?.id }, dca: { fromId: bank?.id, toId: gold?.id }, saving: { fromId: bank?.id, toId: fixed?.id }, expense: { fromId: bank?.id, toId: '' } };
@@ -35,10 +36,13 @@ function FlowModal({ st, s, flow, onClose }) {
   // runs before today that would be replayed (today's run happens as usual)
   const past = f.start && !flow ? E.flowOccurrences({ ...f, done: 0 }, '0000-00-00', yday, 400).length : 0;
   const [confirmPast, setConfirmPast] = useState(false);
+  const [confirmLoan, setConfirmLoan] = useState(false);
   const save = async () => {
     if (!f.title.trim() || !(f.amount > 0) || (!f.fromId && !f.toId)) return toast('عنوان، مبلغ و دست‌کم یکی از حساب‌های مبدأ/مقصد لازم است');
     if (f.fromId && f.fromId === f.toId) return toast('حساب مبدأ و مقصد یکی است');
     if (f.end && f.start && f.end < f.start) return toast('تاریخ پایان باید بعد از تاریخ شروع باشد');
+    const loanSide = [f.fromId, f.toId].map((id) => accounts.find((a) => a.id === id)).find((a) => a?.mode === 'loan');
+    if (loanSide && /قسط/.test(f.title) && !confirmLoan) { setConfirmLoan(true); return; }
     const out = { ...f, fromId: f.fromId || null, toId: f.toId || null };
     if (!flow && past > 0 && !confirmPast) { out.lastRun = yday; out.done = past; } // don't back-apply old occurrences unless asked
     await act.saveFlow(out); onClose();
@@ -53,7 +57,8 @@ function FlowModal({ st, s, flow, onClose }) {
       <div class="field"><label>به (واریز)</label><select class="input" value=${f.toId || ''} onChange=${(e) => set({ toId: e.target.value })}><option value="">— بیرون از دارایی‌ها (هزینه) —</option>${accounts.map((a) => html`<option value=${a.id}>${a.name}</option>`)}</select></div>
     </div>
     ${toAsset?.mode === 'units' && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>واریز به «${toAsset.name}» با قیمت روز به مقدار (${toAsset.unit}) تبدیل می‌شود — مناسب خرید ماهانه طلا یا صندوق.</div></div>`}
-    ${CAT[toAsset?.category]?.liability && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>هر قسط از مانده بدهی کم می‌شود.</div></div>`}
+    ${toAsset?.mode === 'loan' ? html`<div class=${'callout' + (confirmLoan ? ' warn' : '')}><${Icon} n="alert" cls="sm" /><div>«${toAsset.name}» وام قسطی است و قسط‌هایش خودکار${toAsset.loan?.account ? ' از حساب انتخاب‌شده' : ''} کم می‌شود؛ این جریان هر بار یک پرداخت <b>اضافه</b> حساب می‌شود (قسط دو بار کم نشود). ${confirmLoan ? 'اگر واقعاً پرداخت اضافه است، دوباره «ذخیره» را بزن.' : ''}</div></div>`
+      : CAT[toAsset?.category]?.liability && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>هر قسط از مانده بدهی کم می‌شود.</div></div>`}
     <div class="grid2">
       <div class="field"><label>تکرار</label><${Seg} value=${f.freq} onChange=${(v) => set({ freq: v })} options=${[['monthly', 'ماهانه'], ['weekly', 'هفتگی'], ['yearly', 'سالانه']]} /></div>
       ${f.freq !== 'weekly' && html`<${NumField} label="روز ماه (شمسی)" value=${f.day} onInput=${(v) => set({ day: Math.max(1, Math.min(31, Math.round(v || 1))) })} digits=${0} />`}
@@ -90,7 +95,7 @@ export function AutomationPage({ st, pf, s, open }) {
     </div></div>
 
     <div class="kpis">
-      <div class="kpi"><span class="t">سود ماهانه درآمد ثابت</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">${num(rates.length)} دارایی با نرخ ثابت</span></div>
+      <div class="kpi"><span class="t">سود ماهانه (تقریبی)</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">سپرده‌ها، حساب‌های سوددار و طلب‌ها</span></div>
       <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow + auto.loanGet} s=${s} compact /></span><span class="s">حقوق، اجاره، قسط‌های دریافتی و…</span></div>
       <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow + auto.loanPay} s=${s} compact /></span><span class="s">${auto.loanPay ? html`هزینه‌های ثابت و اقساط (<${Money} v=${auto.loanPay} s=${s} compact />)` : 'هزینه‌های ثابت و اقساط'}</span></div>
       <div class="kpi"><span class="t">خالص جریان خودکار</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span><span class="s">در ماه</span></div>
@@ -151,9 +156,9 @@ export function AutomationPage({ st, pf, s, open }) {
         const a = r.asset; const ls = E.loanState(a.loan); const liab = r.cat.liability;
         return html`<div class="it" style=${'cursor:pointer;align-items:flex-start' + (ls.done ? ';opacity:.6' : '')} onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
           <div class="grow"><div class="sb">${a.name}</div>
-            <div class="xs muted">${ls.done ? 'تسویه شده' : html`قسط <${Money} v=${ls.next.payment} s=${s} compact />، ${num(ls.paid)} از ${num(ls.n)} پرداخت شده، سود ${num(+a.loan.annualPct || 0, 2)}٪`}</div>
+            <div class="xs muted">${ls.done ? 'تسویه شده' : html`قسط <${Money} v=${ls.next.payment} s=${s} compact />، ${num(ls.paid + ls.before)} از ${num(ls.n + ls.before)} پرداخت شده، سود ${num(+a.loan.annualPct || 0, 2)}٪`}</div>
             ${!ls.done && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> قسط بعدی ${fmtJ(ls.next.date, 'dm')} — ${liab ? 'از' : 'به'} ${a.loan.account ? nm(a.loan.account) || 'حساب حذف‌شده' : 'حسابی ثبت نشده'}</div>`}
-            ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round(ls.paid / ls.n * 100)}%;background:${r.cat.color}`}></i></div>`}</div>
+            ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round((ls.paid + ls.before) / (ls.n + ls.before) * 100)}%;background:${r.cat.color}`}></i></div>`}</div>
           <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></div><div class="xs muted">${liab ? 'مانده بدهی' : 'مانده طلب'}</div></div></div>`;
       })}</div>
     </div>`}

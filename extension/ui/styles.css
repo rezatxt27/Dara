@@ -455,7 +455,7 @@ details.more[open] > summary { margin-bottom: 10px; }
 @media (max-width: 1100px) {
   .card:has(> .tbl) { overflow-x: auto; }
   .card:has(> .tbl) .tbl th { top: 0; }
-  .tbl.assets .c-price, .tbl.assets .c-pnl { display: none; }
+  .tbl.assets .c-price, .tbl.assets .c-pnl, .tbl.assets .c-today { display: none; }
   .tbl.assets .src-narrow { display: block; }
 }
 @media (max-width: 860px) {

@@ -66,26 +66,39 @@ async function afterUpdate(prev) {
   }
 }
 
+/**
+ * Chrome stops an idle MV3 worker after ~30 s without extension API calls, even mid-fetch. Long jobs (price cycle,
+ * history rebuild, AI weekly report) ping a cheap API so they can finish and save their result.
+ */
+function keepAlive() {
+  const t = setInterval(() => { try { chrome.runtime.getPlatformInfo(() => {}); } catch (e) { /* ignore */ } }, 20000);
+  return () => clearInterval(t);
+}
+
 let running = null;
 async function runCycle({ force = false, reason = 'alarm' } = {}) {
   if (running) return running;
+  const done = keepAlive();
   running = (async () => {
     const t0 = Date.now();
     const st = await store.loadAll();
     const { settings } = st;
-    await store.save({ meta: { ...st.meta, running: true, runStartedAt: t0 } });
+    await store.update('meta', (m) => ({ ...m, running: true, runStartedAt: t0 }));
 
-    // 1) Resolve tickers that were entered by symbol only (e.g. a gold ETF imported from a spreadsheet)
+    // 1) Resolve tickers that were entered by symbol only (e.g. a gold ETF imported from a spreadsheet).
+    //    In parallel, a few per cycle, and a symbol that failed is retried only after a few hours.
     let assets = st.assets;
     const resolved = {};
-    for (const a of assets) {
-      const ref = a.mode === 'units' && a.price?.source === 'market' ? a.price.ref : null;
-      if (ref?.provider === 'tsetmc' && !ref.key && ref.symbol && settings.providers.tsetmc !== false) {
-        try {
-          const hit = resolved[ref.symbol] ?? (resolved[ref.symbol] = await P.tsetmcResolve(ref.symbol));
-          if (hit) { ref.key = hit.insCode; ref.label = hit.symbol; ref.name = hit.name; }
-        } catch (e) { /* stays pending */ }
-      }
+    const failedAt = st.meta.symFail || {};
+    const pending = [...new Set(assets.map((a) => (a.mode === 'units' && a.price?.source === 'market' ? a.price.ref : null))
+      .filter((ref) => ref?.provider === 'tsetmc' && !ref.key && ref.symbol && !(Date.now() - (failedAt[ref.symbol] || 0) < 6 * 3600000))
+      .map((ref) => ref.symbol))].slice(0, 8);
+    if (pending.length && settings.providers.tsetmc !== false) {
+      const hits = await Promise.allSettled(pending.map((sym) => P.tsetmcResolve(sym)));
+      const fails = {};
+      pending.forEach((sym, i) => { const h = hits[i].status === 'fulfilled' ? hits[i].value : null; if (h) resolved[sym] = h; else fails[sym] = Date.now(); });
+      for (const a of assets) { const ref = a.price?.ref; const h = ref && !ref.key && resolved[ref.symbol]; if (h) { ref.key = h.insCode; ref.label = h.symbol; ref.name = h.name; } }
+      if (Object.keys(fails).length) await store.update('meta', (m) => ({ ...m, symFail: { ...(m.symFail || {}), ...fails } }));
     }
     if (Object.keys(resolved).length) {
       // persist resolved keys on the freshest asset list
@@ -104,25 +117,22 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     const relevant = new Set(E.collectRefs(assets, st.alerts, CORE_REFS).map((r) => P.quoteId(r)));
     const relErrors = Object.fromEntries(Object.entries(errors).filter(([k]) => relevant.has(k)));
 
-    // 3) Automations on the freshest state (quick read-modify-write after the slow network step)
-    const cur = await store.load('assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings');
-    const quotes = E.mergeQuotes(cur.quotes, fresh, errors);
-    const autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
-    E.rememberLastPrices(autos.assets, quotes);
-    const events = autos.events.concat(cur.events).slice(0, 3000);
-    E.settlePending(autos.assets, events, quotes);
-
-    // 4) Snapshot for today
-    const pf = E.portfolio(autos.assets, quotes, cur.settings);
-    const snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
-
-    // 5) Alerts
-    const alerts = cur.alerts;
-    const fired = E.checkAlerts(alerts, quotes);
-
-    const meta = { ...cur.meta, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
-      errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason };
-    await store.save({ assets: autos.assets, flows: autos.flows, events, quotes, snapshots, alerts, meta });
+    // 3–5) Automations, today's snapshot and alerts on the freshest state, under the shared lock: a page saving at the
+    //      same moment waits instead of being overwritten (or overwriting an installment that was just applied).
+    let autos, pf, snapshots, quotes, fired, meta;
+    await store.mutate(['assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings'], (cur) => {
+      quotes = E.mergeQuotes(cur.quotes, fresh, errors);
+      autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
+      E.rememberLastPrices(autos.assets, quotes);
+      const events = autos.events.concat(cur.events).slice(0, E.EVENTS_MAX);
+      E.settlePending(autos.assets, events, quotes);
+      pf = E.portfolio(autos.assets, quotes, cur.settings);
+      snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
+      fired = E.checkAlerts(cur.alerts, quotes);
+      meta = { ...cur.meta, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
+        errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason, fatal: undefined };
+      Object.assign(cur, { assets: autos.assets, flows: autos.flows, events, quotes, snapshots, meta });
+    });
 
     // 6) Notifications + badge
     await notifyAutomations(autos.events, autos.assets, settings);
@@ -132,10 +142,9 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     return { ok: okCount, errors: meta.errCount, events: autos.events.length };
   })().catch(async (e) => {
     console.error('[dara] cycle failed', e);
-    const { meta } = await store.load('meta');
-    await store.save({ meta: { ...meta, running: false, lastRun: Date.now(), fatal: String(e?.message || e) } });
+    await store.update('meta', (m) => ({ ...m, running: false, lastRun: Date.now(), fatal: String(e?.message || e) }));
     return { ok: 0, errors: 1, fatal: String(e?.message || e) };
-  }).finally(() => { running = null; });
+  }).finally(() => { running = null; done(); });
   return running;
 }
 
@@ -184,8 +193,7 @@ async function maybeStaleNotice(pf, meta, settings) {
   if (!stale.length) return;
   if (Date.now() - (meta.lastStaleNotice || 0) < 3 * 86400000) return;
   notify('dara-stale', 'یادآوری به‌روزرسانی دارایی‌ها', `${stale.length} دارایی دستی مدتی است به‌روز نشده: ${stale.slice(0, 3).map((r) => r.asset.name).join('، ')}`);
-  const { meta: m } = await store.load('meta');
-  await store.save({ meta: { ...m, lastStaleNotice: Date.now() } });
+  await store.update('meta', (m) => ({ ...m, lastStaleNotice: Date.now() }));
 }
 
 async function updateBadge(pf, snaps, quotes, settings) {
@@ -229,8 +237,9 @@ async function rialHistory(ref, days) {
 let backfilling = null;
 async function backfill(days) {
   if (backfilling) return backfilling;
+  const done = keepAlive();
   backfilling = (async () => {
-    const setProg = async (p) => { const { meta } = await store.load('meta'); await store.save({ meta: { ...meta, backfill: p } }); };
+    const setProg = (p) => store.update('meta', (m) => ({ ...m, backfill: p }));
     try {
       const st = await store.loadAll();
       const refs = E.collectRefs(st.assets, [], [{ provider: 'tgju', key: 'price_dollar_rl' }, { provider: 'tgju', key: 'geram18' }, { provider: 'tgju', key: 'sekee' }]);
@@ -242,12 +251,13 @@ async function backfill(days) {
         done++; await setProg({ state: 'running', done, total: uniq.length, at: Date.now() });
       }
       if (!hist['tgju:price_dollar_rl']) throw new Error('تاریخچه نرخ دلار دریافت نشد؛ اتصال به tgju را بررسی کن');
-      const cur = await store.load('assets', 'events', 'quotes', 'settings', 'snapshots');
-      const rebuilt = E.reconstructHistory(cur.assets, cur.events, hist, cur.quotes, cur.settings, days);
-      const snapshots = { ...cur.snapshots };
       let added = 0;
-      for (const [d, snap] of Object.entries(rebuilt)) if (!snapshots[d] || snapshots[d].est) { snapshots[d] = snap; added++; }
-      await store.save({ snapshots: E.pruneSnapshots(snapshots) });
+      await store.mutate(['assets', 'events', 'quotes', 'settings', 'snapshots'], (cur) => {
+        const rebuilt = E.reconstructHistory(cur.assets, cur.events, hist, cur.quotes, cur.settings, days);
+        const snapshots = { ...cur.snapshots };
+        for (const [d, snap] of Object.entries(rebuilt)) if (!snapshots[d] || snapshots[d].est) { snapshots[d] = snap; added++; }
+        cur.snapshots = E.pruneSnapshots(snapshots);
+      });
       const res = { state: 'done', added, days, failed: failed.map((r) => P.quoteId(r)), at: Date.now() };
       await setProg(res);
       return { ok: true, ...res };
@@ -256,7 +266,7 @@ async function backfill(days) {
       await setProg(res);
       return { ok: false, ...res };
     }
-  })().finally(() => { backfilling = null; });
+  })().finally(() => { backfilling = null; done(); });
   return backfilling;
 }
 
@@ -269,7 +279,11 @@ function weekKey(now = new Date()) {
   if (fri > now) fri.setDate(fri.getDate() - 7);
   return isoFromDate(fri);
 }
-async function generateWeekly({ force = false, days = 7 } = {}) {
+async function generateWeekly(opts = {}) {
+  const done = keepAlive();
+  try { return await weeklyInner(opts); } finally { done(); }
+}
+async function weeklyInner({ force = false, days = 7 } = {}) {
   const st = await store.loadAll();
   const key = force ? todayIso() : weekKey();
   if (!force && (st.reports || []).some((r) => r.weekOf === key)) return { ok: true, skipped: true };
@@ -313,21 +327,18 @@ async function captureTab(tabId) {
 const handlers = {
   async refresh() { return runCycle({ force: true, reason: 'manual' }); },
   async automate() {
-    const st = await store.loadAll();
-    const autos = E.applyAutomations(st.assets, st.flows, st.quotes, todayIso());
-    if (autos.events.length) {
-      await store.save({ assets: autos.assets, flows: autos.flows, events: autos.events.concat(st.events).slice(0, 3000) });
-      await notifyAutomations(autos.events, autos.assets, st.settings);
-    }
+    let autos, settings;
+    await store.mutate(['assets', 'flows', 'events', 'quotes', 'settings'], (st) => {
+      autos = E.applyAutomations(st.assets, st.flows, st.quotes, todayIso()); settings = st.settings;
+      if (autos.events.length) Object.assign(st, { assets: autos.assets, flows: autos.flows, events: autos.events.concat(st.events).slice(0, E.EVENTS_MAX) });
+    });
+    if (autos.events.length) await notifyAutomations(autos.events, autos.assets, settings);
     return { events: autos.events.length };
   },
   async quote({ ref }) {
     const { quotes, errors } = await P.fetchAll([ref], {});
     const id = P.quoteId(ref);
-    if (quotes[id]) {
-      const { quotes: stored } = await store.load('quotes');
-      await store.save({ quotes: E.mergeQuotes(stored, { [id]: quotes[id] }, {}) });
-    }
+    if (quotes[id]) await store.update('quotes', (stored) => E.mergeQuotes(stored, { [id]: quotes[id] }, {}));
     return { quote: quotes[id] || null, error: errors[id] || null };
   },
   async search({ provider, q }) {
@@ -343,7 +354,8 @@ const handlers = {
     if (h && Date.now() - h.at < 3 * 3600000) return { points: h.points };
     const rows = await rialHistory(ref, days);
     const points = rows.map((r) => [r.date, r.close]);
-    await store.save({ history: { ...history, [id]: { at: Date.now(), points } } });
+    // a small cache: the 40 most recent series
+    await store.update('history', (h) => Object.fromEntries(Object.entries({ ...h, [id]: { at: Date.now(), points } }).sort((a, b) => b[1].at - a[1].at).slice(0, 40)));
     return { points };
   },
   async backfill({ days = 365 }) { return backfill(days); },

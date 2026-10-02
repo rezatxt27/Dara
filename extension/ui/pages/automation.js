@@ -74,7 +74,7 @@ export function AutomationPage({ st, pf, s, open }) {
   const loans = pf.rows.filter((r) => r.asset.mode === 'loan');
   const sugg = suggestions(st, pf);
   const up = E.upcoming(st.assets, st.flows, 45);
-  const auto = E.monthlyAuto(st.assets, st.flows, st.quotes, s);
+  const auto = E.monthlyAuto(st.assets, st.flows);
   const events = st.events.slice(0, 40);
   const nm = (id) => (id && byId[id] ? byId[id].name : null);
 

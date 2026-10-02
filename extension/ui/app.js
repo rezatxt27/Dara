@@ -136,7 +136,7 @@ function Kpis({ st, pf, s }) {
       <${StackBar} items=${[{ name: 'بالا', value: liq.high, color: '#14BCDB' }, { name: 'متوسط', value: liq.mid, color: '#8E70FF' }, { name: 'پایین', value: liq.low, color: '#D946A8' }]} height=${6} />
       <span class="s">قابل نقد در چند روز: <${Money} v=${liq.high} s=${s} compact /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span>
-      <span class="v"><${Money} v=${auto.interest + auto.inflow + auto.loanGet} s=${s} compact /></span>
+      <span class="v"><${Money} v=${auto.interest + auto.inflow} s=${s} compact /></span>
       <span class="s">سود <${Money} v=${auto.interest} s=${s} compact unit=${false} />، ورودی‌ها <${Money} v=${auto.inflow} s=${s} compact unit=${false} /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="live" cls="sm" />به‌روزرسانی خودکار</span>
       <span class="v num">${pf.gross > 0 ? pct(autoVal / g, { sign: false }) : '—'}</span>

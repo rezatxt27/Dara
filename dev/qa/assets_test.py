@@ -111,7 +111,7 @@ async def main():
             await pg.click('tr.xrow button:has-text("حذف")'); await pg.wait_for_timeout(700)
             n = await pg.locator('tbody tr.r').count()
             check('filter resets when its last asset is deleted', n > 5, n)
-            await pg.click('.toast button:has-text("بازگردانی")'); await pg.wait_for_timeout(700)
+            await pg.click('.toast button:has-text("برگشت")'); await pg.wait_for_timeout(700)
             check('restore brings it back', any(x['id'] == 'house' for x in await get(pg, 'assets')))
         await step('filters', t_filters())
 
@@ -120,7 +120,7 @@ async def main():
             await pg.click('tr.xrow button:has-text("حذف")'); await pg.wait_for_timeout(700)
             fl = await get(pg, 'flows')
             check('deleting an account pauses its salary flow', not fl[0]['active'])
-            await pg.click('.toast button:has-text("بازگردانی")'); await pg.wait_for_timeout(700)
+            await pg.click('.toast button:has-text("برگشت")'); await pg.wait_for_timeout(700)
             fl = await get(pg, 'flows')
             check('restoring the account resumes its salary flow', fl[0]['active'] and any(x['id'] == 'bankA' for x in await get(pg, 'assets')))
         await step('delete/restore flows', t_delete_flows())

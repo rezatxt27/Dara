@@ -110,6 +110,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     const autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
     E.rememberLastPrices(autos.assets, quotes);
     const events = autos.events.concat(cur.events).slice(0, 3000);
+    E.settlePending(autos.assets, events, quotes);
 
     // 4) Snapshot for today
     const pf = E.portfolio(autos.assets, quotes, cur.settings);

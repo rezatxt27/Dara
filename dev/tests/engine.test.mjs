@@ -597,3 +597,112 @@ test('one-sentence entry: running quantity across actions and side words', () =>
   const sc = A.parseScenario({ shocks: { usd: 0.2, equity: '-۰٫۱' } });
   assert.equal(sc.shocks.usd, 20); assert.equal(sc.shocks.equity, -10);
 });
+
+test('assets: values, signs and totals add up', () => {
+  const now = Date.now();
+  const assets = [
+    { id: 'b', category: 'bank', mode: 'balance', balance: 1000, balanceAt: now },
+    { id: 'h', category: 'property', mode: 'balance', balance: 5000, balanceAt: now },
+    { id: 'l', category: 'debt', mode: 'balance', balance: 700, balanceAt: now },
+    { id: 'ld', category: 'debt', mode: 'rate', rate: { principal: 1000, annualPct: 36.5, start: J.addDaysIso(iso, -10), mode: 'simple' } },
+    { id: 'g', category: 'gold', mode: 'units', quantity: 2, costBasis: 150, price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' } } },
+    { id: 'x', category: 'other', mode: 'balance', balance: 50, archived: true },
+  ];
+  const quotes = { 'tgju:geram18': { price: 100, changePct: 0.25, at: now } };
+  const pf = E.portfolio(assets, quotes, {}, now);
+  assert.equal(pf.rows.length, 5, 'archived assets are left out');
+  close(pf.gross, 1000 + 5000 + 200, 1e-9);
+  close(pf.debt, 700 + 1010, 1.01); // + the live part of today
+  close(pf.net, pf.rows.reduce((t, r) => t + r.signedValue, 0), 1e-6);
+  const g = pf.rows.find((r) => r.asset.id === 'g');
+  close(g.dayChange, 200 * 0.25 / 1.25, 1e-9); close(g.pnl, 50, 1e-9); close(g.ret, 1 / 3, 1e-9);
+  const ld = pf.rows.find((r) => r.asset.id === 'ld');
+  assert.ok(ld.signedValue < 0 && ld.dayChange < 0, 'a growing loan lowers net worth every day');
+  assert.equal(pf.rows.find((r) => r.asset.id === 'l').pnl, null);
+});
+
+test('assets: re-appraising a house is a market move; topping up a bank account is money in', () => {
+  const now = Date.now();
+  const snaps = { [J.addDaysIso(iso, -2)]: { t: 6000, at: now - 2 * 86400000, v: { h: 5000, b: 1000 } } };
+  const assets = [{ id: 'h', name: 'خانه', category: 'property', mode: 'balance', balance: 6000, balanceAt: now }, { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1500, balanceAt: now }];
+  const events = [{ id: 'e1', kind: 'edit', date: iso, at: now - 1000, title: 'ویرایش', amount: 0, changes: [{ assetId: 'h', field: 'balance', delta: 1000, reval: true }] },
+                  { id: 'e2', kind: 'edit', date: iso, at: now - 900, title: 'ویرایش', amount: 0, changes: [{ assetId: 'b', field: 'balance', delta: 500 }] }];
+  const at = E.attribution(assets, {}, {}, snaps, events, 1, iso);
+  const h = at.rows.find((r) => r.id === 'h'), b = at.rows.find((r) => r.id === 'b');
+  close(h.market, 1000, 1e-9); close(h.edit, 0, 1e-9);
+  close(b.market, 0, 1e-9); close(b.edit, 500, 1e-9);
+  // undo still reverses the appraisal
+  const st = structuredClone(assets); E.undoEvent(st, events[0]); assert.equal(st[0].balance, 5000);
+});
+
+test('assets: matured deposits ask for attention; appraised assets are reminded quarterly', () => {
+  const now = Date.now();
+  const r = { principal: 1000, annualPct: 20, start: J.addDaysIso(iso, -100), maturity: J.addDaysIso(iso, -5), mode: 'simple' };
+  const v = E.valueOf({ id: 'd', category: 'fixed', mode: 'rate', rate: r }, {}, {}, now);
+  assert.equal(v.status, 'matured'); assert.ok(v.error); assert.equal(v.dayChange, 0);
+  assert.equal(E.portfolio([{ id: 'd', category: 'fixed', mode: 'rate', rate: r }], {}, {}, now).attention.length, 1);
+  assert.equal(E.valueOf({ id: 'd', category: 'fixed', mode: 'rate', rate: { ...r, maturity: J.addDaysIso(iso, 5) } }, {}, {}, now).status, 'auto');
+  assert.equal(E.remindDaysFor({ category: 'property', mode: 'balance' }, { remindDays: { balance: 30, price: 7 } }), 90);
+  assert.equal(E.remindDaysFor({ category: 'private', mode: 'units' }, { remindDays: { balance: 30, price: 7 } }), 90);
+  assert.equal(E.remindDaysFor({ category: 'bank', mode: 'balance' }, { remindDays: { balance: 30, price: 7 } }), 30);
+  assert.equal(E.remindDaysFor({ category: 'property', mode: 'balance', remindDays: 7 }, {}), 7);
+  const h = E.valueOf({ id: 'h', category: 'property', mode: 'balance', balance: 1, balanceAt: now - 40 * 86400000 }, {}, { remindDays: { balance: 30, price: 7 } }, now);
+  assert.equal(h.status, 'manual', 'a 40-day-old house value is not stale yet');
+});
+
+test('assets: undo and history rebuild handle removals and method changes', () => {
+  const house = { id: 'h', name: 'خانه', category: 'property', mode: 'balance', balance: 900 };
+  // a change of valuation method is undone by restoring the previous record, never by arithmetic on «mode»
+  const now = [{ id: 'h', name: 'خانه', category: 'property', mode: 'units', quantity: 1, price: { source: 'manual', value: 1000 } }];
+  const ev = { kind: 'edit', date: iso, changes: [{ assetId: 'h', field: 'value', delta: 0, value: 100 }], prev: house };
+  E.undoEvent(structuredClone(now), ev); // must not throw or write NaN
+  const back = E.revertEvent(structuredClone(now), ev);
+  assert.deepEqual(back[0], house);
+  const st = [];
+  E.revertEvent(st, { kind: 'edit', date: iso, restore: house, changes: [{ assetId: 'h', field: 'remove', delta: 0, value: -900 }] });
+  assert.equal(st.length, 1, 'going back past a deletion brings the asset back');
+  const hist = E.reconstructHistory([], [{ id: 'e', kind: 'edit', date: iso, restore: house, changes: [{ assetId: 'h', field: 'remove', delta: 0, value: -900 }] }], {}, {}, {}, 3, iso);
+  assert.equal(hist[J.addDaysIso(iso, -1)].t, 900);
+});
+
+test('rate assets: money added or withdrawn mid-way earns only from that day', () => {
+  for (const mode of ['simple', 'compound', 'payout']) {
+    const a = { id: 'd', category: 'fixed', mode: 'rate', rate: { principal: 1_000_000, annualPct: 20, start: J.addDaysIso(iso, -200), mode } };
+    const t = Date.now();
+    const v0 = E.rateValue(a.rate, iso, t);
+    const ch = E.applyDelta(a, 500_000);
+    close(E.rateValue(a.rate, iso, t) - v0, 500_000, 1, `${mode}: value jumps by exactly the money added`);
+    // a year later the new money has earned ~20% (simple/payout: on a year; compound: compounded)
+    const later = J.addDaysIso(iso, 365);
+    if (mode !== 'payout') {
+      const base = E.rateValue({ principal: 1_000_000, annualPct: 20, start: J.addDaysIso(iso, -200), mode }, later);
+      close(E.rateValue(a.rate, later) - base, 600_000, 300); // less today's elapsed hours
+    }
+    const back = structuredClone([a]); E.undoEvent(back, { changes: ch });
+    close(E.rateValue(back[0].rate, iso, t), v0, 1e-6, `${mode}: undo restores the value`);
+  }
+  // payout: the next monthly payout pays new money only for the days it was there
+  const start = J.addDaysIso(iso, -45);
+  const a = { id: 'p', name: 'سپرده', category: 'fixed', mode: 'rate', rate: { principal: 3_650_000, annualPct: 10, start, mode: 'payout', payoutTo: 'self' } };
+  E.applyAutomations([a], [], {}, J.addDaysIso(iso, -1)); // catch up the payouts until yesterday
+  const since = a.rate.lastPayout || start;
+  const P0 = a.rate.principal; // earlier payouts were added to it
+  E.applyDelta(a, 3_650_000);
+  const next = E.nextMonthlyAfter(start, since);
+  const p0 = a.rate.principal;
+  const { events } = E.applyAutomations([a], [], {}, next);
+  const paid = events.find((e) => e.date === next).amount;
+  const want = P0 * 0.1 * J.daysBetween(since, next) / 365 + 3_650_000 * 0.1 * J.daysBetween(iso, next) / 365;
+  close(paid, want, 1001); // the new money starts earning at this hour, not at midnight
+  close(a.rate.principal - p0, paid, 1e-9);
+  assert.equal(a.rate.offset, 0, 'offset used up at the payout');
+});
+
+test('price-source change made offline: the correction is filled in once the price arrives', () => {
+  const a = { id: 'x', category: 'gold', mode: 'units', quantity: 2, price: { source: 'market', ref: { provider: 'tgju', key: 'sekee' }, pendingFix: { eventId: 'e1', before: 300, qty: 2 } } };
+  const events = [{ id: 'e1', kind: 'edit', date: iso, changes: [{ assetId: 'x', field: 'value', delta: 0, value: 0, pending: true }] }];
+  E.settlePending([a], events, {});
+  assert.ok(a.price.pendingFix, 'still waiting without a price');
+  E.settlePending([a], events, { 'tgju:sekee': { price: 1000, at: Date.now() } });
+  assert.equal(events[0].changes[0].value, 2000 - 300); assert.ok(!events[0].changes[0].pending && !a.price.pendingFix);
+});

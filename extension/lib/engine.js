@@ -5,7 +5,7 @@ import { quoteId, isUsdRef } from './providers.js';
 import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 
-export { quoteId, isUsdRef };
+export { quoteId, isUsdRef, addDaysIso };
 const DAY = 86400000;
 
 export const isLiability = (a) => !!CAT[a.category]?.liability;
@@ -71,13 +71,17 @@ export function rateValue(r, nowIso = todayIso(), nowMs = null) {
     return P * Math.pow(1 + a, Math.max(0, years));
   }
   if (r.mode === 'simple') {
-    return P * (1 + a * (dayFactor(r.start, end, basis) + live / yearDays(end, basis)));
+    return P * (1 + a * (dayFactor(r.start, end, basis) + live / yearDays(end, basis))) + (+r.offset || 0);
   }
   // payout: principal + interest accrued since the last payout (computed from the schedule, not stored state)
+  const since = payoutSince(r, end);
+  return P + P * a * (dayFactor(since, end, basis) + live / yearDays(end, basis)) + (r.offset && r.offsetFrom === since ? +r.offset : 0);
+}
+/** Start of the current payout period (last payout, or the last monthly anniversary on/before `end`). */
+function payoutSince(r, end) {
   let since = r.lastPayout && r.lastPayout <= end ? r.lastPayout : r.start;
   const prev = prevMonthlyOnOrBefore(r.start, end);
-  if (prev > since) since = prev; // a payout is due/applied on `prev`
-  return P + P * a * (dayFactor(since, end, basis) + live / yearDays(end, basis));
+  return prev > since ? prev : since;
 }
 
 export function rateDaily(r, value, iso = todayIso()) {
@@ -141,10 +145,18 @@ export function unitPriceOf(asset, quotes) {
   return { price: +p.value || 0, q: null, adj: 1 };
 }
 
+/** Categories whose value is an estimate the owner re-appraises (a house, a car, private shares) — not cash. */
+export const APPRAISED = new Set(['property', 'private', 'other']);
+/** Statuses that need the owner's attention (shown in «نیاز به توجه»). */
+export const ATTENTION = ['stale', 'error', 'delayed', 'matured'];
+export const needsAttention = (status) => ATTENTION.includes(status);
+
 export function remindDaysFor(asset, settings) {
   if (asset.remindDays === 0) return 0;
   if (asset.remindDays) return asset.remindDays;
-  return asset.mode === 'balance' ? settings?.remindDays?.balance ?? 30 : settings?.remindDays?.price ?? 7;
+  const d = asset.mode === 'balance' ? settings?.remindDays?.balance ?? 30 : settings?.remindDays?.price ?? 7;
+  // A house or private shares aren't re-priced weekly: ask every 3 months unless the owner chose otherwise.
+  return APPRAISED.has(asset.category) ? Math.max(d, 90) : d;
 }
 
 /**
@@ -187,6 +199,11 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
     value = rateValue(asset.rate, nowIso, liveMs);
     status = 'auto'; source = 'rate'; at = now;
     dayChange = asOf ? 0 : rateDaily(asset.rate, value, nowIso);
+    if (!asOf && asset.rate?.maturity && asset.rate.maturity < nowIso) {
+      // Past maturity it stops growing; the owner should move it to an account or set a new maturity.
+      status = 'matured'; at = null;
+      error = 'سررسید شده و دیگر سود نمی‌گیرد؛ آن را به حساب منتقل کن یا تاریخ سررسید جدید بگذار';
+    }
   } else {
     value = +asset.balance || 0;
     at = asset.balanceAt || asset.updatedAt;
@@ -230,7 +247,7 @@ export function portfolio(assets = [], quotes = {}, settings = {}, now = Date.no
     }
     byCat[cat.id] = (byCat[cat.id] || 0) + v.value;
     dayChange += v.dayChange || 0;
-    if (['stale', 'error', 'delayed'].includes(v.status)) attention.push({ asset: a, ...v });
+    if (needsAttention(v.status)) attention.push({ asset: a, ...v });
   }
   const net = gross - debt;
   const cats = CATEGORIES.filter((c) => byCat[c.id]).map((c) => ({ ...c, value: byCat[c.id], share: gross ? byCat[c.id] / gross : 0 }))
@@ -259,7 +276,23 @@ export function applyDelta(asset, delta, quotes = {}) {
   const rec = (field, d) => { if (d) changes.push({ assetId: asset.id, field, delta: d }); };
   if (asset.mode === 'rate') {
     const d = liab ? -delta : delta;
-    asset.rate.principal = (+asset.rate.principal || 0) + d; rec('rate.principal', d);
+    const r = asset.rate; const a = (+r.annualPct || 0) / 100; const today = todayIso();
+    // Money added today earns from today, not from the start date: keep the value jump equal to the money moved.
+    if (a && r.start && r.start < today && r.mode === 'compound') {
+      // same value right now, grows only from now on
+      const v = rateValue(r, today, Date.now());
+      const dp = +r.principal > 0 && v > 0 ? d * (+r.principal) / v : d / Math.pow(1 + a, daysBetween(r.start, today) / 365);
+      r.principal = (+r.principal || 0) + dp; rec('rate.principal', dp);
+    } else {
+      r.principal = (+r.principal || 0) + d; rec('rate.principal', d);
+      if (a && r.start && r.start < today && !(r.maturity && r.maturity < today)) {
+        // simple: interest on d for [start, today) never existed; payout: same, until the next payout
+        const since = r.mode === 'payout' ? payoutSince(r, today) : r.start;
+        const off = -d * a * (dayFactor(since, today, r.basis || 365) + fracOfDay(Date.now()) / yearDays(today, r.basis || 365));
+        if (r.mode === 'payout' && r.offsetFrom !== since) { if (r.offset) rec('rate.offset', -r.offset); r.offset = 0; r.offsetFrom = since; }
+        if (off) { r.offset = (+r.offset || 0) + off; rec('rate.offset', off); }
+      }
+    }
   } else if (asset.mode === 'units') {
     const { price } = unitPriceOf(asset, quotes);
     if (price > 0) {
@@ -282,18 +315,32 @@ export function applyDelta(asset, delta, quotes = {}) {
 function getField(a, f) {
   if (f === 'rate.principal') return +a.rate?.principal || 0;
   if (f === 'interest.accrued') return +a.interest?.accrued || 0;
+  if (f === 'rate.offset') return +a.rate?.offset || 0;
   return +a[f] || 0;
 }
 function setField(a, f, v) {
   if (f === 'rate.principal') a.rate.principal = v;
   else if (f === 'interest.accrued') { if (a.interest) a.interest.accrued = v; }
+  else if (f === 'rate.offset') { if (a.rate) a.rate.offset = v; }
   else a[f] = v;
 }
 
+/** Step the asset list back past one event (history rebuild): bring back a removed asset, the record before a
+ *  change of valuation method, then reverse the numeric changes. Mutates `state`. */
+export function revertEvent(state, ev) {
+  if (ev.restore && !state.some((a) => a.id === ev.restore.id)) state.push(structuredClone(ev.restore));
+  if (ev.prev) {
+    const i = state.findIndex((a) => a.id === ev.prev.id);
+    if (i >= 0) state[i] = structuredClone(ev.prev);
+    return undoEvent(state, { ...ev, changes: (ev.changes || []).filter((c) => c.assetId !== ev.prev.id) });
+  }
+  return undoEvent(state, ev);
+}
+const UNDOABLE = new Set(['quantity', 'balance', 'costBasis', 'rate.principal', 'rate.offset', 'interest.accrued']);
 export function undoEvent(assets, ev) {
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   for (const c of ev.changes || []) {
-    const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number' || c.field === 'add' || c.field === 'remove') continue;
+    const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number' || !UNDOABLE.has(c.field)) continue;
     setField(a, c.field, getField(a, c.field) - c.delta);
     a.updatedAt = Date.now();
   }
@@ -349,11 +396,15 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
       const next = nextMonthlyAfter(r.start, last);
       if (next > today) break;
       if (r.maturity && next > r.maturity) break;
-      const interest = Math.round((+r.principal || 0) * (+r.annualPct / 100) * dayFactor(last, next, r.basis || 365));
+      let interest = Math.round((+r.principal || 0) * (+r.annualPct / 100) * dayFactor(last, next, r.basis || 365));
+      // money added mid-period earned only from the day it came in
+      const off = r.offset && r.offsetFrom === last ? +r.offset : 0;
+      if (off) { interest = Math.round(interest + off); r.offset = 0; }
       let changes = [];
       const target = r.payoutTo && r.payoutTo !== 'self' ? byId[r.payoutTo] : null;
       if (target && !target.archived) changes = applyDelta(target, interest, quotes);
       else { r.principal = (+r.principal || 0) + interest; changes = [{ assetId: a.id, field: 'rate.principal', delta: interest }]; }
+      if (off) changes.push({ assetId: a.id, field: 'rate.offset', delta: -off });
       r.lastPayout = next; last = next;
       events.push({ id: uid('e'), kind: 'interest', date: next, at: Date.now(), title: `واریز سود «${a.name}»`, amount: interest,
         fromId: a.id, toId: target ? target.id : a.id, changes });
@@ -519,6 +570,7 @@ export function eventEffects(events, s, byId, nowById = {}) {
           else if (c.field === 'quantity') x = c.delta * (nowById[a.id]?.unitPrice || 0);
           v = liab ? -x : x;
         }
+        if (c.reval) continue; // the owner re-appraised it (house, car, private shares): a market move, not money
         if (c.field === 'remove') { add(edit, c.assetId, v || 0, true); sum += v || 0; continue; }
         if (v === null || !v) continue;
         add(edit, c.assetId, v); sum += v;
@@ -662,13 +714,13 @@ function lastOnOrBefore(series, iso) {
  */
 export function reconstructHistory(assets, events, hist, quotesNow, settings, days = 365, today = todayIso()) {
   const state = structuredClone(assets.filter((a) => !a.archived));
-  const evs = (events || []).filter((e) => !e.undone && e.date && e.changes?.length).sort((a, b) => b.date.localeCompare(a.date));
+  const evs = (events || []).filter((e) => !e.undone && e.date && (e.changes?.length || e.restore)).sort((a, b) => b.date.localeCompare(a.date));
   let ei = 0;
   const out = {};
   const ids = Object.keys(quotesNow);
   for (let i = 1; i <= days; i++) {
     const d = addDaysIso(today, -i);
-    while (ei < evs.length && evs[ei].date > d) { undoEvent(state, evs[ei]); ei++; }
+    while (ei < evs.length && evs[ei].date > d) { revertEvent(state, evs[ei]); ei++; }
     const q = {};
     for (const id of ids) {
       const series = hist[id];
@@ -780,6 +832,17 @@ export function mergeQuotes(stored, fetched, errors, now = Date.now()) {
     else out[id] = { price: 0, error: msg, errorAt: now, fetchedAt: now };
   }
   return out;
+}
+
+/** Fill in corrections logged while the new price source had no price yet (see saveAsset). Mutates assets & events. */
+export function settlePending(assets, events, quotes) {
+  for (const a of assets) {
+    const fix = a.price?.pendingFix; if (!fix) continue;
+    const u = unitPriceOf(a, quotes); if (u.fallback || !(u.price > 0)) continue;
+    const c = events.find((e) => e.id === fix.eventId)?.changes?.find((c) => c.assetId === a.id && c.pending);
+    if (c) { c.value = valueOf({ ...a, quantity: fix.qty }, quotes).signedValue - fix.before; delete c.pending; }
+    delete a.price.pendingFix;
+  }
 }
 
 export function rememberLastPrices(assets, quotes) {

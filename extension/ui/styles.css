@@ -83,6 +83,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .lbl { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .field .hint { font-size: 11.5px; color: var(--muted); }
+.field .hint.warn { color: var(--warn); }
 .input, select.input, textarea.input { height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); outline: none; width: 100%; transition: border-color .15s, box-shadow .15s; }
 textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height: 64px; }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -198,6 +199,8 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .editable { cursor: text; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; border: 1px dashed transparent; }
 .editable:hover { border-color: var(--line-2); background: var(--surface); }
 .src { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.src.warn { color: var(--warn); }
+.src .approx { text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 
 /* ============ Drawer & modal ============ */
 .scrim { position: fixed; inset: 0; background: rgba(12,10,22,.42); z-index: 50; animation: fade .15s; backdrop-filter: blur(2px); }

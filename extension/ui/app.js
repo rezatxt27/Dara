@@ -126,7 +126,7 @@ function Kpis({ st, pf, s }) {
   const liq = pf.byLiquidity;
   const auto = E.monthlyAuto(st.assets, st.flows);
   let autoVal = 0;
-  for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
+  for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'matured' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
   return html`<div class="kpis">
     <div class="kpi"><span class="t"><${Icon} n="shield" cls="sm" />دارایی ضدتورمی</span>
       <span class="v num">${pf.gross > 0 ? pct(hard / g, { sign: false }) : '—'}</span><${StackBar} items=${exItems} height=${6} />

@@ -101,6 +101,7 @@ export function Ava({ cat, size = 34 }) {
 export const STATUS = {
   live: { t: 'زنده', cls: 'live' }, auto: { t: 'خودکار', cls: 'auto' }, manual: { t: 'دستی', cls: '' },
   stale: { t: 'نیاز به به‌روزرسانی', cls: 'stale' }, delayed: { t: 'قیمت قدیمی', cls: 'delayed' }, error: { t: 'خطای دریافت', cls: 'error' },
+  matured: { t: 'سررسید شده', cls: 'stale' },
 };
 export function StatusPill({ status, title }) {
   const s = STATUS[status] || STATUS.manual;

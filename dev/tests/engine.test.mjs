@@ -852,3 +852,44 @@ test('monthly figures: a receivable installment is not counted twice', () => {
   const m = E.monthlyAuto([mk('debt'), mk('receivable')], [], iso);
   close(m.net, 0, 1);
 });
+
+test('fipiran: POST to the new host, unique keys for share classes, old refs still priced', async () => {
+  // Synthetic list: one plain fund and an umbrella fund whose two classes share a registration number.
+  const raw = { items: [
+    { regNo: '90001', name: 'صندوق نمونه يكم', fundType: 4, cancelNav: 11000, issueNav: 11010, statisticalNav: 11000, date: '2026-09-29T00:00:00', smallSymbolName: 'نمون', netAsset: 5e12 },
+    { regNo: '90002', name: 'بخشی نمونه', fundType: 21, cancelNav: 20000, issueNav: 20100, statisticalNav: 20000, date: '2026-09-29T00:00:00', netAsset: 3e12 },
+    { regNo: '90002', name: '>صندوق بخشی نمونه-ب (کلاس دو)', fundType: 21, cancelNav: 30000, issueNav: 30100, statisticalNav: 30000, date: '2026-09-29T00:00:00', netAsset: 1e12 },
+  ] };
+  const calls = [];
+  P.setFetch(async (url, init) => {
+    calls.push({ url, method: init.method, body: init.body });
+    return { ok: true, status: 200, text: async () => JSON.stringify(raw) };
+  });
+  const found = await P.fipiranSearch('نمونه');
+  assert.equal(calls[0].url, 'https://www.fipiran.com/services/fund/fundcompare');
+  assert.equal(calls[0].method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].body), { regNos: [], showMarketMakers: false });
+  assert.equal(found.length, 3);
+  const keys = new Set(found.map((f) => f.key));
+  assert.equal(keys.size, 3, 'every row has its own key');
+  assert.ok(keys.has('90001'), 'a unique regNo stays the key (old refs keep working)');
+  const cls2 = found.find((f) => f.name.includes('کلاس دو'));
+  assert.ok(!cls2.name.startsWith('>'));
+  assert.equal(cls2.type, 'بخشی');
+  assert.equal(P.searchFunds(found, 'یکم')[0].regNo, '90001', 'Arabic ي/ك in the API match Persian input');
+  assert.equal(P.searchFunds(found, 'نمون')[0].regNo, '90001');
+
+  const { quotes, errors } = await P.fetchAll([
+    { provider: 'fipiran', key: '90001', field: 'cancelNav' },
+    { provider: 'fipiran', key: cls2.key, field: 'cancelNav' },
+    { provider: 'fipiran', key: '90002', name: 'صندوق بخشی نمونه-ب (کلاس دو)', field: 'issueNav' },
+    { provider: 'fipiran', key: '90002', field: 'statisticalNav' },
+    { provider: 'fipiran', key: '99999', field: 'cancelNav' },
+  ]);
+  assert.equal(quotes['fipiran:90001:cancelNav'].price, 11000);
+  assert.equal(quotes['fipiran:90001:cancelNav'].asOf, '2026-09-29');
+  assert.equal(quotes[`fipiran:${cls2.key}:cancelNav`].price, 30000);
+  assert.equal(quotes['fipiran:90002:issueNav'].price, 30100, 'an old regNo-only ref finds its class by name');
+  assert.match(errors['fipiran:90002:statisticalNav'], /چند صندوق/);
+  assert.match(errors['fipiran:99999:cancelNav'], /پیدا نشد/);
+});

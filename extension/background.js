@@ -10,11 +10,13 @@ import { todayIso, addDaysIso, isoFromDate } from './lib/jalali.js';
 import { money, pct, uid } from './lib/format.js';
 import * as U from './lib/update.js';
 
-const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'fund.fipiran.ir', 'api.nobitex.ir'];
+const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir'];
 const REFERERS = {
   'call1.tgju.org': 'https://www.tgju.org/', 'api.tgju.org': 'https://www.tgju.org/',
-  'cdn.tsetmc.com': 'https://www.tsetmc.com/', 'fund.fipiran.ir': 'https://fund.fipiran.ir/', 'api.nobitex.ir': 'https://nobitex.ir/',
+  'cdn.tsetmc.com': 'https://www.tsetmc.com/', 'www.fipiran.com': 'https://www.fipiran.com/', 'api.nobitex.ir': 'https://nobitex.ir/',
 };
+// Fipiran's fund list is a POST; it is sent with the site's own Origin, exactly like its fund-compare page.
+const ORIGINS = { 'www.fipiran.com': 'https://www.fipiran.com' };
 
 // Requests made by the extension itself (tabId -1) get a site Referer and no extension Origin,
 // so the public price endpoints treat them like their own web pages.
@@ -25,7 +27,8 @@ async function installNetRules() {
     condition: { requestDomains: [host], tabIds: [-1], resourceTypes: ['xmlhttprequest', 'other'] },
   }));
   // Installed as two independent sets so one rejected header can't block the other.
-  for (const rules of [mk(100, (h) => [{ header: 'referer', operation: 'set', value: REFERERS[h] }]), mk(200, () => [{ header: 'origin', operation: 'remove' }])]) {
+  const origin = (h) => (ORIGINS[h] ? [{ header: 'origin', operation: 'set', value: ORIGINS[h] }] : [{ header: 'origin', operation: 'remove' }]);
+  for (const rules of [mk(100, (h) => [{ header: 'referer', operation: 'set', value: REFERERS[h] }]), mk(200, origin)]) {
     try { await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: rules.map((r) => r.id), addRules: rules }); }
     catch (e) { console.warn('[dara] net rules', e?.message || e); }
   }

@@ -32,7 +32,7 @@ async def main():
             if 'ajax.json' in u:
                 return await J({'current': {'price_dollar_rl': {'p': '1,000,000', 'dp': 0, 'dt': 'high', 'ts': '2026-10-01 10:00:00'}}})
             return await route.fulfill(status=503, body='x')
-        for pat in ['https://cdn.tsetmc.com/**', 'https://api.coingecko.com/**', 'https://call1.tgju.org/**', 'https://api.tgju.org/**', 'https://api.nobitex.ir/**', 'https://fund.fipiran.ir/**']:
+        for pat in ['https://cdn.tsetmc.com/**', 'https://api.coingecko.com/**', 'https://call1.tgju.org/**', 'https://api.tgju.org/**', 'https://api.nobitex.ir/**', 'https://www.fipiran.com/**']:
             await ctx.route(pat, handler)
         sw = ctx.service_workers[0] if ctx.service_workers else await ctx.wait_for_event('serviceworker', timeout=15000)
         ext = sw.url.split('/')[2]

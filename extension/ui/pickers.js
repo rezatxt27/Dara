@@ -18,12 +18,12 @@ export function TickerSearch({ provider, s, isOn, onPick }) {
   useEffect(() => { setRes(null); setErr(''); setQ(''); if (provider === 'fipiran') search(''); }, [provider]);
   const refOf = (it) => provider === 'tsetmc'
     ? { provider: 'tsetmc', key: it.insCode, symbol: it.symbol, label: it.symbol, name: it.name, field: 'close' }
-    : { provider: 'fipiran', key: it.regNo, label: it.name, name: it.name, field: 'cancelNav' };
+    : { provider: 'fipiran', key: it.key || it.regNo, label: it.name, name: it.name, field: 'cancelNav' };
   return html`<div class="col" style="gap:8px">
     <div class="row"><input class="input" autoFocus placeholder=${provider === 'tsetmc' ? 'نماد را بنویس: فولاد، خودرو، شستا، کهربا…' : 'نام صندوق: فیروزه، آگاه…'} value=${q}
       onInput=${(e) => setQ(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && (e.preventDefault(), search())} />
       <button type="button" class="btn" onClick=${() => search()} disabled=${loading}><${Icon} n=${loading ? 'refresh' : 'search'} cls=${loading ? 'sm spin' : 'sm'} />جست‌وجو</button></div>
-    ${err && html`<div class="callout err"><${Icon} n="wifi" cls="sm" /><div>${err}. ${provider === 'tsetmc' ? 'سایت TSETMC گاهی از خارج ایران یا با VPN پاسخ نمی‌دهد.' : ''}</div></div>`}
+    ${err && html`<div class="callout err"><${Icon} n="wifi" cls="sm" /><div>${err}. ${provider === 'tsetmc' ? 'سایت TSETMC گاهی از خارج ایران یا با VPN پاسخ نمی‌دهد.' : 'سایت فیپیران گاهی با VPN یا از خارج ایران پاسخ نمی‌دهد؛ دوباره «جست‌وجو» را بزن.'}</div></div>`}
     ${res && html`<div class="picker"><div class="scroll">${res.length ? res.map((it) => {
       const ref = refOf(it); const on = isOn(ref);
       return provider === 'tsetmc'

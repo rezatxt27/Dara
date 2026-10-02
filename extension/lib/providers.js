@@ -242,38 +242,84 @@ export async function tsetmcQuotes(refs) {
 }
 
 /* ------------------------------ Fipiran (mutual funds NAV) ------------------------------ */
+// The old host (fund.fipiran.ir) is gone. The fund list now comes from a POST to www.fipiran.com/services
+// (a GET answers 405). One registration number can cover several share classes of an umbrella fund, each
+// with its own name and NAV, so a fund's key is its regNo when that is unique, else regNo + a hash of its name.
+export const FIPIRAN_FUNDS_URL = 'https://www.fipiran.com/services/fund/fundcompare';
 let fundCache = { at: 0, items: [] };
-export const FUND_TYPES = { 4: 'درآمد ثابت', 6: 'سهامی', 7: 'مختلط', 5: 'بخشی', 11: 'بازارگردانی', 12: 'جسورانه', 13: 'کالایی', 14: 'پروژه', 15: 'املاک', 16: 'خصوصی', 17: 'طلا', 21: 'اهرمی' };
-export async function fipiranFunds(force = false) {
-  if (!force && fundCache.items.length && Date.now() - fundCache.at < 30 * 60 * 1000) return fundCache.items;
-  const j = await getJSON('https://fund.fipiran.ir/api/v1/fund/fundcompare');
-  const items = (j.items || []).map((f) => ({
-    regNo: String(f.regNo), name: persianize(f.name), type: FUND_TYPES[f.fundType] || '', fundType: f.fundType,
-    cancelNav: n(f.cancelNav), issueNav: n(f.issueNav), statisticalNav: n(f.statisticalNav), date: f.date,
-    annual: n(f.annualEfficiency), symbol: persianize(f.smallSymbolName || ''),
-  }));
+export const FUND_TYPES = {
+  4: 'درآمد ثابت', 5: 'کالایی', 6: 'سهامی', 7: 'مختلط', 11: 'بازارگردانی', 12: 'جسورانه', 13: 'پروژه', 14: 'زمین و ساختمان',
+  16: 'خصوصی', 17: 'صندوق در صندوق', 18: 'املاک و مستغلات', 21: 'بخشی', 22: 'اهرمی', 23: 'شاخصی', 24: 'تضمین اصل سرمایه', 25: 'بازنشستگی',
+};
+const fundName = (s) => persianize(String(s ?? '').replace(/<[^>]*>/g, '').replace(/^[>\s]+/, '')).replace(/\s+/g, ' ');
+const squash = (s) => fundName(s).replace(/[\s\-–_()]/g, '');
+function hash36(s) { let h = 5381; for (const ch of s) h = (Math.imul(h, 33) ^ ch.codePointAt(0)) >>> 0; return h.toString(36); }
+export const fundKey = (regNo, name, shared) => (shared ? `${regNo}-${hash36(squash(name))}` : String(regNo));
+
+/** Raw API items → [{key, regNo, name, type, cancelNav, issueNav, statisticalNav, date, annual, symbol, size}] */
+export function parseFunds(raw) {
+  const rows = (Array.isArray(raw) ? raw : raw?.items || []).filter((f) => f && f.regNo != null && f.name);
+  const count = {};
+  for (const f of rows) count[f.regNo] = (count[f.regNo] || 0) + 1;
+  const byKey = new Map();
+  for (const f of rows) {
+    const name = fundName(f.name); const regNo = String(f.regNo);
+    const it = { key: fundKey(regNo, name, count[f.regNo] > 1), regNo, name, type: FUND_TYPES[f.fundType] || '', fundType: f.fundType,
+      cancelNav: n(f.cancelNav), issueNav: n(f.issueNav), statisticalNav: n(f.statisticalNav), date: f.date || '',
+      annual: n(f.annualEfficiency), symbol: persianize(f.smallSymbolName || ''), size: n(f.netAsset) || n(f.fundSize) || 0 };
+    const prev = byKey.get(it.key); // the same fund listed twice: keep the newer NAV
+    if (!prev || (!(prev.cancelNav > 0) && it.cancelNav > 0) || String(it.date) > String(prev.date)) byKey.set(it.key, it);
+  }
+  return [...byKey.values()];
+}
+
+/** maxAge: how old (ms) a cached list may be. NAVs change once a day, so a few minutes is plenty. */
+export async function fipiranFunds(maxAge = 30 * 60 * 1000) {
+  if (fundCache.items.length && Date.now() - fundCache.at < maxAge) return fundCache.items;
+  const j = await getJSON(FIPIRAN_FUNDS_URL, { method: 'POST', timeout: 25000, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regNos: [], showMarketMakers: false }) });
+  const items = parseFunds(j);
+  if (!items.length) throw new Error('فهرست صندوق‌ها خالی برگشت');
   fundCache = { at: Date.now(), items };
   return items;
 }
-export async function fipiranSearch(q) {
-  const items = await fipiranFunds();
-  const t = persianize(q).replace(/\s+/g, ' ');
-  if (!t) return items.slice(0, 30);
-  return items.filter((f) => f.name.includes(t) || f.symbol.includes(t) || f.regNo === t).slice(0, 40);
+
+/** Fund search over name, symbol and registration number; spaces, half-spaces and Arabic letters don't matter. */
+export function searchFunds(items, q) {
+  const t = squash(q);
+  const list = !t ? items : items.filter((f) => squash(f.name).includes(t) || (f.symbol && squash(f.symbol).includes(t)) || f.regNo === t);
+  return list.slice().sort((a, b) => (b.cancelNav > 0) - (a.cancelNav > 0) || b.size - a.size).slice(0, t ? 60 : 30);
 }
+export async function fipiranSearch(q) { return searchFunds(await fipiranFunds(), q); }
+
+/** The fund a saved ref points at. Older refs hold only the regNo; for an umbrella fund the saved name picks the class. */
+export function findFund(items, ref) {
+  const key = String(ref?.key ?? '');
+  const exact = items.find((x) => x.key === key);
+  if (exact) return exact;
+  const same = items.filter((x) => x.regNo === key.split('-')[0]);
+  if (same.length <= 1) return same[0] || null;
+  const want = squash(ref.name || ref.label || '');
+  if (!want) return null;
+  return same.find((x) => squash(x.name) === want) || same.find((x) => { const s = squash(x.name); return s.includes(want) || want.includes(s); }) || null;
+}
+
 export async function fipiranQuotes(refs) {
   const out = {}; const errors = {};
   if (!refs.length) return { quotes: out, errors };
   const idOf = (r) => `${r.key}${r.field ? ':' + r.field : ''}`;
   try {
-    const items = await fipiranFunds(true);
+    const items = await fipiranFunds(10 * 60 * 1000);
     for (const r of refs) {
-      const f = items.find((x) => x.regNo === String(r.key));
+      const f = findFund(items, r);
       const price = f && f[r.field || 'cancelNav'];
       if (price > 0) {
-        const d = f.date ? new Date(f.date) : null;
-        out[idOf(r)] = { price, change: 0, changePct: 0, at: d && !isNaN(d) ? Math.min(d.getTime(), Date.now()) : Date.now(), asOf: f.date || '', source: 'fipiran' };
-      } else errors[idOf(r)] = 'صندوق پیدا نشد';
+        const day = String(f.date || '').slice(0, 10);
+        out[idOf(r)] = { price, change: 0, changePct: 0, at: day ? tehranDayEnd(day) : Date.now(), asOf: day, source: 'fipiran' };
+      } else if (f) errors[idOf(r)] = 'فیپیران برای این صندوق قیمتی اعلام نکرده';
+      else errors[idOf(r)] = items.some((x) => x.regNo === String(r.key).split('-')[0])
+        ? 'این شماره ثبت چند صندوق دارد؛ صندوق را یک بار دیگر از فهرست انتخاب کن'
+        : 'صندوق در فهرست فیپیران پیدا نشد';
     }
   } catch (e) { for (const r of refs) errors[idOf(r)] = e.message; }
   return { quotes: out, errors };

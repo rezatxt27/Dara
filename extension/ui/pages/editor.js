@@ -81,11 +81,11 @@ function SourcePicker({ st, s, price, setPrice, cat }) {
         <button type="button" class="btn" onClick=${() => search()} disabled=${loading}><${Icon} n=${loading ? 'refresh' : 'search'} cls=${loading ? 'sm spin' : 'sm'} />جست‌وجو</button></div>
       ${ref.key && html`<div class="callout"><${Icon} n="check" cls="sm" /><div>انتخاب‌شده: <b>${refLabel(ref)}</b> ${ref.name && ref.name !== ref.label ? html`<span class="muted">— ${ref.name}</span>` : ''}</div></div>`}
       ${!ref.key && ref.symbol && html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>نماد «${ref.symbol}» هنوز شناسایی نشده؛ جست‌وجو کن و از فهرست انتخاب کن (یا در به‌روزرسانی بعدی خودکار شناسایی می‌شود).</div></div>`}
-      ${err && html`<div class="callout err"><${Icon} n="wifi" cls="sm" /><div>${err}. ${prov === 'tsetmc' ? 'سایت TSETMC گاهی از خارج ایران یا با VPN پاسخ نمی‌دهد.' : ''}</div></div>`}
+      ${err && html`<div class="callout err"><${Icon} n="wifi" cls="sm" /><div>${err}. ${prov === 'tsetmc' ? 'سایت TSETMC گاهی از خارج ایران یا با VPN پاسخ نمی‌دهد.' : 'سایت فیپیران گاهی با VPN یا از خارج ایران پاسخ نمی‌دهد؛ دوباره «جست‌وجو» را بزن.'}</div></div>`}
       ${res && html`<div class="picker"><div class="scroll">${res.length ? res.map((it) => prov === 'tsetmc'
         ? html`<div class=${'opt' + (ref.key === it.insCode ? ' on' : '')} onClick=${() => setRef({ provider: 'tsetmc', key: it.insCode, symbol: it.symbol, label: it.symbol, name: it.name, field: ref.field || 'close' })}>
             <span class="grow"><span class="sb">${it.symbol}</span> <span class="xs muted">${it.name}</span></span><span class="xs muted">${it.market}${it.active ? '' : '، غیرفعال'}</span></div>`
-        : html`<div class=${'opt' + (ref.key === it.regNo ? ' on' : '')} onClick=${() => setRef({ provider: 'fipiran', key: it.regNo, label: it.name, name: it.name, field: ref.field || 'cancelNav' })}>
+        : html`<div class=${'opt' + (ref.key === (it.key || it.regNo) ? ' on' : '')} onClick=${() => setRef({ provider: 'fipiran', key: it.key || it.regNo, label: it.name, name: it.name, field: ref.field || 'cancelNav' })}>
             <span class="grow"><span class="sb">${it.name}</span> <span class="xs muted">${it.type}</span></span><span class="small num"><${Money} v=${it.cancelNav} s=${s} /></span></div>`)
         : html`<div class="opt muted">نتیجه‌ای پیدا نشد</div>`}</div></div>`}
       ${prov === 'tsetmc' && html`<div class="row"><span class="lbl">قیمت مبنا</span><${Seg} value=${ref.field || 'close'} onChange=${(f) => setRef({ ...ref, field: f })} options=${[['close', 'قیمت پایانی'], ['last', 'آخرین معامله'], ['nav', 'NAV ابطال (ETF)']]} /></div>`}

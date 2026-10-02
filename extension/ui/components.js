@@ -431,11 +431,12 @@ export function Explain({ get, s, title = 'این عدد از کجا آمد؟', 
   useEffect(() => {
     if (!pos) return;
     const close = (e) => { if (!e.target.closest?.('.xpop') && !btn.current?.contains(e.target)) setPos(null); };
-    const esc = (e) => e.key === 'Escape' && setPos(null);
+    // Escape closes only the popover, not the form or dialog around it (they listen on window, after document)
+    const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setPos(null); } };
     const off = (e) => { if (e?.target?.closest?.('.xpop')) return; setPos(null); }; // scrolling inside the popover keeps it open
     const t = setTimeout(() => document.addEventListener('mousedown', close), 0);
-    addEventListener('keydown', esc); addEventListener('resize', off); document.addEventListener('scroll', off, true);
-    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); removeEventListener('keydown', esc); removeEventListener('resize', off); document.removeEventListener('scroll', off, true); };
+    document.addEventListener('keydown', esc); addEventListener('resize', off); document.addEventListener('scroll', off, true);
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); removeEventListener('resize', off); document.removeEventListener('scroll', off, true); };
   }, [pos]);
   const toggle = (e) => {
     e.stopPropagation(); e.preventDefault();
@@ -480,12 +481,18 @@ export function Tip({ title, text, example }) {
   useEffect(() => {
     if (!pos?.pinned) return;
     const close = (e) => { if (!e.target.closest?.('.tippop') && !btn.current?.contains(e.target)) setPos(null); };
-    const esc = (e) => e.key === 'Escape' && setPos(null);
     const off = (e) => { if (e?.target?.closest?.('.tippop')) return; setPos(null); };
     const t = setTimeout(() => document.addEventListener('mousedown', close), 0);
-    addEventListener('keydown', esc); document.addEventListener('scroll', off, true);
-    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); removeEventListener('keydown', esc); document.removeEventListener('scroll', off, true); };
+    document.addEventListener('scroll', off, true);
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', close); document.removeEventListener('scroll', off, true); };
   }, [pos?.pinned]);
+  // Escape closes the tip (hovered or pinned) and nothing else
+  useEffect(() => {
+    if (!pos) return;
+    const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); setPos(null); } };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [!!pos]);
   const enter = () => { clearTimeout(hideT.current); if (!pos) place(false); };
   const leave = () => { if (pos && !pos.pinned) hideT.current = setTimeout(() => setPos((p) => (p && !p.pinned ? null : p)), 120); };
   const click = (e) => { e.stopPropagation(); e.preventDefault(); if (pos?.pinned) setPos(null); else place(true); };

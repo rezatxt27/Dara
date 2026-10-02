@@ -469,3 +469,12 @@ details.more[open] > summary { margin-bottom: 10px; }
 }
 .xpanel.solo { grid-template-columns: 1fr; }
 .card .sched { border: 0; border-radius: 0; max-height: 360px; }
+
+/* ============ Form help (1.5) ============ */
+.ltip { display: inline-flex; align-items: center; gap: 2px; }
+.ltip .xbtn, .st .xbtn, .lbl .xbtn, .tipinl .xbtn { width: 22px; height: 22px; margin: -4px 0; }
+.ltip .xbtn svg, .st .xbtn svg { width: 13px; height: 13px; }
+.catguide { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 10px; padding: 8px 11px; line-height: 1.8; }
+.catguide .cswitch { color: var(--muted); }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.linkbtn:hover { color: var(--accent-2, var(--accent)); }

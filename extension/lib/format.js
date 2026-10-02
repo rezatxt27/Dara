@@ -16,29 +16,48 @@ export const toEnDigits = (s) => String(s ?? '')
   .replace(/[٠-٩]/g, (c) => '٠١٢٣٤٥٦٧٨٩'.indexOf(c));
 
 const WORD_SCALE = { 'هزار': 1e3, 'میلیون': 1e6, 'ملیون': 1e6, 'میلیارد': 1e9, 'ملیارد': 1e9, 'بیلیون': 1e9, 'تریلیون': 1e12 };
+const WORD_NUM = { 'صفر': 0, 'یک': 1, 'یه': 1, 'دو': 2, 'سه': 3, 'چهار': 4, 'پنج': 5, 'شش': 6, 'شیش': 6, 'هفت': 7, 'هشت': 8, 'نه': 9, 'ده': 10,
+  'یازده': 11, 'دوازده': 12, 'سیزده': 13, 'چهارده': 14, 'پانزده': 15, 'پونزده': 15, 'شانزده': 16, 'شونزده': 16, 'هفده': 17, 'هجده': 18, 'هیجده': 18, 'نوزده': 19,
+  'بیست': 20, 'سی': 30, 'چهل': 40, 'پنجاه': 50, 'شصت': 60, 'هفتاد': 70, 'هشتاد': 80, 'نود': 90,
+  'صد': 100, 'یکصد': 100, 'دویست': 200, 'سیصد': 300, 'چهارصد': 400, 'پانصد': 500, 'پونصد': 500, 'ششصد': 600, 'هفتصد': 700, 'هشتصد': 800, 'نهصد': 900, 'نیم': 0.5 };
+// words that may sit around an amount without changing it
+const FILLER = new Set(['و', 'تومان', 'تومن', 'ریال', 'مثلا', 'مثلاً', 'حدود', 'حدودا', 'حدوداً', 'تقریبا', 'تقریباً']);
+/** True if the text has Persian/Arabic letters (not just digits and separators such as «٬» and «٫»). */
+export const hasWords = (s) => /[آ-غف-يپچژکگی]/.test(String(s || ''));
 /**
- * Parse a user-typed number: "۱٬۲۳۴٫۵", "1,234.5", "12 میلیون", and compound amounts as people say them —
- * "۱۲ میلیون و ۵۰۰ هزار" (12,500,000), "۲ میلیارد و ۳۰۰ میلیون", "۵ هزار میلیارد" (5e12).
+ * Parse a user-typed number: "۱٬۲۳۴٫۵", "1,234.5", "۱/۵", "12 میلیون", and amounts as people say them —
+ * "۱۲ میلیون و ۵۰۰ هزار" (12,500,000), "دو میلیون", "یک میلیون و دویست هزار", "۲ و نیم میلیون", "۵ هزار میلیارد".
+ * Any other word makes it NaN, so a typo never turns into a silent wrong amount.
  */
-export function parseNum(input) {
+export function parseNum(input, { lenient = false } = {}) {
   if (input === null || input === undefined) return NaN;
   if (typeof input === 'number') return input;
-  let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/\u200c/g, ' ').trim();
+  let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/‌/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
   const neg = /^-/.test(s);
-  // thousands separators inside a number go; Persian decimal mark becomes a dot; "12 500 000" joins up
-  s = s.replace(/(\d)[٬,](?=\d)/g, '$1').replace(/٫/g, '.').replace(/(\d)\s+(?=\d{3}(?!\d))/g, '$1');
-  const tokens = s.match(/\d+(?:\.\d+)?|\.\d+|هزار|میلیون|ملیون|میلیارد|ملیارد|بیلیون|تریلیون/g);
+  // thousands separators inside a number go; Persian decimal mark (and «/» between digits) becomes a dot; "12 500 000" joins up
+  s = s.replace(/(\d)[٬,](?=\d)/g, '$1').replace(/٫/g, '.').replace(/(\d)\/(\d)/g, '$1.$2').replace(/(\d)\s+(?=\d{3}(?!\d))/g, '$1');
+  if (lenient) s = s.replace(/[a-z]+/gi, ' '); // spreadsheet cells: «12 گرم», «120 USD»
+  else if (/[a-z]/i.test(s)) return NaN;
+  const tokens = s.match(/\d+(?:\.\d+)?|\.\d+|[آ-ی]+/g);
   if (!tokens) return NaN;
-  if (!tokens.some((t) => t in WORD_SCALE)) {
-    const n = parseFloat(tokens.join(''));
+  const known = (t) => t in WORD_SCALE || t in WORD_NUM;
+  let words = tokens.filter((t) => !/^[\d.]/.test(t) && !FILLER.has(t));
+  if (lenient) { for (let i = tokens.length - 1; i >= 0; i--) if (!/^[\d.]/.test(tokens[i]) && !FILLER.has(tokens[i]) && !known(tokens[i])) tokens.splice(i, 1); words = words.filter(known); }
+  if (words.some((t) => !known(t))) return NaN;
+  if (!words.length) {
+    const n = parseFloat(tokens.filter((t) => /^[\d.]/.test(t)).join(''));
     return isFinite(n) ? (neg ? -n : n) : NaN;
   }
-  // words: a scale multiplies the number before it ("۵ هزار میلیارد" multiplies twice); a new number after a scale
-  // starts the next part, and the parts add up ("۱۲ میلیون و ۵۰۰ هزار")
-  let total = 0, group = 0, scaled = false;
+  // a scale multiplies what came before it («۵ هزار میلیارد» multiplies twice); a number after a scale starts the next
+  // part; the parts add up («۱۲ میلیون و ۵۰۰ هزار»). Word numbers add up within a part («سیصد و پنجاه»).
+  let total = 0, group = 0, scaled = false, unit = 1;
   for (const t of tokens) {
-    if (t in WORD_SCALE) { group = (group || 1) * WORD_SCALE[t]; scaled = true; }
-    else { if (scaled) { total += group; group = 0; scaled = false; } group += parseFloat(t); }
+    if (FILLER.has(t)) continue;
+    if (t in WORD_SCALE) { group = (group || 1) * WORD_SCALE[t]; unit = WORD_SCALE[t]; scaled = true; continue; }
+    if (t === 'نیم' && scaled) { group += unit / 2; continue; } // «۱۰ میلیون و نیم» = 10.5 million
+    const v = t in WORD_NUM ? WORD_NUM[t] : parseFloat(t);
+    if (scaled) { total += group; group = 0; scaled = false; }
+    group += v;
   }
   total += group;
   return neg ? -total : total;

@@ -286,7 +286,7 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
     if (!asOf && asset.rate?.maturity && asset.rate.maturity < nowIso) {
       // Past maturity it stops growing; the owner should move it to an account or set a new maturity.
       status = 'matured'; at = null;
-      error = 'سررسید شده و دیگر سود نمی‌گیرد؛ آن را به حساب منتقل کن یا تاریخ سررسید جدید بگذار';
+      error = liab ? 'سررسید شده؛ آن را از یکی از حساب‌ها تسویه کن یا تاریخ جدید بگذار' : 'سررسید شده و دیگر سود نمی‌گیرد؛ آن را به حساب منتقل کن یا تاریخ سررسید جدید بگذار';
     }
   } else {
     value = +asset.balance || 0;
@@ -414,12 +414,14 @@ function getField(a, f) {
   if (f === 'rate.principal') return +a.rate?.principal || 0;
   if (f === 'interest.accrued') return +a.interest?.accrued || 0;
   if (f === 'rate.offset') return +a.rate?.offset || 0;
+  if (f === 'price.value') return +a.price?.value || 0;
   return +a[f] || 0;
 }
 function setField(a, f, v) {
   if (f === 'rate.principal') a.rate.principal = v;
   else if (f === 'interest.accrued') { if (a.interest) a.interest.accrued = v; }
   else if (f === 'rate.offset') { if (a.rate) a.rate.offset = v; }
+  else if (f === 'price.value') { if (a.price) a.price = { ...a.price, value: v, updatedAt: Date.now() }; }
   else a[f] = v;
 }
 
@@ -434,12 +436,12 @@ export function revertEvent(state, ev) {
   }
   if (ev.prev) {
     const i = state.findIndex((a) => a.id === ev.prev.id);
-    if (i >= 0) state[i] = structuredClone(ev.prev);
+    if (i >= 0) state[i] = structuredClone(ev.prev); else state.push(structuredClone(ev.prev));
     return undoEvent(state, { ...ev, changes: (ev.changes || []).filter((c) => c.assetId !== ev.prev.id) });
   }
   return undoEvent(state, ev);
 }
-const UNDOABLE = new Set(['quantity', 'balance', 'costBasis', 'rate.principal', 'rate.offset', 'interest.accrued']);
+const UNDOABLE = new Set(['quantity', 'balance', 'costBasis', 'rate.principal', 'rate.offset', 'interest.accrued', 'price.value']);
 export function undoEvent(assets, ev) {
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   for (const c of [...(ev.changes || [])].reverse()) {
@@ -517,7 +519,7 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
   // recurring flows (an account that no longer exists pauses the flow instead of moving money to nowhere)
   for (const f of flows) {
     if (!f.active || !(+f.amount)) continue;
-    if ((f.fromId && !byId[f.fromId]) || (f.toId && !byId[f.toId])) { f.active = false; f.paused = 'missing'; continue; }
+    if ((f.fromId && !ok(f.fromId)) || (f.toId && !ok(f.toId))) { f.active = false; f.paused = 'missing'; continue; }
     for (const d of flowOccurrences(f, f.lastRun || addDaysIso(f.start, -1), today, 60)) { push(d, { kind: 'flow', f }); if (d < first) first = d; }
   }
   // bank accounts with day-count interest
@@ -541,7 +543,9 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
         events.push({ id: uid('e'), kind: 'interest', date: d, at, title: `سود روزشمار «${a.name}»`, amount: amt, fromId: a.id, toId: a.id, changes });
       }
     }
-    // b) deposit payouts falling on this day
+    // b) deposit payouts falling on this day — every amount is worked out first, then paid, so one deposit paying into
+    //    another on the same day can't change what the other pays
+    const pays = [];
     for (const a of payers) {
       const r = a.rate; const n = nextPayout(r);
       if (n !== d) continue;
@@ -550,20 +554,29 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
       // money added mid-period earned only from the day it came in
       const off = r.offset && r.offsetFrom === last ? +r.offset : 0;
       if (off) { interest = Math.round(interest + off); r.offset = 0; }
+      r.lastPayout = n;
+      pays.push({ a, interest, off });
+    }
+    for (const { a, interest, off } of pays) {
+      const r = a.rate;
       // a debt's interest adds to the debt itself; an asset's goes to the chosen account (or stays in it)
       const target = !isLiability(a) && r.payoutTo && r.payoutTo !== 'self' ? ok(r.payoutTo) : null;
       let changes;
       if (target) changes = applyDelta(target, interest, quotes, d);
       else { r.principal = (+r.principal || 0) + interest; changes = [{ assetId: a.id, field: 'rate.principal', delta: interest }]; }
       if (off) changes.push({ assetId: a.id, field: 'rate.offset', delta: -off });
-      r.lastPayout = n;
-      events.push({ id: uid('e'), kind: 'interest', date: n, at, title: `${isLiability(a) ? 'سود اضافه‌شده به' : 'واریز سود'} «${a.name}»`, amount: interest,
+      events.push({ id: uid('e'), kind: 'interest', date: d, at, title: `${isLiability(a) ? 'سود اضافه‌شده به' : 'واریز سود'} «${a.name}»`, amount: interest,
         fromId: a.id, toId: target ? target.id : a.id, changes });
     }
     // c) installments and recurring flows of this day
     for (const job of due.get(d) || []) {
       if (job.kind === 'loan') {
-        const { a, row } = job; const L = a.loan; const liab = isLiability(a);
+        const { a } = job; const L = a.loan; const liab = isLiability(a);
+        // the schedule may have changed earlier in this run (an extra payment, a settlement): use it as it is now
+        if (a.archived || (L.settledAt && d >= L.settledAt) || (L.lastRun && d <= L.lastRun)) continue;
+        const plan = loanPlan(L); const row = plan.rows.find((x) => x.date === d);
+        if (!row) continue;
+        job.n = plan.n;
         const amt = Math.round(row.payment);
         const acc = ok(L.account);
         const changes = acc ? applyDelta(acc, liab ? -amt : amt, quotes, d) : [];
@@ -650,14 +663,14 @@ export function upcoming(assets, flows, days = 30, today = todayIso()) {
  * received, and interest owed on debts. net = what the month adds to (or takes from) your cash and wealth.
  */
 export function monthlyAuto(assets, flows, today = todayIso()) {
-  let interest = 0, inflow = 0, outflow = 0, loanPay = 0, loanGet = 0, loanInterest = 0, debtInterest = 0;
+  let interest = 0, inflow = 0, outflow = 0, loanPay = 0, loanGet = 0, loanInterest = 0, debtInterest = 0, recvInterest = 0;
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   for (const a of assets) {
     if (a.archived || a.mode !== 'loan') continue;
     const st = loanState(a.loan, today);
     if (st.done) continue;
     if (isLiability(a)) { loanPay += st.next.payment; loanInterest += st.next.interest; }
-    else { loanGet += st.next.payment; interest += st.next.interest; }
+    else { loanGet += st.next.payment; interest += st.next.interest; recvInterest += st.next.interest; }
   }
   for (const a of assets) {
     if (a.archived || a.mode === 'loan') continue;
@@ -677,7 +690,8 @@ export function monthlyAuto(assets, flows, today = todayIso()) {
   }
   // installments leave (or reach) the accounts every month; their interest part is the real cost (or income)
   return { interest, inflow, outflow, loanPay, loanGet, loanInterest, debtInterest,
-    net: interest + inflow - outflow - loanPay + loanGet - debtInterest };
+    // (interest received on installments is inside loanGet already)
+    net: interest - recvInterest + inflow - outflow - loanPay + loanGet - debtInterest };
 }
 
 /* ============================ snapshots & series ============================ */
@@ -760,6 +774,8 @@ export function eventEffects(events, s, byId, nowById = {}) {
       if (sum) dated.push({ date: e.date, amount: sum, kind: 'edit' });
       continue;
     }
+    // a closed deposit (its money moved to an account): the removal marker keeps its earnings up to now as return
+    for (const c of e.changes || []) if (c.field === 'remove') add(edit, c.assetId, typeof c.value === 'number' ? c.value : 0, true);
     if (e.kind === 'interest' && e.fromId === e.toId) continue; // bank day-count interest = return, not a flow
     if (e.toId) add(flow, e.toId, amt);
     if (e.fromId) add(flow, e.fromId, -amt);
@@ -897,7 +913,7 @@ function lastOnOrBefore(series, iso) {
  * through the event log; manual prices/balances without history are held constant (snapshot.est = 1).
  */
 export function reconstructHistory(assets, events, hist, quotesNow, settings, days = 365, today = todayIso()) {
-  const state = structuredClone(assets.filter((a) => !a.archived));
+  const state = structuredClone(assets); // archived ones too: going back past a «close», they were open
   const evs = (events || []).filter((e) => !e.undone && e.date && (e.changes?.length || e.restore)).sort((a, b) => b.date.localeCompare(a.date));
   let ei = 0;
   const out = {};
@@ -961,7 +977,7 @@ export function weeklyFacts(st, today = todayIso(), days = 7) {
 /** Privacy filter: replace money amounts with % of net worth (for AI in "percent" mode) */
 export function percentify(obj, net) {
   const base = Math.abs(net) || 1;
-  const moneyKeys = new Set(['net', 'gross', 'debt', 'abs', 'market', 'external', 'edits', 'flow', 'amount', 'interestReceived', 'value', 'before', 'after', 'delta', 'price_rial']);
+  const moneyKeys = new Set(['net', 'gross', 'debt', 'abs', 'market', 'external', 'edits', 'internal', 'flow', 'amount', 'interestReceived', 'value', 'before', 'after', 'delta', 'price_rial']);
   const walk = (o) => {
     if (Array.isArray(o)) return o.map(walk);
     if (o && typeof o === 'object') {

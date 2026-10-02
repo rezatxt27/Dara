@@ -31,14 +31,16 @@ function FlowModal({ st, s, flow, onClose }) {
     const map = { salary: { toId: bank?.id, fromId: '' }, rent: { toId: bank?.id, fromId: '' }, installment: { fromId: bank?.id, toId: debt?.id }, dca: { fromId: bank?.id, toId: gold?.id }, saving: { fromId: bank?.id, toId: fixed?.id }, expense: { fromId: bank?.id, toId: '' } };
     set({ title: t.title, ...(map[t.id] || {}) });
   };
-  const past = f.start && !flow ? E.flowOccurrences({ ...f, done: 0 }, '0000-00-00', todayIso(), 400).length : 0;
+  const yday = addDaysIso(todayIso(), -1);
+  // runs before today that would be replayed (today's run happens as usual)
+  const past = f.start && !flow ? E.flowOccurrences({ ...f, done: 0 }, '0000-00-00', yday, 400).length : 0;
   const [confirmPast, setConfirmPast] = useState(false);
   const save = async () => {
     if (!f.title.trim() || !(f.amount > 0) || (!f.fromId && !f.toId)) return toast('عنوان، مبلغ و دست‌کم یکی از حساب‌های مبدأ/مقصد لازم است');
     if (f.fromId && f.fromId === f.toId) return toast('حساب مبدأ و مقصد یکی است');
     if (f.end && f.start && f.end < f.start) return toast('تاریخ پایان باید بعد از تاریخ شروع باشد');
     const out = { ...f, fromId: f.fromId || null, toId: f.toId || null };
-    if (!flow && past > 0 && !confirmPast) { out.lastRun = todayIso(); out.done = past; } // don't back-apply old occurrences unless asked
+    if (!flow && past > 0 && !confirmPast) { out.lastRun = yday; out.done = past; } // don't back-apply old occurrences unless asked
     await act.saveFlow(out); onClose();
   };
   const toAsset = accounts.find((a) => a.id === f.toId);

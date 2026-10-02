@@ -172,7 +172,8 @@ async def main():
             n0 = len(await get(pg, 'events'))
             await pg.keyboard.press('Control+A'); await pg.keyboard.type('3000'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(600)
             a = next(x for x in await get(pg, 'assets') if x['id'] == 'priv')
-            check('inline manual price edit saves (market move, no event)', a['price']['value'] == 30000 and len(await get(pg, 'events')) == n0, a['price'])
+            ev = (await get(pg, 'events'))[0]
+            check('inline manual price edit saves (a price move: logged for undo, not counted as money)', a['price']['value'] == 30000 and ev['changes'][0]['field'] == 'price.value', a['price'])
             cell = pg.locator('tr.r:has-text("حساب بانکی ب") .editable').first
             await cell.click(); await pg.wait_for_timeout(200)
             await pg.keyboard.press('Control+A'); await pg.keyboard.type('200000000'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(600)
@@ -233,6 +234,28 @@ async def main():
             a = next(x for x in await get(pg, 'assets') if x['id'] == 'priv')
             check('undo restores the previous method and value', a['mode'] == 'units' and a['quantity'] == 1_000_000, (a['mode'], a.get('quantity')))
         await step('editor: method', t_editor_mode())
+
+        async def t_matured_and_words():
+            n0 = (await pf(pg))['net']; b0 = next(x for x in await get(pg, 'assets') if x['id'] == 'bankB')['balance']
+            await pg.click('tr.r:has-text("سپرده سررسیدشده")'); await pg.wait_for_timeout(300)
+            await pg.click('tr.xrow .btn.primary:has-text("انتقال یا تمدید")'); await pg.wait_for_timeout(300)
+            await pg.select_option('.modal select', 'bankB'); await pg.click('.modal button:has-text("انتقال و بستن")'); await pg.wait_for_timeout(700)
+            A = {x['id']: x for x in await get(pg, 'assets')}; n1 = (await pf(pg))['net']
+            check('matured deposit closed into the account, net worth unchanged', A['dep'].get('archived') and A['bankB']['balance'] - b0 == 120_000_000 and abs(n1 - n0) < 1000, (A['bankB']['balance'] - b0, n1 - n0))
+            await pg.click('.toast:has-text("منتقل شد") button:has-text("برگشت")'); await pg.wait_for_timeout(700)
+            A = {x['id']: x for x in await get(pg, 'assets')}
+            check('undo reopens it', not A['dep'].get('archived') and A['bankB']['balance'] == b0)
+            # amounts in words, and Escape in the calendar keeps the form open
+            await pg.click('button:has-text("دارایی جدید")'); await pg.wait_for_timeout(500)
+            await pg.fill('.drawer .field:has-text("مانده حساب") input', 'دو میلیون و پانصد هزار'); await pg.wait_for_timeout(200)
+            words = await pg.inner_text('.drawer .field:has-text("مانده حساب")')
+            check('money field reads amounts in words', 'دو میلیون و پانصد هزار تومان' in words or '2,500,000' in words.translate(FA) or 'دو میلیون و پانصد' in words, words.replace('\n', ' | ')[:120])
+            await pg.click('.drawer .catbtn:has-text("درآمد ثابت")'); await pg.wait_for_timeout(300)
+            await pg.click('.drawer .field:has-text("تاریخ شروع") input'); await pg.wait_for_timeout(300)
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+            check('Escape in the calendar keeps the form open', await pg.locator('.drawer').count() == 1)
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(300)
+        await step('matured & words', t_matured_and_words())
 
         await pg.reload(); await pg.wait_for_timeout(1200)
         await pg.screenshot(path=f'{SH}/assets-after-{THEME}.png', full_page=True)

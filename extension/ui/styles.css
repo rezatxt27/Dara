@@ -453,6 +453,8 @@ details.more[open] > summary { margin-bottom: 10px; }
 /* narrow windows: an icon rail instead of hiding navigation; the assets table keeps what matters */
 .tbl.assets .src-narrow { display: none; }
 @media (max-width: 1100px) {
+  .card:has(> .tbl) { overflow-x: auto; }
+  .card:has(> .tbl) .tbl th { top: 0; }
   .tbl.assets .c-price, .tbl.assets .c-pnl { display: none; }
   .tbl.assets .src-narrow { display: block; }
 }
@@ -462,8 +464,8 @@ details.more[open] > summary { margin-bottom: 10px; }
   .brand .name, .brand .tag, .side .foot { display: none; }
   .nav a { font-size: 0; gap: 0; justify-content: center; padding: 0; height: 40px; }
   .nav a .count { display: none; }
-  .card:has(> .tbl) { overflow-x: auto; }
   .tbl.assets .c-today { display: none; }
+  .search { display: flex; flex: 1 1 120px; min-width: 0; max-width: 220px; }
 }
 .xpanel.solo { grid-template-columns: 1fr; }
 .card .sched { border: 0; border-radius: 0; max-height: 360px; }

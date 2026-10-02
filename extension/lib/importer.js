@@ -110,8 +110,9 @@ export function importRows(rows, opts = {}) {
     const g = (k) => (C[k] >= 0 ? norm(r[C[k]]) : '');
     const catText = g('cat'); let name = clean(C.name >= 0 ? r[C.name] : '');
     if (!catText || !name) continue;
-    const qty = parseNum(g('qty')); const price = parseNum(g('price')) * mult; const direct = parseNum(g('direct')) * mult;
-    const value = parseNum(g('value')) * mult; const cost = parseNum(g('cost')) * mult;
+    const P = (v) => parseNum(v, { lenient: true }); // cells may carry a unit («۱۲ گرم»)
+    const qty = P(g('qty')); const price = P(g('price')) * mult; const direct = P(g('direct')) * mult;
+    const value = P(g('value')) * mult; const cost = P(g('cost')) * mult;
     let holder = clean(C.holder >= 0 ? r[C.holder] : ''); const unit = g('unit');
     const total = isFinite(value) && value ? value : isFinite(direct) && direct ? direct : (isFinite(qty) && isFinite(price) ? qty * price : NaN);
     if (!isFinite(total) || total === 0) { notes.push(`ردیف «${name}» بدون مقدار بود و وارد نشد.`); continue; }

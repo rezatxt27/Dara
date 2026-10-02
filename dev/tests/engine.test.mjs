@@ -812,3 +812,43 @@ test('monthly automation: debts cost interest, matured deposits earn nothing, a 
   close(m.interest, 10, 1e-9); close(m.debtInterest, 20, 1e-9); close(m.outflow, 50, 1e-9);
   close(m.net, 10 - 50 - 20, 1e-9);
 });
+
+test('same-day payouts: one deposit paying into another does not change what the other pays', () => {
+  const start = J.addDaysIso(iso, -40);
+  const mk = () => [
+    { id: 'A', name: 'A', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start, mode: 'payout', payoutTo: 'B' } },
+    { id: 'B', name: 'B', category: 'fixed', mode: 'rate', rate: { principal: 2e9, annualPct: 24, start, mode: 'payout', payoutTo: 'self' } },
+  ];
+  const r1 = E.applyAutomations(mk(), [], {}, iso); const r2 = E.applyAutomations(mk().reverse(), [], {}, iso);
+  const paid = (r) => r.events.filter((e) => e.fromId === 'B').map((e) => e.amount).join(',');
+  assert.equal(paid(r1), paid(r2));
+});
+
+test('installments follow the loan as it is now (an extra payment earlier in the same catch-up)', () => {
+  const firstDue = J.addJMonthsIso(iso, -2);
+  const loan = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { amount: 12e6, annualPct: 0, months: 12, firstDue, account: 'b', lastRun: J.addDaysIso(firstDue, -1) } };
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1e9 };
+  // a flow pays the whole loan off between its first and second installment
+  const flows = [{ id: 'f', title: 'تسویه', amount: 11e6, fromId: 'b', toId: 'l', freq: 'monthly', day: J.isoToJ(J.addDaysIso(firstDue, 3)).jd, start: J.addDaysIso(firstDue, 1), count: 1, active: true }];
+  const r = E.applyAutomations([bank, loan], flows, {}, iso);
+  const inst = r.events.filter((e) => e.kind === 'loan');
+  assert.equal(inst.length, 1, 'no installment after it was paid off');
+  close(r.assets[0].balance, 1e9 - 1e6 - 11e6, 1);
+});
+
+test('history rebuild brings back a deposit closed into an account', () => {
+  const dep = { id: 'd', name: 'سپرده', category: 'fixed', mode: 'rate', archived: true, rate: { principal: 0, annualPct: 20, start: J.addDaysIso(iso, -100), mode: 'simple' } };
+  const prev = { ...dep, archived: false, rate: { ...dep.rate, principal: 1e9 } };
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1.05e9 };
+  const ev = { id: 'e', kind: 'adjust', date: iso, at: Date.now(), amount: 1.05e9, fromId: 'd', toId: 'b', prev, changes: [{ assetId: 'b', field: 'balance', delta: 1.05e9 }, { assetId: 'd', field: 'remove', delta: 0, value: 0 }] };
+  const hist = E.reconstructHistory([bank, dep], [ev], {}, {}, {}, 2, iso);
+  const y = hist[J.addDaysIso(iso, -1)];
+  assert.ok(y.v.d > 1e9 && y.v.b === 0, JSON.stringify(y.v));
+});
+
+test('monthly figures: a receivable installment is not counted twice', () => {
+  const firstDue = J.addJMonthsIso(iso, 1);
+  const mk = (cat) => ({ id: cat, category: cat, mode: 'loan', loan: { amount: 1e8, annualPct: 24, months: 12, firstDue } });
+  const m = E.monthlyAuto([mk('debt'), mk('receivable')], [], iso);
+  close(m.net, 0, 1);
+});

@@ -28,8 +28,9 @@ function relink(st, ev) {
   st.flows = st.flows.map((f) => ((ev.flowIds || []).includes(f.id) ? { ...f, active: true, paused: undefined, ...(last && (f.lastRun || '') < last ? { lastRun: last } : {}) } : f));
   for (const u of ev.unlinked || []) {
     const x = st.assets.find((y) => y.id === u.id); if (!x) continue;
-    if (u.f === 'loan.account' && x.loan && !x.loan.account) x.loan = { ...x.loan, account: ev.restore.id };
-    if (u.f === 'rate.payoutTo' && x.rate && (!x.rate.payoutTo || x.rate.payoutTo === 'self')) x.rate = { ...x.rate, payoutTo: ev.restore.id };
+    const back = (ev.restore || ev.prev).id;
+    if (u.f === 'loan.account' && x.loan && !x.loan.account) x.loan = { ...x.loan, account: back };
+    if (u.f === 'rate.payoutTo' && x.rate && (!x.rate.payoutTo || x.rate.payoutTo === 'self')) x.rate = { ...x.rate, payoutTo: back };
   }
 }
 
@@ -54,32 +55,37 @@ export const act = {
   async saveAsset(a, opts = {}) {
     const now = Date.now(); const today = todayIso();
     let ev = null;
-    if (!opts.fund && a.mode !== 'units') await catchUp();
+    await catchUp(); // anything due (interest, installments) lands before this change
     await store.mutate(['assets', 'events', 'meta', 'quotes'], (st) => {
       const { quotes } = st; const list = st.assets;
       const i = list.findIndex((x) => x.id === a.id);
       const rec = { ...a, updatedAt: now };
       if (i >= 0) {
-        const x = list[i]; const o = opts.orig || x;
+        const x = list[i]; const o = opts.orig || x; let paidIn = 0;
         const sameMode = x.mode === rec.mode && o.mode === rec.mode;
         const reval = opts.reval ?? E.APPRAISED.has(rec.category);
         // what the user changed in the form (compared with what the form opened with)
-        const termsChanged = sameMode && ((rec.mode === 'rate' && diffKeys(o.rate, rec.rate, RATE_KEYS.filter((k) => k !== 'principal')))
+        const termsChanged = sameMode && ((rec.mode === 'rate' && diffKeys(o.rate, rec.rate, RATE_KEYS))
           || (rec.mode === 'loan' && diffKeys(o.loan, rec.loan, LOAN_KEYS)));
         if (sameMode) {
           // numbers the user didn't touch follow the stored record; the ones they edited move by the same amount
           if (rec.mode === 'balance') rec.balance = num(x.balance) + (num(rec.balance) - num(o.balance));
           if (rec.mode === 'units') rec.quantity = num(x.quantity) + (num(rec.quantity) - num(o.quantity));
+          // payouts and mid-period offsets belong to the automation: always the stored ones (a new start date resets them below)
           if (rec.mode === 'rate' && x.rate) rec.rate = { ...rec.rate, principal: num(x.rate.principal) + (num(rec.rate?.principal) - num(o.rate?.principal)),
-            ...(termsChanged ? {} : { lastPayout: x.rate.lastPayout, offset: x.rate.offset, offsetFrom: x.rate.offsetFrom }) };
-          if (rec.mode === 'loan' && x.loan && !termsChanged) rec.loan = { ...x.loan, account: rec.loan?.account ?? x.loan.account };
+            lastPayout: maxIso(x.rate.lastPayout, rec.rate?.lastPayout) || undefined, offset: x.rate.offset, offsetFrom: x.rate.offsetFrom };
+          if (rec.mode === 'loan' && x.loan && !termsChanged) rec.loan = { ...x.loan, account: rec.loan && 'account' in rec.loan ? rec.loan.account || null : x.loan.account };
           if (rec.costBasis !== undefined || x.costBasis !== undefined) rec.costBasis = num(rec.costBasis) === num(o.costBasis) ? x.costBasis : num(x.costBasis) + (num(rec.costBasis) - num(o.costBasis));
         }
         // automation-owned fields always come from the stored record
         if (x.interest && rec.interest) {
           rec.interest = { ...rec.interest, accrued: x.interest.accrued, lastAccrual: x.interest.lastAccrual, lastPaid: x.interest.lastPaid };
           // switching day-count interest off pays what had accrued into the balance (nothing is lost)
-          if (x.interest.on && !rec.interest.on && num(x.interest.accrued) >= 1) { rec.balance = num(rec.balance) + Math.floor(x.interest.accrued); rec.interest.accrued = 0; }
+          if (x.interest.on && !rec.interest.on) {
+            const acc = Math.floor(E.balanceInterestLive(x, today, Date.now()).accrued);
+            if (acc >= 1) { rec.balance = num(rec.balance) + acc; paidIn = acc; }
+            rec.interest.accrued = 0;
+          }
           if (!x.interest.on && rec.interest.on) rec.interest = { ...rec.interest, since: today, lastAccrual: null, accrued: 0 };
         }
         if (x.price && rec.price) rec.price = { ...rec.price, ...(E.quoteId(x.price.ref || {}) === E.quoteId(rec.price.ref || {}) ? { last: x.price.last ?? rec.price.last } : {}), pendingFix: x.price.pendingFix };
@@ -107,7 +113,9 @@ export const act = {
             changes: [{ assetId: rec.id, field: 'value', delta: 0, value: pending ? 0 : after - before, ...(pending ? { pending: true } : {}) }] };
         } else {
           const changes = [];
-          if (rec.mode === 'balance' && num(x.balance) !== num(rec.balance)) changes.push({ assetId: rec.id, field: 'balance', delta: num(rec.balance) - num(x.balance), ...(reval ? { reval: true } : {}) });
+          // interest that was already counted moving into the balance isn't a change the user made
+          const db = num(rec.balance) - num(x.balance) - paidIn;
+          if (rec.mode === 'balance' && Math.abs(db) >= 1) changes.push({ assetId: rec.id, field: 'balance', delta: db, ...(reval ? { reval: true } : {}) });
           if (rec.mode === 'units' && num(x.quantity) !== num(rec.quantity)) {
             const dq = num(rec.quantity) - num(x.quantity);
             changes.push({ assetId: rec.id, field: 'quantity', delta: dq, value: qtyValue(rec, dq, quotes) });
@@ -167,6 +175,7 @@ export const act = {
         changes.push({ assetId: id, field: 'quantity', delta: dq, value: qtyValue(x, dq, st.quotes) });
         if (!('costBasis' in patch)) next.costBasis = costAfter(x, num(x.quantity), num(patch.quantity), st.quotes);
       }
+      if ('price' in patch && x.mode === 'units' && num(patch.price?.value) !== num(x.price?.value)) changes.push({ assetId: id, field: 'price.value', delta: num(patch.price.value) - num(x.price?.value) });
       if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `ویرایش «${x.name}»`, amount: 0, changes };
       Object.assign(x, next);
       logEv(st, ev);
@@ -259,7 +268,7 @@ export const act = {
       const i = list.findIndex((x) => x.id === f.id);
       // keep what the automation owns (last run, count done) from the stored flow
       if (i >= 0) { const x = list[i]; list[i] = { ...f, lastRun: f.resetFrom !== undefined ? f.resetFrom : x.lastRun, done: x.done, paused: f.active ? undefined : x.paused }; delete list[i].resetFrom; }
-      else list.push({ ...f, id: f.id || uid('f'), done: 0, createdAt: Date.now() });
+      else list.push({ ...f, id: f.id || uid('f'), done: +f.done || 0, createdAt: Date.now() });
       return list;
     });
     const r = await catchUp();
@@ -278,14 +287,15 @@ export const act = {
       const restoresId = ev.prev?.id || ev.changes?.find((c) => c.field === 'loan')?.assetId;
       if (restoresId) {
         const touches = (e) => e.toId === restoresId || e.fromId === restoresId || e.changes?.some((c) => c.assetId === restoresId);
-        if (st.events.some((e) => e.id !== ev.id && !e.undone && (e.at || 0) > (ev.at || 0) && touches(e))) { refused = 'later'; return; }
+        const idx = st.events.findIndex((e) => e.id === ev.id); // newest first: earlier in the list = later in time
+        if (st.events.slice(0, idx).some((e) => !e.undone && touches(e))) { refused = 'later'; return; }
       }
       if (ev.restore) {
         if (!st.assets.some((x) => x.id === ev.restore.id)) st.assets.push(ev.restore);
         E.undoEvent(st.assets, { changes: (ev.changes || []).filter((c) => c.assetId !== ev.restore.id) });
         relink(st, ev);
         if (ev.reversalOf) st.events = st.events.map((e) => (e.id === ev.reversalOf ? { ...e, reversedBy: null } : e));
-      } else if (ev.prev) E.revertEvent(st.assets, ev);
+      } else if (ev.prev) { E.revertEvent(st.assets, ev); if (ev.flowIds || ev.unlinked) relink(st, ev); }
       else {
         E.undoEvent(st.assets, ev);
         // a page capture that created assets: they go too
@@ -308,6 +318,11 @@ export const act = {
     await store.mutate(['assets', 'events', 'quotes'], (st) => {
       const a = st.assets.find((x) => x.id === id);
       if (!a) { msg = 'این دارایی دیگر وجود ندارد'; return; }
+      // after a sale, a payment or an installment the original amount no longer matches what is there
+      const touches = (e) => e.toId === id || e.fromId === id || e.changes?.some((c) => c.assetId === id);
+      // the log is newest first: anything before this entry happened after it
+      const idx = st.events.findIndex((e) => e.id === ev.id);
+      if (st.events.slice(0, idx < 0 ? 0 : idx).some((e) => !e.undone && touches(e))) { msg = 'بعد از افزودن، تغییرهای دیگری روی این دارایی ثبت شده؛ اول آن‌ها را برگردان یا دارایی را حذف کن'; return; }
       const acc = st.assets.find((x) => x.id === ev.fund.accountId);
       // the money has to go back somewhere: with its account deleted, bring the account back first
       if (!acc) { msg = 'حسابی که پول از آن آمده بود حذف شده؛ اول آن را از «گزارش رویدادها» برگردان'; return; }
@@ -398,15 +413,23 @@ export const act = {
   async closeDeposit({ assetId, accountId }) {
     let ev = null;
     await catchUp();
-    await store.mutate(['assets', 'events', 'quotes'], (st) => {
+    await store.mutate(['assets', 'flows', 'events', 'quotes'], (st) => {
       const a = st.assets.find((x) => x.id === assetId); const acc = st.assets.find((x) => x.id === accountId);
       if (!a || !acc || a.mode !== 'rate') return;
-      const prev = structuredClone(a);
+      const prev = structuredClone(a); const liab = E.isLiability(a);
       const amount = Math.round(E.valueOf(a, st.quotes, {}).value);
-      // a removal worth nothing (its money just moved): what it earned up to now stays a market gain
-      const changes = [...E.applyDelta(acc, amount, st.quotes), { assetId: a.id, field: 'remove', delta: 0, value: 0 }];
+      // a removal worth nothing (its money just moved): what it earned (or cost) up to now stays a market result
+      const changes = [...E.applyDelta(acc, liab ? -amount : amount, st.quotes), { assetId: a.id, field: 'remove', delta: 0, value: 0 }];
       a.rate = { ...a.rate, principal: 0, offset: 0 }; a.archived = true; a.updatedAt = Date.now();
-      ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: `انتقال «${a.name}» به «${acc.name}» و بستن آن`, amount, fromId: a.id, toId: acc.id, changes, prev };
+      // like a deletion: recurring flows into or out of it pause; a loan or payout using it as its account unlinks
+      const flowIds = []; const unlinked = [];
+      st.flows = st.flows.map((f) => { if ((f.fromId === a.id || f.toId === a.id) && f.active) { flowIds.push(f.id); return { ...f, active: false }; } return f; });
+      for (const x of st.assets) {
+        if (x.mode === 'loan' && x.loan?.account === a.id) { x.loan = { ...x.loan, account: null }; unlinked.push({ id: x.id, f: 'loan.account' }); }
+        if (x.mode === 'rate' && x.rate?.payoutTo === a.id) { x.rate = { ...x.rate, payoutTo: 'self' }; unlinked.push({ id: x.id, f: 'rate.payoutTo' }); }
+      }
+      ev = { id: uid('e'), kind: 'adjust', date: todayIso(), at: Date.now(), title: liab ? `تسویه «${a.name}» از «${acc.name}»` : `انتقال «${a.name}» به «${acc.name}» و بستن آن`, amount,
+        fromId: liab ? acc.id : a.id, toId: liab ? a.id : acc.id, changes, prev, flowIds, unlinked };
       logEv(st, ev);
     });
     return ev;

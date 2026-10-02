@@ -1,7 +1,7 @@
 import { html, render, useState, useMemo, useStore, useTick, Icon, Money, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
 import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
-import { ago, parseNum, groupTyping, getDigits } from '../lib/format.js';
+import { ago, parseNum, groupTyping, getDigits, hasWords } from '../lib/format.js';
 import { act } from './actions.js';
 import { ProposalCard } from './proposals.js';
 import * as AI from '../lib/ai.js';
@@ -30,7 +30,7 @@ function QuickRow({ r, s }) {
     setTxt(''); toast(`«${a.name}» به‌روز شد`); send('badge');
   };
   // live thousands separators (amounts typed in words stay as typed)
-  const onIn = (e) => { const v = e.target.value; setTxt(/[آ-ی]/.test(v) ? v : (getDigits() === 'fa' ? groupTyping(v).replace(/,/g, '٬') : groupTyping(v))); };
+  const onIn = (e) => { const v = e.target.value; setTxt(hasWords(v) ? v : (getDigits() === 'fa' ? groupTyping(v).replace(/,/g, '٬') : groupTyping(v))); };
   const ph = a.mode === 'balance' ? (E.APPRAISED.has(a.category) ? `ارزش جدید (${unit})` : `مانده جدید (${unit})`) : `قیمت هر واحد (${unit})`;
   return html`<div class="pp-row">
     <div class="grow" style="min-width:0"><div class="sb ellipsis" title=${a.name}>${r.status === 'stale' && html`<span class="warn" title="مدتی به‌روز نشده">● </span>`}${a.name}</div><div class="xs muted">${a.mode === 'balance' ? 'مانده' : 'قیمت واحد'}: <${Money} v=${cur} s=${s} unit=${false} />، ${ago(r.at)}</div></div>

@@ -26,7 +26,7 @@ function ImportPanel({ s, onDone, compact }) {
   const [busy, setBusy] = useState(false);
   const parse = (text) => {
     try {
-      if (text.trim().startsWith('{')) {
+      if (/^\s*[\[{]/.test(text)) {
         let obj;
         try { obj = JSON.parse(text); } catch { return toast('این فایل JSON خراب است و خوانده نشد'); }
         const chk = store.checkBackup(obj);

@@ -1,7 +1,7 @@
 import { html, render, useState, useEffect, useMemo, useRef, useCallback } from '../lib/vendor/preact-htm.js';
 import { ICONS } from './icons.js';
 import * as store from '../lib/store.js';
-import { money, pct, num, parseNum, setDigits, signed, compact, numToWordsFa, groupTyping, getDigits, toEnDigits, timeHM } from '../lib/format.js';
+import { money, pct, num, parseNum, setDigits, signed, compact, numToWordsFa, groupTyping, getDigits, toEnDigits, timeHM, hasWords } from '../lib/format.js';
 import { fmtJ, parseJ, todayIso, isoToJ, jToIso, monthLength, dateFromIso, MONTHS } from '../lib/jalali.js';
 import { CAT, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from '../lib/catalog.js';
 
@@ -141,7 +141,7 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
   const onIn = (e) => {
     const el = e.target; const raw = el.value; const caret = el.selectionStart ?? raw.length;
     // words like «۱۲ میلیون و ۵۰۰ هزار» are kept while typing and turned into digits when leaving the field
-    if (/[آ-ی]/.test(raw)) { setTxt(raw); const v = parseNum(raw); onInput(isFinite(v) ? v : null); return; }
+    if (hasWords(raw)) { setTxt(raw); const v = parseNum(raw); onInput(isFinite(v) ? v : null); return; }
     const sig = toEnDigits(raw.slice(0, caret)).replace(/[^\d.\-]/g, '').length;
     const g = localSep(groupTyping(raw));
     setTxt(g);
@@ -162,10 +162,10 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
     ${label && html`<label>${label}</label>`}
     <div class="input-wrap">
       <input ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn}
-        onBlur=${() => { if (/[آ-ی]/.test(txt)) { const v = parseNum(txt); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
+        onBlur=${() => { if (hasWords(txt)) { const v = parseNum(txt); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
       ${suffix && html`<span class=${'suffix' + (String(suffix).length <= 2 ? ' short' : '')}>${suffix}</span>`}
     </div>
-    ${!compact && (w || hint || warn) && html`<span class="hint">
+    ${!compact && (w || hint || warn) && html`<span class="hint stack">
       ${w && html`<span class="words">${w}</span>`}
       ${warn && html`<span class="warn-line"><${Icon} n="alert" cls="sm" /> ${ratio >= 8 ? `حدود ${num(ratio, 0)} برابرِ مقدار قبلی است؛ تعداد صفرها را چک کن` : `حدود ${num(1 / ratio, 0)} برابر کمتر از مقدار قبلی است؛ تعداد صفرها را چک کن`}</span>`}
       ${hint && html`<span>${hint}</span>`}
@@ -190,8 +190,9 @@ export function JCalendar({ value, onPick, onClear, onClose }) {
   const box = useRef();
   useEffect(() => {
     const h = (e) => { if (box.current && !box.current.contains(e.target)) onClose(); };
-    const k = (e) => e.key === 'Escape' && onClose();
-    setTimeout(() => { document.addEventListener('mousedown', h); box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 0); document.addEventListener('keydown', k);
+    // Escape closes the calendar only, not the form around it
+    const k = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    setTimeout(() => { document.addEventListener('mousedown', h); if (!box.current?.closest('.modal')) box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 0); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, []);
   const first = jToIso(ym.jy, ym.jm, 1);

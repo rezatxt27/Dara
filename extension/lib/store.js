@@ -177,10 +177,14 @@ export async function importBackup(obj, { merge = false } = {}) {
   if (merge) {
     const cur = await loadAll();
     const ids = new Set(cur.assets.map((a) => a.id));
-    const assets = cur.assets.concat((d.assets || []).filter((a) => !ids.has(a.id)));
+    // codes stay unique: an incoming code that is already taken gets the next free one
+    const used = new Set(cur.assets.map((a) => a.code));
+    let n = Math.max(+cur.meta?.lastCode || 0, ...cur.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
+    const incoming = (d.assets || []).filter((a) => !ids.has(a.id)).map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
+    const assets = cur.assets.concat(incoming);
     const fids = new Set(cur.flows.map((a) => a.id));
     const flows = cur.flows.concat((d.flows || []).filter((a) => !fids.has(a.id)));
-    await locked(() => save({ assets, flows }));
+    await locked(() => save({ assets, flows, meta: { ...cur.meta, lastCode: n } }));
     return chk;
   }
   const toSave = {};

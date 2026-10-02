@@ -3,7 +3,7 @@ import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, St
 import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
-import { ago, parseNum, groupTyping, getDigits, toEnDigits } from '../../lib/format.js';
+import { ago, parseNum, groupTyping, getDigits, toEnDigits, hasWords } from '../../lib/format.js';
 import { act, doneToast } from '../actions.js';
 
 /** Quantity column for an installment loan: installment amount and progress. */
@@ -33,6 +33,9 @@ function SourceLine({ r }) {
   return html`<div class="src"><${Icon} n="edit" cls="sm" />قیمت دستی، ${ago(r.at)}</div>`;
 }
 
+/** «ثبت شد» — or, when the new number is ~10× off, a warning about the zeros (both with undo). */
+const savedMsg = (v, prev, ok) => { const r = prev > 0 && v > 0 ? v / prev : 1; return r >= 8 || r <= 1 / 8 ? `ثبت شد؛ حدود ${num(r >= 8 ? r : 1 / r)} برابر ${r >= 8 ? 'بیشتر' : 'کمتر'} از قبل است. اگر صفرها اشتباه است «برگشت» را بزن` : ok; };
+
 /** Click-to-edit money cell for manual prices & balances (live separators, Enter to save, Esc to cancel) */
 function InlineMoney({ value, s, onSave, children }) {
   const [ed, setEd] = useState(false);
@@ -46,7 +49,7 @@ function InlineMoney({ value, s, onSave, children }) {
   // leaving the field without typing a different number changes nothing (no rounding of rials into a fake edit)
   const commit = () => { const v = parseNum(txt); if (txt !== start && isFinite(v) && v >= 0 && Math.round(v) !== Math.round(parseNum(start))) onSave(v * k); setEd(false); };
   return html`<input ref=${ref} class="input num-in" style="height:30px;width:160px" value=${txt} onClick=${(e) => e.stopPropagation()}
-    onInput=${(e) => setTxt(/[آ-ی]/.test(e.target.value) ? e.target.value : sep(groupTyping(e.target.value)))} onKeyDown=${(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEd(false); }} onBlur=${commit} />`;
+    onInput=${(e) => setTxt(hasWords(e.target.value) ? e.target.value : sep(groupTyping(e.target.value)))} onKeyDown=${(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEd(false); }} onBlur=${commit} />`;
 }
 
 function TradeModal({ st, s, asset, onClose }) {
@@ -84,10 +87,12 @@ function AdjustModal({ s, asset, onClose }) {
   const liab = CAT[asset.category]?.liability;
   const rate = asset.mode === 'rate';
   const cur = rate ? E.rateValue(asset.rate) : +asset.balance || 0; // what could be withdrawn today
-  const tooMuch = dir === 'out' && !liab && amt > cur + 0.5;
+  // can't take out more than is there, or pay a debt below zero
+  const tooMuch = amt > cur + 0.5 && ((dir === 'out' && !liab) || (dir === 'in' && liab));
   const save = async () => {
     if (!(amt > 0)) return toast('مبلغ را وارد کن');
     if (tooMuch && rate) return toast('برداشت بیشتر از ارزش فعلی است');
+    if (tooMuch && liab) return toast('بیشتر از مانده بدهی است');
     const ev = await act.adjust({ assetId: asset.id, delta: dir === 'in' ? amt : -amt, note }); doneToast('ثبت شد', ev); onClose();
   };
   const label = liab ? (dir === 'in' ? 'ثبت پرداخت' : 'ثبت افزایش بدهی') : dir === 'in' ? 'ثبت واریز' : 'ثبت برداشت';
@@ -175,24 +180,25 @@ function ValueModal({ s, asset, onClose }) {
 
 /** A deposit past its maturity: move it all to an account (and close it), or renew it. */
 function MaturedModal({ st, s, asset, onClose }) {
+  const liab = !!CAT[asset.category]?.liability;
   const accounts = st.assets.filter((x) => x.id !== asset.id && !x.archived && x.mode === 'balance' && !CAT[x.category]?.liability);
   const [kind, setKind] = useState(accounts.length ? 'move' : 'renew');
   const [acc, setAcc] = useState(asset.rate.payoutTo && accounts.some((x) => x.id === asset.rate.payoutTo) ? asset.rate.payoutTo : accounts[0]?.id || '');
   const [mat, setMat] = useState(null); const [rate, setRate] = useState(asset.rate.annualPct);
   const v = E.valueOf(asset, st.quotes, s).value;
   const save = async () => {
-    if (kind === 'move') { if (!acc) return toast('حساب مقصد را انتخاب کن'); doneToast('به حساب منتقل شد', await act.closeDeposit({ assetId: asset.id, accountId: acc })); }
-    else { if (mat && mat <= todayIso()) return toast('سررسید جدید باید بعد از امروز باشد'); doneToast('سپرده تمدید شد', await act.renewDeposit({ assetId: asset.id, maturity: mat, annualPct: rate })); }
+    if (kind === 'move') { if (!acc) return toast(liab ? 'حساب پرداخت را انتخاب کن' : 'حساب مقصد را انتخاب کن'); doneToast(liab ? 'تسویه شد' : 'به حساب منتقل شد', await act.closeDeposit({ assetId: asset.id, accountId: acc })); }
+    else { if (mat && mat <= todayIso()) return toast('سررسید جدید باید بعد از امروز باشد'); doneToast('تمدید شد', await act.renewDeposit({ assetId: asset.id, maturity: mat, annualPct: rate })); }
     onClose();
   };
-  return html`<${Modal} title=${`سررسید — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${kind === 'move' ? 'انتقال و بستن' : 'ثبت تمدید'}</button>`}>
-    <div class="preview outcome"><div class="row between"><span class="muted">ارزش در سررسید</span><span class="big"><${Money} v=${v} s=${s} /></span></div></div>
-    <${Seg} value=${kind} onChange=${setKind} options=${[...(accounts.length ? [['move', 'انتقال به حساب']] : []), ['renew', 'تمدید سپرده']]} />
-    ${kind === 'move' ? html`<div class="field"><label>به حساب</label><select class="input" value=${acc} onChange=${(e) => setAcc(e.target.value)}>${accounts.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
-        <span class="hint">همه مبلغ به این حساب می‌رود و سپرده بسته می‌شود؛ ارزش خالص تغییری نمی‌کند.</span></div>`
+  return html`<${Modal} title=${`سررسید — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>${kind === 'move' ? (liab ? 'پرداخت و تسویه' : 'انتقال و بستن') : 'ثبت تمدید'}</button>`}>
+    <div class="preview outcome"><div class="row between"><span class="muted">${liab ? 'مبلغ بدهی در سررسید' : 'ارزش در سررسید'}</span><span class="big"><${Money} v=${v} s=${s} cls=${liab ? 'debt' : ''} /></span></div></div>
+    <${Seg} value=${kind} onChange=${setKind} options=${[...(accounts.length ? [['move', liab ? 'پرداخت از حساب' : 'انتقال به حساب']] : []), ['renew', liab ? 'تمدید' : 'تمدید سپرده']]} />
+    ${kind === 'move' ? html`<div class="field"><label>${liab ? 'از حساب' : 'به حساب'}</label><select class="input" value=${acc} onChange=${(e) => setAcc(e.target.value)}>${accounts.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
+        <span class="hint">${liab ? 'همه مبلغ از این حساب کم می‌شود و بدهی بسته می‌شود؛ ارزش خالص تغییری نمی‌کند.' : 'همه مبلغ به این حساب می‌رود و سپرده بسته می‌شود؛ ارزش خالص تغییری نمی‌کند.'}</span></div>`
       : html`<div class="grid2"><${JDateField} label="سررسید جدید (اختیاری)" iso=${mat} onIso=${setMat} allowEmpty hint="خالی = بدون سررسید" />
         <${NumField} label="نرخ سود جدید" suffix="٪" value=${rate} onInput=${setRate} digits=${2} /></div>
-        <span class="hint">ارزش امروز، اصل سپرده جدید می‌شود و سود از امروز با نرخ جدید حساب می‌شود.</span>`}
+        <span class="hint">${liab ? 'مبلغ امروز، اصل جدید می‌شود و سود از امروز با نرخ جدید حساب می‌شود.' : 'ارزش امروز، اصل سپرده جدید می‌شود و سود از امروز با نرخ جدید حساب می‌شود.'}</span>`}
   </${Modal}>`;
 }
 
@@ -234,7 +240,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
       [liabL ? 'قسط‌ها از' : 'قسط‌ها به', a.loan.account ? (st.assets.find((x) => x.id === a.loan.account)?.name || 'حساب حذف‌شده') : 'ثبت نمی‌شود']);
   }
   const mainAct = a.mode === 'units' ? ['trade', 'swap', 'خرید یا فروش']
-    : r.status === 'matured' ? ['matured', 'clock', 'انتقال یا تمدید']
+    : r.status === 'matured' ? ['matured', 'clock', r.cat.liability ? 'تسویه یا تمدید' : 'انتقال یا تمدید']
     : a.mode === 'rate' ? ['adjust', 'swap', 'افزایش یا برداشت اصل']
     : loan ? (ls.done ? null : ['loanpay', 'swap', r.cat.liability ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'])
     : E.APPRAISED.has(a.category) && !a.interest?.on ? ['value', 'target', 'ثبت ارزش جدید']
@@ -252,7 +258,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
     </div>`}
     <div class="col">
       ${!showChart && !loan && html`<div class="sb small row" style="gap:4px">${r.cat.liability ? 'مانده این بدهی' : 'ارزش این دارایی'}: <${Money} v=${r.value} s=${s} /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} /></div>`}
-      ${r.status === 'matured' && html`<div class="callout warn"><${Icon} n="clock" cls="sm" /><div class="grow">سررسید شده و دیگر سود نمی‌گیرد.</div><button class="btn sm primary" onClick=${() => onModal({ t: 'matured', a })}>انتقال یا تمدید</button></div>`}
+      ${r.status === 'matured' && html`<div class="callout warn"><${Icon} n="clock" cls="sm" /><div>${r.cat.liability ? 'سررسید شده؛ با «تسویه یا تمدید» آن را از یک حساب بپرداز یا تمدیدش کن.' : 'سررسید شده و دیگر سود نمی‌گیرد؛ با «انتقال یا تمدید» آن را به حساب ببر یا تمدیدش کن.'}</div></div>`}
       <div class="xfacts">${facts.map(([k, v]) => html`<div class="pcell"><span class="n">${k}</span><span class="small sb">${v}</span></div>`)}</div>
       ${r.error && r.status !== 'matured' && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${r.error}</div></div>`}
       ${a.note && html`<div class="xs muted">${a.note}</div>`}
@@ -324,7 +330,7 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
       ${rows.length ? html`<table class="tbl assets">
         <thead><tr><th>دارایی</th><th class="n">مقدار</th><th class="n c-price">قیمت واحد</th><th class="n">ارزش روز</th><th class="n c-today">امروز</th>${hasPnl && html`<th class="n c-pnl">سود / زیان</th>`}<th>وضعیت</th><th></th></tr></thead>
         <tbody>${groups.map((g) => html`
-          ${g.title && html`<tr class="grp"><td colspan="3"><span class="row">${g.cat ? html`<span class="dot" style=${`width:9px;height:9px;border-radius:3px;background:${g.cat.color}`}></span>` : html`<${Icon} n=${g.icon} cls="sm" />`}${g.title}<span class="muted xs num">${num(g.rows.length)} مورد${!g.cat?.liability && pf.gross && g.owned ? '، ' + pct(g.owned / pf.gross, { sign: false }) + ' از کل' : ''}</span></span></td>
+          ${g.title && html`<tr class="grp"><td colspan="2"><span class="row">${g.cat ? html`<span class="dot" style=${`width:9px;height:9px;border-radius:3px;background:${g.cat.color}`}></span>` : html`<${Icon} n=${g.icon} cls="sm" />`}${g.title}<span class="muted xs num">${num(g.rows.length)} مورد${!g.cat?.liability && pf.gross && g.owned ? '، ' + pct(g.owned / pf.gross, { sign: false }) + ' از کل' : ''}</span></span></td><td class="c-price"></td>
             <td class="n num"><${Money} v=${g.total} s=${s} compact cls=${g.cat?.liability || g.total < 0 ? 'debt' : ''} /></td><td colspan=${hasPnl ? 4 : 3}></td></tr>`}
           ${g.rows.map((r) => {
             const a = r.asset; const liab = r.cat.liability; const isOpen = openId === a.id;
@@ -336,8 +342,8 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
                 <div class="sb ellipsis" style="max-width:240px">${a.name}${a.review ? html` <span title=${a.review} class="warn"><${Icon} n="info" cls="sm" /></span>` : ''}</div>
                 <div class="xs muted ellipsis" style="max-width:240px">${(a.custodian || '').trim() !== a.name ? (a.custodian || '').trim() : ''}</div><div class="src-narrow"><${SourceLine} r=${r} /></div></div></div></td>
               <td class="n num small">${a.mode === 'units' ? html`<span class="priv">${num(a.quantity, 'auto')}</span> <span class="muted">${a.unit || ''}</span>` : a.mode === 'rate' ? html`<span class="muted">اصل: </span><${Money} v=${a.rate?.principal} s=${s} compact unit=${false} />` : a.mode === 'loan' ? loanCell(a, s) : html`<span class="muted">—</span>`}</td>
-              <td class="n small c-price">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${async (v) => doneToast('قیمت ثبت شد', await act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } }))}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
-              <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${async (v) => doneToast('ثبت شد', await act.patchAsset(a.id, { balance: v, balanceAt: Date.now() }))}><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></${InlineMoney}>` : html`<${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} />`}</div>
+              <td class="n small c-price">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.unitPrice, 'قیمت ثبت شد'), await act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } }))}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
+              <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.value, 'ثبت شد'), await act.patchAsset(a.id, { balance: v, balanceAt: Date.now() }))}><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></${InlineMoney}>` : html`<${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} />`}</div>
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
               <td class="n small c-today">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
               ${hasPnl && html`<td class="n small c-pnl">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>`}

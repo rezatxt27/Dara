@@ -1,4 +1,4 @@
-import { isoFromDate } from '../../lib/jalali.js';
+import { isoFromDate, todayIso } from '../../lib/jalali.js';
 import { html, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, Seg, AreaChart, toast, send, num, pct, fmtJ, money, Explain, AskBtn } from '../components.js';
 import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
@@ -6,11 +6,22 @@ import * as E from '../../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, toEnDigits } from '../../lib/format.js';
 import { act } from '../actions.js';
 
+/** Quantity column for an installment loan: installment amount and progress. */
+function loanCell(a, s) {
+  const ls = E.loanState(a.loan);
+  if (ls.done) return html`<span class="muted">${num(ls.n)} قسط</span>`;
+  return html`<div><span class="muted">قسط: </span><${Money} v=${ls.next.payment} s=${s} compact unit=${false} /></div><div class="xs muted">${num(ls.paid)} از ${num(ls.n)} پرداخت شده</div>`;
+}
+
 /** Search text: Arabic ي/ك as Persian, digits as Latin, no case, no half-spaces. */
 const norm = (x) => toEnDigits(String(x ?? '')).replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/[\u200c\u200f\u200e]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
 function SourceLine({ r }) {
   const a = r.asset;
+  if (a.mode === 'loan') {
+    const ls = E.loanState(a.loan);
+    return html`<div class="src"><${Icon} n="calendar" cls="sm" />${ls.done ? 'تسویه شده' : `قسطی ${num(+a.loan.annualPct || 0, 2)}٪، قسط بعدی ${fmtJ(ls.next.date, 'dm')}`}</div>`;
+  }
   if (a.mode === 'rate' && r.status === 'matured') return html`<div class="src warn"><${Icon} n="alert" cls="sm" />سررسید ${fmtJ(a.rate.maturity)}</div>`;
   if (a.mode === 'rate') return html`<div class="src"><${Icon} n="percent" cls="sm" />روزشمار ${num(a.rate?.annualPct, 2)}٪، ${a.rate?.mode === 'payout' ? 'سود ماهانه' : a.rate?.mode === 'compound' ? 'مرکب' : 'ساده'}</div>`;
   if (a.mode === 'balance') return html`<div class="src"><${Icon} n=${a.interest?.on ? 'percent' : 'edit'} cls="sm" />${a.interest?.on ? `مانده + سود روزشمار ${num(a.interest.annualPct, 2)}٪` : 'مانده دستی'}، ${ago(r.at)}</div>`;
@@ -83,6 +94,53 @@ function AdjustModal({ s, asset, onClose }) {
   </${Modal}>`;
 }
 
+/** Extra payment or early settlement of an installment loan (or an extra repayment received on one you gave). */
+function LoanPayModal({ st, s, asset, onClose }) {
+  const liab = !!CAT[asset.category]?.liability;
+  const ls = E.loanState(asset.loan, todayIso(), Date.now());
+  const accounts = st.assets.filter((x) => x.id !== asset.id && !x.archived && (x.mode === 'balance' || x.mode === 'rate') && !CAT[x.category]?.liability);
+  const [kind, setKind] = useState('part'); const [amt, setAmt] = useState(null);
+  const [acc, setAcc] = useState(asset.loan.account && accounts.some((x) => x.id === asset.loan.account) ? asset.loan.account : '');
+  const pay = kind === 'all' ? ls.value : amt || 0;
+  const tooMuch = pay > ls.value + 0.5;
+  // what the schedule looks like afterwards (same installment, fewer installments)
+  const after = useMemo(() => {
+    if (!(pay > 0) || tooMuch || kind === 'all') return null;
+    const c = structuredClone(asset); E.loanRebase(c, ls.value - pay); return E.loanState(c.loan, todayIso());
+  }, [pay, kind]);
+  const accObj = accounts.find((x) => x.id === acc);
+  const short = liab && accObj && pay > (E.valueOf(accObj, st.quotes, s).value || 0) + 0.5;
+  const save = async () => {
+    if (!(pay > 0)) return toast('مبلغ را وارد کن');
+    if (tooMuch) return toast(liab ? 'بیشتر از مانده وام است' : 'بیشتر از مانده طلب است');
+    const amount = kind === 'all' ? E.loanState(asset.loan, todayIso(), Date.now()).value : amt; // settlement: to this very moment
+    const note = kind === 'all' ? `تسویه «${asset.name}»` : `${liab ? 'پرداخت اضافه' : 'دریافت اضافه'} «${asset.name}»`;
+    if (accObj) await act.transfer(liab ? { fromId: accObj.id, toId: asset.id, amount, note } : { fromId: asset.id, toId: accObj.id, amount, note });
+    else await act.adjust({ assetId: asset.id, delta: liab ? amount : -amount, note });
+    toast(kind === 'all' ? 'تسویه ثبت شد' : 'ثبت شد'); onClose();
+  };
+  return html`<${Modal} title=${`${liab ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'} — ${asset.name}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت</button>`}>
+    <${Seg} value=${kind} onChange=${setKind} options=${[['part', liab ? 'پرداخت بخشی از وام' : 'دریافت بخشی از طلب'], ['all', 'تسویه کامل']]} />
+    ${kind === 'part' ? html`<${MoneyField} label="مبلغ" rial=${amt} onRial=${setAmt} s=${s} autoFocus err=${tooMuch} />`
+      : html`<div class="preview"><span class="muted">مبلغ تسویه امروز (مانده اصل + سود روزهای گذشته)</span><span class="v"><${Money} v=${ls.value} s=${s} /></span></div>`}
+    <div class="field"><label>${liab ? 'از حساب' : 'به حساب'} (اختیاری)</label>
+      <select class="input" value=${acc} onChange=${(e) => setAcc(e.target.value)}><option value="">— ثبت نشود —</option>${accounts.map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
+      ${short && html`<span class="hint warn">مانده این حساب کافی نیست؛ اگر ثبت کنی منفی می‌شود.</span>`}</div>
+    <div class=${'xs ' + (tooMuch ? 'neg' : 'muted')}>مانده امروز: <${Money} v=${ls.value} s=${s} />${after ? html`. بعد از این، قسط همان <${Money} v=${after.A} s=${s} compact /> می‌ماند و ${num(after.n - after.paid)} قسط باقی می‌ماند.` : ''}</div>
+  </${Modal}>`;
+}
+
+/** Full installment table: paid ones greyed out. */
+function LoanSchedule({ asset, s }) {
+  const ls = E.loanState(asset.loan);
+  return html`<div class="sched"><table class="tbl small">
+    <thead><tr><th>#</th><th>تاریخ</th><th class="n">قسط</th><th class="n">سود</th><th class="n">اصل</th><th class="n">مانده</th></tr></thead>
+    <tbody>${ls.rows.map((x) => html`<tr class=${x.k < ls.paid ? 'paid' : x.k === ls.paid ? 'next' : ''}>
+      <td class="num">${num(x.k + 1)}</td><td>${fmtJ(x.date, 'dm')} <span class="xs muted">${fmtJ(x.date).split(' ').pop()}</span></td>
+      <td class="n"><${Money} v=${x.payment} s=${s} unit=${false} /></td><td class="n"><${Money} v=${x.interest} s=${s} unit=${false} /></td>
+      <td class="n"><${Money} v=${x.principal} s=${s} unit=${false} /></td><td class="n"><${Money} v=${x.balance} s=${s} unit=${false} /></td></tr>`)}</tbody></table></div>`;
+}
+
 /** New appraisal of a house, car or private shares. By default a market move; or part of it bought or sold. */
 function ValueModal({ s, asset, onClose }) {
   const [v, setV] = useState(null); const [why, setWhy] = useState('reval');
@@ -103,6 +161,8 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   const a = r.asset;
   const isMarket = a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key;
   const [view, setView] = useState('value');
+  const [sched, setSched] = useState(false);
+  const ls = a.mode === 'loan' ? E.loanState(a.loan) : null;
   const [priceSeries, setPriceSeries] = useState(null);
   const valueSeries = useMemo(() => Object.keys(st.snapshots).sort().slice(-180).map((d) => ({ date: d, value: Math.abs(st.snapshots[d].v?.[a.id] ?? NaN), est: !!st.snapshots[d].est })).filter((p) => isFinite(p.value)), [st.snapshots, a.id]);
   useEffect(() => {
@@ -115,16 +175,19 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   const evs = st.events.filter((e) => !e.undone && (e.toId === a.id || e.fromId === a.id || e.changes?.some((c) => c.assetId === a.id))).slice(0, 5);
   const series = view === 'price' ? priceSeries : valueSeries;
   const facts = [
-    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : 'مانده دستی'],
+    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : a.mode === 'loan' ? 'جدول اقساط (خودکار)' : 'مانده دستی'],
     ['آخرین به‌روزرسانی', r.status === 'auto' ? 'هر لحظه (خودکار)' : r.status === 'matured' ? `سررسید ${fmtJ(a.rate.maturity)}` : r.at ? `${fmtJ(isoFromDate(new Date(r.at)))}، ${ago(r.at)}` : '—'],
     ...(a.mode === 'units' ? [['مقدار', `${num(a.quantity, 'auto')} ${a.unit || ''}`], ['قیمت واحد', html`<${Money} v=${r.unitPrice} s=${s} />`]] : []),
     ...(a.mode === 'rate' ? [['اصل', html`<${Money} v=${a.rate.principal} s=${s} />`], ['سود روزانه', html`<${Money} v=${E.rateDaily(a.rate, r.value)} s=${s} />`]] : []),
     ...(a.interest?.on ? [['سود روزشمار انباشته', html`<${Money} v=${r.accrued} s=${s} />`]] : []),
+    ...(ls && !ls.done ? [['مبلغ قسط', html`<${Money} v=${ls.next.payment} s=${s} />`], ['قسط بعدی', `${fmtJ(ls.next.date)} (${num(ls.paid + 1)} از ${num(ls.n)})`],
+      ['سود باقی‌مانده تا آخر', html`<${Money} v=${ls.rows.slice(ls.paid).reduce((t, x) => t + x.interest, 0) - ls.accrued} s=${s} compact />`],
+      [CAT[a.category]?.liability ? 'پرداخت از' : 'واریز به', a.loan.account ? (st.assets.find((x) => x.id === a.loan.account)?.name || 'حساب حذف‌شده') : 'ثبت نمی‌شود']] : []),
     ...(r.pnl !== null ? [['سود / زیان', html`<span class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign /> <span class="ltr">(${pct(r.ret)})</span></span>`]] : []),
     ['سهم از کل', r.cat.liability ? '—' : pct(r.value / (pf.gross || 1), { sign: false })],
     ['مواجهه / نقدشوندگی', `${EXPOSURES[r.exposure]?.name || '—'}، ${LIQUIDITY[a.liquidity || r.cat.liquidity]}`],
   ];
-  return html`<div class="xpanel">
+  return html`<div class="xpanel-wrap"><div class="xpanel">
     <div class="card flat" style="padding:14px">
       <div class="row between" style="margin-bottom:6px"><span class="sb small row" style="gap:4px">${view === 'price' ? 'قیمت واحد (۱۲۰ روز)' : html`${r.cat.liability ? 'مانده این بدهی' : 'ارزش این دارایی'}: <${Money} v=${r.value} s=${s} compact /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} />`}</span>
         ${isMarket && html`<${Seg} value=${view} onChange=${setView} options=${[['value', 'ارزش'], ['price', 'قیمت']]} />`}</div>
@@ -143,12 +206,15 @@ function Expanded({ st, r, s, pf, open, onModal }) {
           ? html`<button class="btn sm" onClick=${() => onModal({ t: 'value', a })}><${Icon} n="edit" cls="sm" />ثبت ارزش جدید</button>`
           : html`<button class="btn sm" onClick=${() => onModal({ t: 'adjust', a })}><${Icon} n="swap" cls="sm" />${r.cat.liability ? 'پرداخت یا افزایش بدهی' : 'واریز یا برداشت'}</button>`)}
         ${a.mode === 'rate' && html`<button class="btn sm" onClick=${() => onModal({ t: 'adjust', a })}><${Icon} n="swap" cls="sm" />افزایش یا برداشت اصل</button>`}
+        ${ls && !ls.done && html`<button class="btn sm" onClick=${() => onModal({ t: 'loanpay', a })}><${Icon} n="swap" cls="sm" />${r.cat.liability ? 'پرداخت اضافه یا تسویه' : 'دریافت اضافه یا تسویه'}</button>`}
+        ${ls && html`<button class="btn sm ghost" onClick=${() => setSched(!sched)} aria-expanded=${sched}><${Icon} n="calendar" cls="sm" />جدول اقساط</button>`}
         <${AskBtn} q=${`درباره «${a.name}» توضیح بده: ارزشش چطور حساب شده، اخیراً چرا تغییر کرده و چه ریسکی در پرتفوی من دارد؟`} label="درباره‌اش بپرس" />
         <span class="grow"></span>
         <button class="btn sm ghost danger" onClick=${() => act.deleteAsset(a.id)}><${Icon} n="trash" cls="sm" />حذف</button>
       </div>
     </div>
-  </div>`;
+  </div>
+    ${sched && ls && html`<${LoanSchedule} asset=${a} s=${s} />`}</div>`;
 }
 
 export function AssetsPage({ st, pf, s, open, route, q }) {
@@ -214,13 +280,13 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
               <td><div class="row" style="gap:10px"><${Ava} cat=${a.category} size=${34} /><div style="min-width:0">
                 <div class="sb ellipsis" style="max-width:240px">${a.name}${a.review ? html` <span title=${a.review} class="warn"><${Icon} n="info" cls="sm" /></span>` : ''}</div>
                 <div class="xs muted ellipsis" style="max-width:240px">${[(a.custodian || '').trim() !== a.name ? (a.custodian || '').trim() : '', a.code].filter(Boolean).join('، ')}</div></div></div></td>
-              <td class="n num small">${a.mode === 'units' ? html`${num(a.quantity, 'auto')} <span class="muted">${a.unit || ''}</span>` : a.mode === 'rate' ? html`<span class="muted">اصل: </span><${Money} v=${a.rate?.principal} s=${s} compact unit=${false} />` : html`<span class="muted">—</span>`}</td>
+              <td class="n num small">${a.mode === 'units' ? html`${num(a.quantity, 'auto')} <span class="muted">${a.unit || ''}</span>` : a.mode === 'rate' ? html`<span class="muted">اصل: </span><${Money} v=${a.rate?.principal} s=${s} compact unit=${false} />` : a.mode === 'loan' ? loanCell(a, s) : html`<span class="muted">—</span>`}</td>
               <td class="n small">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${(v) => act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } })}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
               <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${(v) => act.patchAsset(a.id, { balance: v, balanceAt: Date.now() })}><${Money} v=${liab ? -r.value : r.value} s=${s} /></${InlineMoney}>` : html`<${Money} v=${liab ? -r.value : r.value} s=${s} />`}</div>
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
               <td class="n small">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
               <td class="n small">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>
-              <td><${StatusPill} status=${r.status} title=${r.error || ''} /><div class="xs faint" style="margin-top:3px">${r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
+              <td><${StatusPill} status=${r.status} title=${r.error || ''} /><div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
               <td onClick=${(e) => e.stopPropagation()}><div class="row" style="gap:2px;justify-content:flex-end">
                 <button class="btn icon sm ghost acts" title="ویرایش" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" /></button>
                 <button class="btn icon sm ghost" title=${isOpen ? 'بستن جزئیات' : 'جزئیات'} onClick=${() => setOpenId(isOpen ? null : a.id)}><${Icon} n="chevronDown" cls="sm chev" /></button>
@@ -239,5 +305,6 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
     ${modal?.t === 'trade' && html`<${TradeModal} st=${st} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'adjust' && html`<${AdjustModal} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'value' && html`<${ValueModal} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
+    ${modal?.t === 'loanpay' && html`<${LoanPayModal} st=${st} s=${s} asset=${modal.a} onClose=${() => setModal(null)} />`}
   </div>`;
 }

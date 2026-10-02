@@ -39,6 +39,13 @@ ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» ف
 }
 
 /** Tools the model can call. ctx: { getState: () => st, privacy, onProposal(p) } */
+/** One line about an installment loan for the assistant (amounts hidden in percent-only privacy). */
+function loanLine(a, settings) {
+  const st = E.loanState(a.loan);
+  if (st.done) return 'وام قسطی، تسویه شده';
+  return `${E.isLiability(a) ? 'وام' : 'طلب'} قسطی ${a.loan.annualPct}٪، ${st.paid} از ${st.n} قسط پرداخت شده، قسط بعدی ${fmtJ(st.next.date)}${settings ? `، مبلغ قسط ${disp(st.next.payment, settings)}` : ''}`;
+}
+
 export function makeTools(ctx) {
   const P = () => ctx.privacy === 'percent';
   const st = () => ctx.getState();
@@ -72,7 +79,7 @@ export function makeTools(ctx) {
           id: r.asset.id, name: r.asset.name, category: r.cat.name, custodian: r.asset.custodian || '', mode: r.asset.mode,
           ...(P() ? {} : { quantity: r.asset.mode === 'units' ? +(+r.asset.quantity).toFixed(6) : undefined, unit: r.asset.unit, unit_price: r.unitPrice ? disp(r.unitPrice, s.settings) : undefined, value: disp(r.signedValue, s.settings), pnl: r.pnl !== null ? disp(r.pnl, s.settings) : undefined }),
           share_pct: r.cat.liability ? null : pct(r.value / g), return_pct: r.ret !== null ? pct(r.ret) : undefined,
-          price_source: r.asset.mode === 'units' ? (r.asset.price?.source === 'market' ? refName(r.asset.price.ref) : 'دستی') : r.asset.mode === 'rate' ? `نرخ ${r.asset.rate?.annualPct}٪` : 'مانده',
+          price_source: r.asset.mode === 'units' ? (r.asset.price?.source === 'market' ? refName(r.asset.price.ref) : 'دستی') : r.asset.mode === 'rate' ? `نرخ ${r.asset.rate?.annualPct}٪` : r.asset.mode === 'loan' ? loanLine(r.asset, P() ? null : s.settings) : 'مانده',
           status: r.status, exposure: EXPOSURES[r.exposure]?.name,
         }));
       },
@@ -133,7 +140,8 @@ export function makeTools(ctx) {
       run: ({ days = 30 } = {}) => {
         const s = st(); const up = E.upcoming(s.assets, s.flows, Math.min(120, days || 30)); const auto = E.monthlyAuto(s.assets, s.flows);
         return { upcoming: up.slice(0, 20).map((e) => ({ date: fmtJ(e.date), title: e.title, ...(P() ? {} : { amount: disp(e.amount, s.settings) }) })),
-          monthly_auto: P() ? undefined : { interest: disp(auto.interest, s.settings), inflow: disp(auto.inflow, s.settings), outflow: disp(auto.outflow, s.settings) } };
+          monthly_auto: P() ? undefined : { interest: disp(auto.interest, s.settings), inflow: disp(auto.inflow, s.settings), outflow: disp(auto.outflow, s.settings),
+            loan_installments_out: disp(auto.loanPay, s.settings), loan_installments_in: disp(auto.loanGet, s.settings), loan_interest_cost: disp(auto.loanInterest, s.settings), net: disp(auto.net, s.settings) } };
       },
     },
     {
@@ -366,6 +374,7 @@ export function captureProposals(json, assets, quotes, settings) {
         }
       } else if (a.mode === 'balance') { field = 'balance'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.balance || 0; }
       else if (a.mode === 'rate') { field = 'rate.principal'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.rate?.principal || 0; }
+      else if (a.mode === 'loan') { field = 'loan.balance'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = E.loanState(a.loan).value; }
     }
     const pageMoney = cu === 'toman' ? 10 : 1;
     const avgCost = isFinite(+it.avg_cost) && +it.avg_cost > 0 ? +it.avg_cost * pageMoney : null;
@@ -555,6 +564,7 @@ export function quickProposals(json, assets, quotes, { idFor = () => uid('a') } 
     } else if (x.type === 'transfer') {
       const f = byId[x.from_id]; const t = byId[x.to_id]; const amt = +x.amount;
       if (!f || !t || f.id === t.id || f.mode === 'units' || t.mode === 'units') { problems.push('حساب‌های مبدأ و مقصد انتقال پیدا نشدند'); continue; }
+      if (f.mode === 'loan' || t.mode === 'loan') { problems.push(`قسط‌های «${(f.mode === 'loan' ? f : t).name}» خودکار ثبت می‌شوند؛ پرداخت اضافه یا تسویه را از صفحه دارایی‌ها ثبت کن`); continue; }
       if (!(amt > 0)) { problems.push('مبلغ انتقال مشخص نیست'); continue; }
       proposals.push({ id, type: 'transfer', fromId: f.id, toId: t.id, fromName: f.name, toName: t.name, amount: amt * k(x.money_unit) });
     }

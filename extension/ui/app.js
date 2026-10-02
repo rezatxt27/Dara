@@ -136,7 +136,7 @@ function Kpis({ st, pf, s }) {
       <${StackBar} items=${[{ name: 'بالا', value: liq.high, color: '#14BCDB' }, { name: 'متوسط', value: liq.mid, color: '#8E70FF' }, { name: 'پایین', value: liq.low, color: '#D946A8' }]} height=${6} />
       <span class="s">قابل نقد در چند روز: <${Money} v=${liq.high} s=${s} compact /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span>
-      <span class="v"><${Money} v=${auto.interest + auto.inflow} s=${s} compact /></span>
+      <span class="v"><${Money} v=${auto.interest + auto.inflow + auto.loanGet} s=${s} compact /></span>
       <span class="s">سود <${Money} v=${auto.interest} s=${s} compact unit=${false} />، ورودی‌ها <${Money} v=${auto.inflow} s=${s} compact unit=${false} /></span></div>
     <div class="kpi"><span class="t"><${Icon} n="live" cls="sm" />به‌روزرسانی خودکار</span>
       <span class="v num">${pf.gross > 0 ? pct(autoVal / g, { sign: false }) : '—'}</span>
@@ -201,7 +201,7 @@ function Upcoming({ st, pf, s, open }) {
         <div class="grow"><div class="sb ellipsis">${r.asset.name}</div><div class="xs muted">${r.status === 'stale' ? `آخرین به‌روزرسانی ${ago(r.at)}` : r.error || 'قیمت آنلاین قدیمی است'}</div></div>
         <${StatusPill} status=${r.status} /></div>`)}
       ${up.map((e) => html`<div class="it">
-        <span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'maturity' ? 'clock' : 'repeat'} /></span>
+        <span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'maturity' ? 'clock' : e.kind === 'loan' ? 'calendar' : 'repeat'} /></span>
         <div class="grow"><div class="sb ellipsis">${e.title}</div><div class="xs muted">${fmtJ(e.date)}${e.toId && byId[e.toId] && e.toId !== e.assetId ? '، به ' + byId[e.toId].name : ''}${e.estimate ? '، تخمینی' : ''}</div></div>
         <span class="small sb"><${Money} v=${e.amount} s=${s} compact /></span></div>`)}
       ${!att.length && !up.length && html`<div class="empty"><div class="ico"><${Icon} n="check" /></div>همه‌چیز به‌روز است و رویدادی در دو هفته آینده نیست.</div>`}

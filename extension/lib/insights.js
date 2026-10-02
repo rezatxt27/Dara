@@ -6,7 +6,8 @@
 //  - critiqueFacts: percent-only facts for the AI portfolio review
 import * as E from './engine.js';
 import { CAT, EXPOSURES, LIQUIDITY, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from './catalog.js';
-import { todayIso, daysBetween, isoFromDate } from './jalali.js';
+import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
+import { num } from './format.js';
 
 const MODE_NAME = { payout: 'روزشمار، سود ماهانه واریز می‌شود', compound: 'روزشمار مرکب', simple: 'روزشمار ساده' };
 const basisName = (b) => (b === 'actual' ? 'طول واقعی سال شمسی' : `${b || 365} روز`);
@@ -74,6 +75,20 @@ export function explainAsset(a, quotes = {}, settings = {}, now = Date.now()) {
     }
     lines.push({ t: liab ? 'بهره انباشته (به بدهی اضافه می‌شود)' : 'سود انباشته', v: v.value - P, k: 'money', sign: !liab });
     lines.push({ t: liab ? 'بهره هر روز' : 'سود هر روز', v: E.rateDaily(r, v.value), k: 'money' });
+  } else if (a.mode === 'loan') {
+    const L = a.loan || {}; const st = E.loanState(L, todayIso(), now);
+    lines.push({ t: liab ? 'مبلغ وام' : 'مبلغ قرض', v: st.P, k: 'money' });
+    lines.push({ t: 'نرخ سود سالانه', v: (+L.annualPct || 0) / 100, k: 'pct' });
+    lines.push({ t: 'مبلغ هر قسط', v: st.A, k: 'money' });
+    lines.push({ t: 'اقساط پرداخت‌شده', v: `${num(st.paid)} از ${num(st.n)}`, k: 'text' });
+    if (st.done) { lines.push({ t: 'وضعیت', v: 'تسویه شده', k: 'text' }); formula = 'تسویه شده؛ دیگر از ارزش خالص کم نمی‌شود'; }
+    else {
+      lines.push({ t: 'مانده اصل بعد از آخرین قسط', v: st.owed, k: 'money' });
+      lines.push({ t: liab ? 'سود (بهره) این دوره تا این لحظه' : 'سود این دوره تا این لحظه', v: st.accrued, k: 'money', sub: st.prev ? `از ${fmtJ(st.prev, 'dm')}` : null });
+      lines.push({ t: 'قسط بعدی', v: st.next.date, k: 'date', sub: `سهم سود از قسط: ${num(Math.round(st.next.interest / st.next.payment * 100))}٪` });
+      formula = 'مبلغ = مانده اصل + سود روزهای گذشته از آخرین قسط (مانده × نرخ ماهانه × روزها ÷ روزهای ماه)';
+      notes.push(`قسط = اصل × نرخ ماهانه ÷ (۱ − (۱ + نرخ ماهانه) به توان منفی تعداد اقساط)؛ نرخ ماهانه = نرخ سالانه ÷ ۱۲.`);
+    }
   } else {
     lines.push({ t: liab ? 'مبلغ ثبت‌شده' : 'مانده ثبت‌شده', v: +a.balance || 0, k: 'money', at: a.balanceAt || a.updatedAt });
     if (a.interest?.on) {

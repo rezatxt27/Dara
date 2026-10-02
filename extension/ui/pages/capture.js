@@ -87,8 +87,8 @@ export function CapturePage({ st, s }) {
       if (a) {
         const isMoney = n.moneyUnit || /ریال|تومان/.test(n.unit || '') || n.manual;
         const k = (n.moneyUnit || (/تومان/.test(n.unit || '') ? 'toman' : 'rial')) === 'toman' ? 10 : 1;
-        if (!('field' in patch)) n.field = a.mode === 'units' ? 'quantity' : a.mode === 'rate' ? 'rate.principal' : 'balance';
-        n.current = n.field === 'quantity' ? +a.quantity || 0 : n.field === 'balance' ? +a.balance || 0 : n.field === 'rate.principal' ? +a.rate?.principal || 0 : +a.price?.value || 0;
+        if (!('field' in patch)) n.field = a.mode === 'units' ? 'quantity' : a.mode === 'rate' ? 'rate.principal' : a.mode === 'loan' ? 'loan.balance' : 'balance';
+        n.current = n.field === 'quantity' ? +a.quantity || 0 : n.field === 'balance' ? +a.balance || 0 : n.field === 'rate.principal' ? +a.rate?.principal || 0 : n.field === 'loan.balance' ? E.loanState(a.loan).value : +a.price?.value || 0;
         n.value = n.field === 'quantity' ? n.amount : n.amount * (n.manual ? (s.currency === 'rial' ? 1 : 10) : k);
         n.on = true; n.create = false;
       }

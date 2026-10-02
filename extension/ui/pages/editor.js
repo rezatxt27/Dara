@@ -1,8 +1,8 @@
-import { html, useState, useEffect, useMemo, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ } from '../components.js';
+import { html, useState, useEffect, useMemo, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ, money } from '../components.js';
 import { CryptoPicker } from '../pickers.js';
 import { CATEGORIES, CAT, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY, LIQUIDITY, METAL_PRESETS } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
-import { todayIso } from '../../lib/jalali.js';
+import { todayIso, addJMonthsIso } from '../../lib/jalali.js';
 import { uid } from '../../lib/format.js';
 import { act } from '../actions.js';
 
@@ -10,7 +10,11 @@ const MODES = [
   { id: 'units', t: 'تعداد × قیمت', d: 'طلا، سکه، ارز، سهام، صندوق، رمزارز', icon: 'coin' },
   { id: 'balance', t: 'مانده / ارزش کل', d: 'حساب بانکی، ملک، خودرو، طلب، بدهی', icon: 'bank' },
   { id: 'rate', t: 'سود با نرخ ثابت', d: 'سپرده، درآمد ثابت، شراکت؛ رشد خودکار روزانه', icon: 'percent' },
+  { id: 'loan', t: 'قسطی', d: 'وام بانکی یا قرضی که ماهانه قسط دارد؛ مانده خودکار کم می‌شود', icon: 'calendar' },
 ];
+/** Installments make sense for what you owe or are owed. */
+const LOAN_CATS = new Set(['debt', 'receivable']);
+const blankLoan = () => ({ amount: null, annualPct: null, months: null, firstDue: addJMonthsIso(todayIso(), 1), installment: null, account: '' });
 
 const DEFAULT_REF = { metal: { provider: 'tgju', key: 'silver_999' }, gold_online: { provider: 'tgju', key: 'geram18' }, gold: { provider: 'tgju', key: 'geram18' }, fx: { provider: 'tgju', key: 'price_dollar_rl' }, crypto: { provider: 'nobitex', key: 'usdt' }, stock: { provider: 'tsetmc', key: '' }, fixed: { provider: 'fipiran', key: '' } };
 const DEFAULT_UNIT = { metal: 'گرم', gold_online: 'گرم', gold: 'گرم', fx: 'دلار', crypto: 'USDT', stock: 'سهم', private: 'سهم', fixed: 'واحد' };
@@ -31,7 +35,8 @@ function blank(cat = 'bank') {
   return { id: uid('a'), name: '', category: cat, custodian: '', code: '', liquidity: c.liquidity, note: '', mode: c.defaultMode,
     quantity: null, unit: DEFAULT_UNIT[cat] || 'واحد',
     price: { source: DEFAULT_REF[cat] ? 'market' : 'manual', value: null, ref: DEFAULT_REF[cat] ? { ...DEFAULT_REF[cat] } : null, adjustPct: 0, factor: 1 },
-    balance: null, rate: { principal: null, annualPct: null, start: todayIso(), mode: 'payout', payoutTo: 'self', maturity: null }, costBasis: null };
+    balance: null, rate: { principal: null, annualPct: null, start: todayIso(), mode: 'payout', payoutTo: 'self', maturity: null }, loan: blankLoan(), costBasis: null,
+    ...(cat === 'debt' ? { mode: 'loan' } : {}) };
 }
 
 /* ---------------- market source picker ---------------- */
@@ -89,10 +94,12 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     const base = asset ? structuredClone(asset) : blank(preset?.category || 'bank');
     if (!base.price) base.price = { source: 'manual', value: null, ref: null, adjustPct: 0, factor: 1 };
     if (!base.rate) base.rate = { principal: null, annualPct: null, start: todayIso(), mode: 'payout', payoutTo: 'self', maturity: null };
+    if (!base.loan) base.loan = blankLoan();
     if (preset?.mode) {
       // "automate this" suggestion: carry over current value
       const v = E.valueOf(base, st.quotes, s).value;
       if (preset.mode === 'rate' && base.mode !== 'rate') base.rate.principal = v;
+      if (preset.mode === 'loan' && base.mode !== 'loan') base.loan.amount = v || null;
       if (preset.mode === 'units' && preset.source === 'market') { base.price.source = 'market'; base.price.ref = base.price.ref || { ...(DEFAULT_REF[base.category] || { provider: 'tgju', key: 'geram18' }) }; }
       base.mode = preset.mode;
     }
@@ -110,14 +117,17 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     return { ...x, price, unit };
   });
   const setRate = (p) => setA((x) => ({ ...x, rate: { ...x.rate, ...p } }));
+  const setLoan = (p) => setA((x) => ({ ...x, loan: { ...x.loan, ...p } }));
+  const [fund, setFund] = useState({ on: false, accountId: '', amount: null });
   const cat = CAT[a.category];
 
   const pickCat = (id) => {
     const c = CAT[id];
     setA((x) => {
       const n = { ...x, category: id, liquidity: c.liquidity };
+      if (n.mode === 'loan' && !LOAN_CATS.has(id)) n.mode = c.defaultMode;
       if (isNew) {
-        n.mode = c.defaultMode; n.unit = DEFAULT_UNIT[id] || x.unit;
+        n.mode = id === 'debt' ? 'loan' : c.defaultMode; n.unit = DEFAULT_UNIT[id] || x.unit;
         if (DEFAULT_REF[id]) n.price = { ...x.price, source: 'market', ref: { ...DEFAULT_REF[id] } }; else n.price = { ...x.price, source: 'manual' };
       }
       return n;
@@ -143,6 +153,14 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const appraised = E.APPRAISED.has(a.category) && a.mode === 'balance' && asset?.mode === 'balance';
   const balChanged = !isNew && a.balance !== null && +a.balance !== +asset?.balance;
   const [why, setWhy] = useState('reval');
+  const L = a.loan || blankLoan();
+  const plan = a.mode === 'loan' && +L.amount > 0 && +L.months >= 1 ? E.loanState({ ...L, installment: +L.installment || null }, todayIso()) : null;
+  const liabCat = !!cat.liability;
+  // «where did the money come from?» (new assets only): the account's balance and the amount moved
+  const fundAcc = fund.on ? balanceTargets.find((x) => x.id === fund.accountId) : null;
+  const fundDefault = a.mode === 'loan' ? +L.amount || 0 : Math.abs(val.value) || 0;
+  const fundAmt = fund.amount ?? fundDefault;
+  const fundShort = fundAcc && !liabCat && fundAmt > (E.valueOf(fundAcc, st.quotes, s).value || 0) + 0.5;
   const errors = [];
   if (!a.name.trim()) errors.push('نام دارایی');
   if (a.mode === 'units' && !(+a.quantity > 0)) errors.push('مقدار');
@@ -151,6 +169,15 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   if (a.mode === 'balance' && !(isFinite(+a.balance) && a.balance !== null)) errors.push('مبلغ');
   if (a.mode === 'balance' && a.interest?.on && !(+a.interest.annualPct > 0)) errors.push('نرخ سود روزشمار');
   if (a.mode === 'rate' && (!(+a.rate.principal > 0) || !(+a.rate.annualPct >= 0) || !a.rate.start)) errors.push('اصل سرمایه، نرخ و تاریخ شروع');
+  if (a.mode === 'loan') {
+    if (!(+L.amount > 0)) errors.push('مبلغ وام');
+    if (!(+L.months >= 1)) errors.push('تعداد اقساط');
+    if (L.annualPct === null || L.annualPct === '' || !(+L.annualPct >= 0)) errors.push('نرخ سود (برای بدون سود: صفر)');
+    if (!L.firstDue) errors.push('تاریخ اولین قسط');
+    if (+L.installment > 0 && +L.amount > 0 && +L.installment <= +L.amount * (+L.annualPct || 0) / 1200) errors.push('مبلغ قسط (کمتر از سود ماهانه است)');
+  }
+  if (isNew && fund.on && !fundAcc) errors.push(liabCat ? 'حسابی که پول وام به آن رفت' : 'حسابی که پول از آن آمد');
+  if (isNew && fund.on && !(fundAmt > 0)) errors.push('مبلغ');
 
   const save = async () => {
     if (errors.length) return toast('تکمیل کن: ' + errors.join('، '));
@@ -166,8 +193,12 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       if (out.interest?.on) out.interest = { ...out.interest, annualPct: +out.interest.annualPct, accrued: +out.interest.accrued || 0 };
     }
     if (out.mode === 'rate') { out.rate.principal = +out.rate.principal; out.rate.annualPct = +out.rate.annualPct; if (asset?.rate?.start !== out.rate.start) delete out.rate.lastPayout; }
+    if (out.mode === 'loan') out.loan = { ...out.loan, amount: +out.loan.amount, annualPct: +out.loan.annualPct, months: Math.round(+out.loan.months), installment: +out.loan.installment > 0 ? +out.loan.installment : null, account: out.loan.account || null };
     delete out.review;
-    await act.saveAsset(out, appraised && balChanged ? { reval: why === 'reval' } : {});
+    await act.saveAsset(out, {
+      ...(appraised && balChanged ? { reval: why === 'reval' } : {}),
+      ...(isNew && fund.on && fundAcc && fundAmt > 0 ? { fund: { accountId: fundAcc.id, amount: fundAmt } } : {}),
+    });
     toast(isNew ? 'دارایی اضافه شد' : 'ذخیره شد');
     onClose();
   };
@@ -195,17 +226,18 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     </div>
 
     <div class="sec"><div class="st"><${Icon} n="zap" cls="sm" />روش ارزش‌گذاری و به‌روزرسانی</div>
-      <div class="modes">${MODES.map((m) => html`<button type="button" class=${'mode' + (a.mode === m.id ? ' on' : '')} onClick=${() => setA((x) => {
+      <div class="modes">${MODES.filter((m) => m.id !== 'loan' || LOAN_CATS.has(a.category)).map((m) => html`<button type="button" class=${'mode' + (a.mode === m.id ? ' on' : '')} onClick=${() => setA((x) => {
           if (x.mode === m.id) return x;
           // carry the current value over, so switching method doesn't start from an empty form
           const cur = Math.abs(val.value) > 0 ? Math.round(val.value) : null;
           const n = { ...x, mode: m.id };
           if (m.id === 'balance' && (x.balance === null || x.balance === undefined)) n.balance = cur;
           if (m.id === 'rate' && !(+x.rate?.principal > 0)) n.rate = { ...x.rate, principal: cur };
+          if (m.id === 'loan' && !(+x.loan?.amount > 0)) n.loan = { ...(x.loan || blankLoan()), amount: cur };
           if (m.id === 'units' && x.price.source === 'manual' && !(+x.price.value > 0) && cur && !(+x.quantity > 0)) { n.quantity = 1; n.price = { ...x.price, value: cur }; }
           return n;
         })}>
-        <span class="mt"><${Icon} n=${m.icon} cls="sm" />${m.t}</span><span class="md">${m.d}</span></button>`)}</div>
+        <span class="mt"><${Icon} n=${m.icon} cls="sm" />${m.id === 'loan' ? (liabCat ? 'وام قسطی' : 'طلب قسطی') : m.t}</span><span class="md">${m.id === 'loan' && !liabCat ? 'قرضی که داده‌ای و ماهانه قسطش را می‌گیری' : m.d}</span></button>`)}</div>
 
       ${a.mode === 'units' && html`
         <div class="grid2">
@@ -248,7 +280,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
           </div>`}`}
         </div>`}
         ${(a.category === 'fixed' || a.category === 'receivable') && !a.interest?.on && html`<div class="callout"><${Icon} n="sparkles" cls="sm" /><div>اگر اصل ثابت است و سود مشخصی دارد، روش «سود با نرخ ثابت» را انتخاب کن تا ارزشش روزشمار رشد کند.</div></div>`}
-        <div class="xs muted">برای حقوق، قسط یا اجاره که هر ماه این مانده را تغییر می‌دهد، در صفحه «خودکارسازی» یک جریان تکراری بساز.</div>
+        <div class="xs muted">${LOAN_CATS.has(a.category) ? 'اگر قسط ماهانه دارد، روش «قسطی» را انتخاب کن تا مانده و قسط‌ها خودکار حساب شوند.' : 'برای حقوق یا اجاره که هر ماه این مانده را تغییر می‌دهد، در صفحه «خودکارسازی» یک جریان تکراری بساز.'}</div>
       `}
 
       ${a.mode === 'rate' && html`
@@ -277,27 +309,65 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
         </div>`}
       `}
 
+      ${a.mode === 'loan' && html`
+        <div class="grid2">
+          <${MoneyField} label=${liabCat ? 'مبلغ وام' : 'مبلغ قرض'} rial=${L.amount} onRial=${(v) => setLoan({ amount: v })} s=${s} />
+          <${NumField} label="نرخ سود سالانه (٪)" value=${L.annualPct} onInput=${(v) => setLoan({ annualPct: v })} digits=${2} hint="بدون سود: صفر؛ قرض‌الحسنه: کارمزد، مثلاً ۴" />
+        </div>
+        <div class="grid2">
+          <${NumField} label="تعداد اقساط (ماهانه)" value=${L.months} onInput=${(v) => setLoan({ months: v ? Math.round(v) : null })} digits=${0} />
+          <${JDateField} label="تاریخ اولین قسط" iso=${L.firstDue} onIso=${(v) => setLoan({ firstDue: v })} />
+        </div>
+        <div class="grid2">
+          <${MoneyField} label="مبلغ هر قسط (اختیاری)" rial=${L.installment} onRial=${(v) => setLoan({ installment: v })} s=${s} hint=${plan && !(+L.installment > 0) ? `خالی بگذار تا طبق فرمول بانک حساب شود: ${money(plan.A, s)}` : 'اگر بانک عدد دیگری گفته، همان را بنویس'} />
+          <div class="field"><label>${liabCat ? 'قسط‌ها از کدام حساب کم شود؟' : 'قسط‌ها به کدام حساب واریز شود؟'}</label>
+            <select class="input" value=${L.account || ''} onChange=${(e) => setLoan({ account: e.target.value })}>
+              <option value="">— ثبت نشود —</option>${balanceTargets.map((x) => html`<option value=${x.id}>${x.name}${x.custodian && x.custodian !== x.name ? ' — ' + x.custodian : ''}</option>`)}
+            </select></div>
+        </div>
+        <div class="callout"><${Icon} n="info" cls="sm" /><div>${liabCat ? 'وامی را که از قبل داری' : 'قرضی را که از قبل داده‌ای'} هم همین‌جا ثبت کن: یا مبلغ و تاریخ اولین قسط اصلی را بنویس تا قسط‌های گذشته پرداخت‌شده حساب شوند، یا مانده فعلی، تعداد قسط‌های باقی‌مانده و تاریخ قسط بعدی را.</div></div>
+        ${plan && html`<div class="grid3">
+          <div class="pcell"><span class="n">قسط ماهانه</span><span class="v"><${Money} v=${plan.A} s=${s} compact /></span></div>
+          <div class="pcell"><span class="n">جمع سود کل دوره</span><span class="v"><${Money} v=${plan.totalInterest} s=${s} compact /></span></div>
+          <div class="pcell"><span class="n">${plan.done ? 'وضعیت' : 'قسط بعدی'}</span><span class="v">${plan.done ? 'تسویه شده' : `${fmtJ(plan.next.date, 'dm')} (${num(plan.paid + 1)} از ${num(plan.n)})`}</span></div>
+        </div>
+        ${plan.rows.length && Math.abs(plan.rows[plan.rows.length - 1].payment - plan.A) > Math.max(plan.A * 0.5, 1) && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>با این مبلغ قسط، قسط آخر <${Money} v=${plan.rows[plan.rows.length - 1].payment} s=${s} /> می‌شود. مبلغ قسط یا تعداد اقساط را بررسی کن.</div></div>`}`}
+      `}
+
       <div class="preview">
-        <div><div class="xs muted">ارزش فعلی</div><div class="v"><${Money} v=${cat.liability ? -val.value : val.value} s=${s} /></div>
+        <div><div class="xs muted">${a.mode === 'loan' ? (liabCat ? 'مانده بدهی امروز' : 'مانده طلب امروز') : 'ارزش فعلی'}</div><div class="v"><${Money} v=${cat.liability ? -val.value : val.value} s=${s} /></div>
           ${a.mode === 'units' && html`<div class="xs muted num">${num(+a.quantity || 0, 'auto')} ${a.unit || ''} × <${Money} v=${val.unitPrice} s=${s} /></div>`}</div>
         <div style="text-align:left">
           ${a.mode === 'units' && a.price.source === 'market' && html`${preview.loading ? html`<span class="pill"><${Icon} n="refresh" cls="sm spin" />دریافت قیمت…</span>` : preview.q?.price ? html`<span class="pill live"><i class="blink"></i>قیمت زنده</span>` : html`<span class="pill error" title=${preview.err || ''}>قیمت دریافت نشد</span>`}
             ${preview.q?.changePct ? html`<div class="xs" style="margin-top:4px">امروز <span class=${preview.q.changePct >= 0 ? 'pos' : 'neg'}>${pct(preview.q.changePct)}</span></div>` : ''}`}
           ${a.mode === 'rate' && html`<span class="pill auto">رشد خودکار</span>`}
+          ${a.mode === 'loan' && html`<span class="pill auto">قسط‌ها خودکار</span>`}
         </div>
       </div>
       ${a.mode === 'units' && a.price.source === 'market' && preview.err && !preview.q?.price && html`<div class="callout warn"><${Icon} n="wifi" cls="sm" /><div>${preview.err}. ذخیره کن؛ در به‌روزرسانی بعدی دوباره تلاش می‌شود${a.price.value ? ' و تا آن موقع آخرین قیمت شناخته‌شده استفاده می‌شود' : ''}.</div></div>`}
     </div>
 
+    ${isNew && balanceTargets.length > 0 && html`<div class="sec"><div class="st"><${Icon} n="swap" cls="sm" />${liabCat ? 'پول این وام کجا رفت؟' : 'پولش از کجا آمد؟'}</div>
+      <${Seg} value=${fund.on ? 'acc' : 'none'} onChange=${(v) => setFund((f) => ({ ...f, on: v === 'acc', accountId: f.accountId || (v === 'acc' && balanceTargets.length === 1 ? balanceTargets[0].id : f.accountId) }))}
+        options=${liabCat ? [['none', 'ثبت نشود'], ['acc', 'به یکی از حساب‌هایم واریز شد']] : [['none', 'از قبل داشتم یا پول تازه است'], ['acc', 'از یکی از حساب‌هایم پرداخت کردم']]} />
+      ${fund.on && html`<div class="grid2">
+        <div class="field"><label>${liabCat ? 'واریز به حساب' : 'پرداخت از حساب'}</label><select class="input" value=${fund.accountId} onChange=${(e) => setFund((f) => ({ ...f, accountId: e.target.value }))}>
+          <option value="">— انتخاب کن —</option>${balanceTargets.map((x) => html`<option value=${x.id}>${x.name}${x.custodian && x.custodian !== x.name ? ' — ' + x.custodian : ''}</option>`)}</select></div>
+        <${MoneyField} label=${liabCat ? 'مبلغ واریزشده' : 'مبلغ پرداختی'} rial=${fundAmt || null} onRial=${(v) => setFund((f) => ({ ...f, amount: v }))} s=${s} hint=${liabCat ? '' : 'اگر با کارمزد یا قیمتی غیر از قیمت روز خریدی، مبلغ واقعی را بنویس'} />
+      </div>
+      ${fundShort && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>مانده «${fundAcc.name}» کافی نیست؛ اگر ثبت کنی منفی می‌شود.</div></div>`}`}
+      <span class="hint">${fund.on ? (liabCat ? 'مبلغ به آن حساب اضافه می‌شود؛ ارزش خالص تغییری نمی‌کند.' : 'مبلغ از آن حساب کم می‌شود و پول تازه یا سود حساب نمی‌شود؛ بهای تمام‌شده هم همین مبلغ ثبت می‌شود.') : (liabCat ? 'اگر پول وام به حسابی رفته که در دارا ثبت کرده‌ای، انتخابش کن.' : 'اگر با پول یکی از حساب‌هایت خریدی، انتخابش کن تا از آن کم شود.')}</span>
+    </div>`}
+
     <div class="sec"><div class="st"><${Icon} n="target" cls="sm" />جزئیات بیشتر (اختیاری)</div>
-      ${!cat.liability && a.mode !== 'rate' && html`<div class="grid2">
+      ${!cat.liability && a.mode !== 'rate' && a.mode !== 'loan' && html`<div class="grid2">
         <${MoneyField} label="بهای تمام‌شده کل" rial=${a.costBasis} onRial=${(v) => set({ costBasis: v })} s=${s} hint="برای محاسبه سود/زیان" />
         ${(a.mode === 'balance' || a.price.source === 'manual') ? html`<div class="field"><label>یادآوری به‌روزرسانی</label>
           <select class="input" value=${a.remindDays ?? ''} onChange=${(e) => set({ remindDays: e.target.value === '' ? null : +e.target.value })}>
             <option value="">پیش‌فرض (${num(E.remindDaysFor({ ...a, remindDays: null }, s))} روز)</option><option value="1">هر روز</option><option value="7">هر هفته</option><option value="30">هر ماه</option><option value="90">هر سه ماه</option><option value="0">هرگز</option>
           </select></div>` : html`<div></div>`}
       </div>`}
-      <${JDateField} label="تاریخ خرید / شروع نگهداری" iso=${a.since || null} onIso=${(v) => set({ since: v })} allowEmpty hint="برای بازسازی دقیق‌تر تاریخچه؛ خالی یعنی از قبل داشته‌ای" />
+      ${a.mode !== 'loan' && html`<${JDateField} label="تاریخ خرید / شروع نگهداری" iso=${a.since || null} onIso=${(v) => set({ since: v })} allowEmpty hint="برای بازسازی دقیق‌تر تاریخچه؛ خالی یعنی از قبل داشته‌ای" />`}
       <div class="field"><label>یادداشت</label><textarea class="input" rows="2" value=${a.note || ''} onInput=${(e) => set({ note: e.target.value })} placeholder="شماره حساب، لینک منبع، توضیحات…"></textarea></div>
     </div>
   </${Drawer}>`;

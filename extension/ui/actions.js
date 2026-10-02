@@ -13,6 +13,7 @@ const qtyValue = (a, dq, quotes) => { const p = E.unitPriceOf(a, quotes).price; 
 
 /** Turn back on the recurring flows a deletion paused (salary into a restored account, …). Occurrences that fell
  *  while it was deleted are not replayed — only the ones from today on. */
+const maxIso = (a, b) => (!a ? b || null : !b ? a : a > b ? a : b);
 const reactivate = async (ids, since) => {
   if (!ids?.length) return;
   const last = since && since < todayIso() ? E.addDaysIso(todayIso(), -1) : null;
@@ -25,7 +26,11 @@ export const act = {
   async watchAdd(ref) { return store.update('settings', (s) => ({ ...s, watch: [...(s.watch || []).filter((w) => E.quoteId(w) !== E.quoteId(ref)), ref] })); },
   async watchRemove(ref) { return store.update('settings', (s) => ({ ...s, watch: (s.watch || []).filter((w) => E.quoteId(w) !== E.quoteId(ref)) })); },
 
-  /** opts.reval: a balance change is a re-appraisal (market move), not money in/out. Default: house, car, private shares. */
+  /**
+   * opts.reval: a balance change is a re-appraisal (market move), not money in/out. Default: house, car, private shares.
+   * opts.fund (new assets): { accountId, amount } — bought with money from that account (or, for a loan, its money went
+   * into that account). Recorded as one transfer, so it's neither new money nor a gain.
+   */
   async saveAsset(a, opts = {}) {
     const now = Date.now();
     let ev = null;
@@ -52,7 +57,14 @@ export const act = {
         // move and not money moved: the whole jump in value is logged as one correction (undo restores the old record).
         const refChanged = sameMode && a.mode === 'units' && (x.price?.source !== a.price?.source
           || (a.price?.source === 'market' && (E.quoteId(x.price?.ref || {}) !== E.quoteId(a.price?.ref || {}) || (+x.price?.factor || 1) !== (+a.price?.factor || 1) || (+x.price?.adjustPct || 0) !== (+a.price?.adjustPct || 0))));
-        const termsChanged = sameMode && a.mode === 'rate' && RATE_KEYS.some((k) => String(x.rate?.[k] ?? '') !== String(a.rate?.[k] ?? ''));
+        const LOAN_KEYS = ['amount', 'annualPct', 'months', 'firstDue', 'start', 'installment', 'settledAt'];
+        const termsChanged = sameMode && ((a.mode === 'rate' && RATE_KEYS.some((k) => String(x.rate?.[k] ?? '') !== String(a.rate?.[k] ?? '')))
+          || (a.mode === 'loan' && LOAN_KEYS.some((k) => String(x.loan?.[k] ?? '') !== String(a.loan?.[k] ?? ''))));
+        // new loan terms: installments that fell before they were entered are history, not something to pay again
+        if (rec.mode === 'loan' && rec.loan && (!sameMode || termsChanged)) {
+          const nl = { ...rec.loan }; if (x.loan?.firstDue !== nl.firstDue) delete nl.anchor;
+          rec.loan = { ...nl, lastRun: maxIso(x.mode === 'loan' ? x.loan?.lastRun : null, E.loanLastDue(nl)) };
+        }
         const liabFlip = E.isLiability(x) !== E.isLiability(a);
         if (!sameMode || refChanged || termsChanged || liabFlip) {
           const before = E.valueOf(x, quotes, {}).signedValue; const after = E.valueOf(rec, quotes, {}).signedValue;
@@ -73,16 +85,28 @@ export const act = {
       } else {
         const id = a.id || uid('a');
         if (!rec.code) rec.code = code;
+        if (rec.mode === 'loan' && rec.loan) rec.loan = { ...rec.loan, lastRun: E.loanLastDue(rec.loan) };
+        const liab = E.isLiability(rec);
+        const acc = opts.fund?.accountId ? list.find((x) => x.id === opts.fund.accountId && !x.archived) : null;
+        const paid = acc ? +opts.fund.amount || 0 : 0;
+        if (acc && paid > 0 && !liab && rec.mode !== 'rate' && !(+rec.costBasis > 0)) rec.costBasis = paid; // what it actually cost
         list.push({ ...rec, id, createdAt: now });
-        // Record what was added, so later analysis treats it as money brought in, not as a market gain.
-        const v = E.valueOf({ ...rec, id }, quotes, {}).signedValue;
-        if (v) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: now, title: `افزودن «${a.name}»`, amount: 0, noUndo: true, changes: [{ assetId: id, field: 'add', delta: 0, value: v }] };
+        if (acc && paid > 0) {
+          // one transfer: out of the account into the new asset (a loan's money: into the account)
+          const accChanges = E.applyDelta(acc, liab ? paid : -paid, quotes);
+          ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: now, title: `افزودن «${a.name}» ${liab ? 'با واریز به' : 'از'} «${acc.name}»`, amount: paid,
+            fund: { accountId: acc.id, amount: paid }, changes: [{ assetId: id, field: 'add', delta: 0, value: liab ? -paid : paid }, ...accChanges] };
+        } else {
+          // Record what was added, so later analysis treats it as money brought in, not as a market gain.
+          const v = E.valueOf({ ...rec, id }, quotes, {}).signedValue;
+          if (v) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: now, title: `افزودن «${a.name}»`, amount: 0, noUndo: true, changes: [{ assetId: id, field: 'add', delta: 0, value: v }] };
+        }
       }
       return list;
     });
     if (ev) await store.update('events', (l) => [ev, ...l].slice(0, EVENTS_MAX));
     if (a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key) send('quote', { ref: a.price.ref });
-    if (a.mode === 'rate' || a.interest?.on) send('automate');
+    if (a.mode === 'rate' || a.mode === 'loan' || a.interest?.on) send('automate');
     send('badge');
     return list;
   },
@@ -116,6 +140,12 @@ export const act = {
         if (r.field === 'quantity') { const dq = r.value - (+a.quantity || 0); changes.push({ assetId: a.id, field: 'quantity', delta: dq, value: qtyValue(a, dq, quotes) }); a.quantity = r.value; }
         else if (r.field === 'balance') { changes.push({ assetId: a.id, field: 'balance', delta: r.value - (+a.balance || 0) }); a.balance = r.value; a.balanceAt = Date.now(); }
         else if (r.field === 'rate.principal') { changes.push({ assetId: a.id, field: 'rate.principal', delta: r.value - (+a.rate.principal || 0) }); a.rate.principal = r.value; }
+        else if (r.field === 'loan.balance' && a.mode === 'loan') {
+          // the bank's figure for what is left: re-base the schedule on it, logged as a correction
+          const before = E.valueOf(a, quotes, {}).signedValue;
+          const ch = E.loanRebase(a, r.value);
+          changes.push(...ch.map((c) => ({ ...c, value: E.valueOf(a, quotes, {}).signedValue - before })));
+        }
         else if (r.field === 'unit_price') { a.price = { ...a.price, value: r.value, updatedAt: Date.now() }; }
         a.updatedAt = Date.now();
       }
@@ -179,18 +209,45 @@ export const act = {
   async deleteFlow(id) { await store.update('flows', (l) => l.filter((x) => x.id !== id)); },
 
   async undoEvent(ev) {
-    if (ev.noUndo) return;
-    if (ev.prev) {
-      // restoring the old record would wipe whatever happened to this asset afterwards
+    if (ev.noUndo || ev.reversedBy) return;
+    if (ev.fund) return act.reverseFundedAdd(ev);
+    // restoring an earlier record (or earlier loan terms) would wipe whatever happened to that asset afterwards
+    const restoresId = ev.prev?.id || ev.changes?.find((c) => c.field === 'loan')?.assetId;
+    if (restoresId) {
       const { events } = await store.load('events');
-      const touches = (e) => e.toId === ev.prev.id || e.fromId === ev.prev.id || e.changes?.some((c) => c.assetId === ev.prev.id);
+      const touches = (e) => e.toId === restoresId || e.fromId === restoresId || e.changes?.some((c) => c.assetId === restoresId);
       if (events.some((e) => e.id !== ev.id && !e.undone && (e.at || 0) > (ev.at || 0) && touches(e))) return toast('اول تغییرهای بعدیِ همین دارایی را برگردان');
     }
-    if (ev.restore) { await store.update('assets', (l) => (l.some((x) => x.id === ev.restore.id) ? l : [...l, ev.restore])); await reactivate(ev.flowIds, ev.date); }
+    if (ev.restore) {
+      await store.update('assets', (l) => E.undoEvent(l.some((x) => x.id === ev.restore.id) ? l : [...l, ev.restore], { changes: (ev.changes || []).filter((c) => c.assetId !== ev.restore.id) }));
+      await reactivate(ev.flowIds, ev.date);
+      if (ev.reversalOf) await store.update('events', (evs) => evs.map((e) => (e.id === ev.reversalOf ? { ...e, reversedBy: null } : e)));
+    }
     else if (ev.prev) await store.update('assets', (assets) => E.revertEvent(assets, ev));
     else await store.update('assets', (assets) => E.undoEvent(assets, ev));
     await store.update('events', (evs) => evs.map((e) => (e.id === ev.id ? { ...e, undone: true } : e)));
     toast('رویداد برگشت داده شد');
+  },
+
+  /**
+   * Undo «added with money from an account»: a reversing entry (asset out at today's value, money back to the account),
+   * so every period before and after stays consistent. Undoing the reversal brings both back.
+   */
+  async reverseFundedAdd(ev) {
+    const id = ev.changes.find((c) => c.field === 'add')?.assetId;
+    const { assets, quotes } = await store.load('assets', 'quotes');
+    const a = assets.find((x) => x.id === id);
+    if (!a) return toast('این دارایی دیگر وجود ندارد');
+    let rev = null;
+    await store.update('assets', (list) => {
+      const acc = list.find((x) => x.id === ev.fund.accountId);
+      const changes = [{ assetId: id, field: 'remove', delta: 0, value: -E.valueOf(a, quotes, {}).signedValue }];
+      if (acc) changes.push(...E.applyDelta(acc, E.isLiability(a) ? -ev.fund.amount : ev.fund.amount, quotes));
+      rev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `برگشت افزودن «${a.name}»`, amount: ev.fund.amount, restore: a, reversalOf: ev.id, changes };
+      return list.filter((x) => x.id !== id);
+    });
+    await store.update('events', (evs) => [rev, ...evs.map((e) => (e.id === ev.id ? { ...e, reversedBy: rev.id } : e))].slice(0, EVENTS_MAX));
+    toast('افزودن برگشت داده شد و پول به حساب برگشت');
   },
 
   /** Buy/sell units; optionally settle against a cash (balance) asset */

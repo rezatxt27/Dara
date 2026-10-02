@@ -3,7 +3,7 @@
 import { CAT, CATEGORIES, EXPOSURES, GOLD_ETFS, TGJU_BY_KEY } from './catalog.js';
 import { quoteId, isUsdRef } from './providers.js';
 import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
-import { uid } from './format.js';
+import { uid, num } from './format.js';
 
 export { quoteId, isUsdRef, addDaysIso };
 const DAY = 86400000;
@@ -128,6 +128,81 @@ export function balanceInterestLive(a, nowIso = todayIso(), nowMs = null) {
   return { accrued: pending + missed + (nowMs ? daily * fracOfDay(nowMs) : 0), daily };
 }
 
+/* ============================ installment loans (وام قسطی) ============================ */
+/**
+ * Bank-style amortizing loan (debt) or installment receivable. Terms only — the state on any day is computed:
+ *  { amount, annualPct, months, firstDue, start?, installment?, anchor?, account?, lastRun?, settledAt? }
+ * Monthly rate = yearly ÷ 12. Installment = P·r ÷ (1 − (1+r)^−n) unless given; the last one settles the rest.
+ * The first period runs from `start` (disbursement; default one month before the first due) and may be shorter or longer.
+ */
+export function loanPlan(L) {
+  const P = +L?.amount || 0, n = Math.max(1, Math.min(600, Math.round(+L?.months || 0) || 1)), r = (+L?.annualPct || 0) / 1200;
+  const due0 = L?.firstDue || todayIso();
+  const anchor = +L?.anchor || isoToJ(due0).jd;
+  const A = +L?.installment > 0 ? +L.installment : r ? P * r / (1 - Math.pow(1 + r, -n)) : P / n;
+  const monthBefore = addJMonthsIso(due0, -1, anchor);
+  const start = L?.start && L.start < due0 ? L.start : monthBefore;
+  const full = daysBetween(monthBefore, due0) || 30;
+  const f0 = daysBetween(start, due0) / full;
+  const rows = []; let B = P;
+  for (let k = 0; k < n && B > 0.5; k++) {
+    const date = addJMonthsIso(due0, k, anchor);
+    const interest = B * r * (k === 0 ? f0 : 1);
+    const pay = k === n - 1 ? B + interest : Math.min(A, B + interest);
+    B = Math.max(0, B - (pay - interest));
+    rows.push({ k, date, payment: pay, interest, principal: pay - interest, balance: B });
+  }
+  return { P, n: rows.length, r, A, start, anchor, rows, totalInterest: rows.reduce((t, x) => t + x.interest, 0) };
+}
+
+/** Where a loan stands on `iso` (installments due on or before it count as paid). value = principal left + interest accrued. */
+export function loanState(L, iso = todayIso(), nowMs = null) {
+  const plan = loanPlan(L);
+  if (L?.settledAt && iso >= L.settledAt) return { ...plan, paid: plan.rows.filter((x) => x.date < L.settledAt).length, owed: 0, accrued: 0, value: 0, daily: 0, next: null, done: true, settled: true };
+  let i = 0; while (i < plan.rows.length && plan.rows[i].date <= iso) i++;
+  const owed = i ? plan.rows[i - 1].balance : plan.P;
+  if (i >= plan.rows.length || owed <= 0.5) return { ...plan, paid: i, owed: 0, accrued: 0, value: 0, daily: 0, next: null, done: true };
+  const next = plan.rows[i];
+  const prev = i ? plan.rows[i - 1].date : plan.start;
+  if (iso < prev) return { ...plan, paid: 0, owed, accrued: 0, value: owed, daily: 0, next, prev };
+  const span = Math.max(1, daysBetween(prev, next.date));
+  const el = Math.min(span, daysBetween(prev, iso) + (nowMs ? fracOfDay(nowMs) : 0));
+  const accrued = next.interest * el / span;
+  return { ...plan, paid: i, owed, accrued, value: owed + accrued, daily: next.interest / span, next, prev };
+}
+
+/** The last installment date on or before `iso` (null if none) — installments before tracking started aren't replayed. */
+export function loanLastDue(L, iso = todayIso()) {
+  const rows = loanPlan(L).rows.filter((x) => x.date <= iso);
+  return rows.length ? rows[rows.length - 1].date : null;
+}
+
+/**
+ * Change what is owed today (extra payment, settlement, more borrowed, or a correction from the bank's page) by re-basing
+ * the terms: same rate and installment, starting today, as many installments as it takes. Returns undo records.
+ */
+export function loanRebase(asset, newOwed, iso = todayIso(), nowMs = Date.now()) {
+  const L = asset.loan; const prevLoan = structuredClone(L);
+  const st = loanState(L, iso, nowMs);
+  // a few rials left over (interest ticking between screen and click) means it's paid off
+  if (!(newOwed > Math.max(10, st.value * 1e-5))) {
+    asset.loan = { ...L, settledAt: iso };
+  } else {
+    const A = st.A > 0 ? st.A : newOwed;
+    const firstDue = st.next?.date || addJMonthsIso(iso, 1, st.anchor);
+    const nl = { ...L, amount: newOwed, start: iso, firstDue, installment: A, anchor: st.anchor, months: 600 };
+    delete nl.settledAt;
+    // value is linear in the amount: scale so that the value right now equals what is owed (live part of today included)
+    const v1 = loanState(nl, iso, nowMs).value;
+    if (v1 > 0) nl.amount = newOwed * newOwed / v1;
+    // as many installments as the same payment needs (the last one closes it)
+    nl.months = Math.max(1, loanPlan(nl).rows.length);
+    asset.loan = nl;
+  }
+  asset.updatedAt = Date.now();
+  return [{ assetId: asset.id, field: 'loan', delta: 0, prevLoan }];
+}
+
 /* ============================ valuation ============================ */
 export function usdRate(quotes) { return quotes['tgju:price_dollar_rl']?.price || quotes['nobitex:usdt']?.price || null; }
 
@@ -195,6 +270,11 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
     } else {
       at = asset.price?.updatedAt || asset.updatedAt;
     }
+  } else if (asset.mode === 'loan') {
+    const ls = loanState(asset.loan, nowIso, liveMs);
+    value = ls.value; source = 'loan'; at = now; status = 'auto';
+    dayChange = asOf ? 0 : ls.daily;
+    if (ls.done) { status = 'settled'; at = null; dayChange = 0; }
   } else if (asset.mode === 'rate') {
     value = rateValue(asset.rate, nowIso, liveMs);
     status = 'auto'; source = 'rate'; at = now;
@@ -274,7 +354,11 @@ export function applyDelta(asset, delta, quotes = {}) {
   const liab = isLiability(asset);
   const changes = [];
   const rec = (field, d) => { if (d) changes.push({ assetId: asset.id, field, delta: d }); };
-  if (asset.mode === 'rate') {
+  if (asset.mode === 'loan') {
+    // paying a debt lowers what is owed; for a receivable, money taken out of it does
+    const st = loanState(asset.loan, todayIso(), Date.now());
+    changes.push(...loanRebase(asset, Math.max(0, st.value + (liab ? -delta : delta))));
+  } else if (asset.mode === 'rate') {
     const d = liab ? -delta : delta;
     const r = asset.rate; const a = (+r.annualPct || 0) / 100; const today = todayIso();
     // Money added today earns from today, not from the start date: keep the value jump equal to the money moved.
@@ -339,8 +423,11 @@ export function revertEvent(state, ev) {
 const UNDOABLE = new Set(['quantity', 'balance', 'costBasis', 'rate.principal', 'rate.offset', 'interest.accrued']);
 export function undoEvent(assets, ev) {
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
-  for (const c of ev.changes || []) {
-    const a = byId[c.assetId]; if (!a || typeof c.delta !== 'number' || !UNDOABLE.has(c.field)) continue;
+  for (const c of [...(ev.changes || [])].reverse()) {
+    const a = byId[c.assetId];
+    // earlier terms come back, but installments already applied stay applied (never paid twice)
+    if (a && c.field === 'loan' && c.prevLoan) { a.loan = { ...structuredClone(c.prevLoan), lastRun: a.loan?.lastRun ?? c.prevLoan.lastRun }; a.updatedAt = Date.now(); continue; }
+    if (!a || typeof c.delta !== 'number' || !UNDOABLE.has(c.field)) continue;
     setField(a, c.field, getField(a, c.field) - c.delta);
     a.updatedAt = Date.now();
   }
@@ -428,7 +515,24 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
       d = addDaysIso(d, 1);
     }
   }
-  // 3) Recurring flows
+  // 3) Installment loans: each due installment moves money between the chosen account and the loan
+  for (const a of assets) {
+    if (a.archived || a.mode !== 'loan' || !a.loan?.firstDue) continue;
+    const L = a.loan; const liab = isLiability(a);
+    const plan = loanPlan(L);
+    for (const row of plan.rows) {
+      if (row.date > today) break;
+      if (L.settledAt && row.date >= L.settledAt) break;
+      if (L.lastRun && row.date <= L.lastRun) continue;
+      const amt = Math.round(row.payment);
+      const acc = L.account && byId[L.account] && !byId[L.account].archived ? byId[L.account] : null;
+      const changes = acc ? applyDelta(acc, liab ? -amt : amt, quotes) : [];
+      L.lastRun = row.date;
+      events.push({ id: uid('e'), kind: 'loan', date: row.date, at: Date.now(), title: `${liab ? 'قسط' : 'دریافت قسط'} «${a.name}» (${num(row.k + 1)} از ${num(plan.n)})`, amount: amt,
+        fromId: liab ? acc?.id || null : a.id, toId: liab ? a.id : acc?.id || null, changes, noUndo: true });
+    }
+  }
+  // 4) Recurring flows
   for (const f of flows) {
     if (!f.active || !(+f.amount)) continue;
     const after = f.lastRun || addDaysIso(f.start, -1);
@@ -475,6 +579,17 @@ export function upcoming(assets, flows, days = 30, today = todayIso()) {
       }
     }
   }
+  for (const a of assets) {
+    if (a.archived || a.mode !== 'loan' || !a.loan?.firstDue) continue;
+    const st = loanState(a.loan, today);
+    if (st.done) continue;
+    const liab = isLiability(a);
+    for (const row of st.rows.slice(st.paid)) {
+      if (row.date > until) break;
+      list.push({ date: row.date, kind: 'loan', title: `${liab ? 'قسط' : 'دریافت قسط'} «${a.name}»`, amount: Math.round(row.payment), assetId: a.id,
+        fromId: liab ? a.loan.account || null : a.id, toId: liab ? a.id : a.loan.account || null });
+    }
+  }
   for (const f of flows) {
     if (!f.active) continue;
     const yesterday = addDaysIso(today, -1);
@@ -486,9 +601,16 @@ export function upcoming(assets, flows, days = 30, today = todayIso()) {
 
 /** Automatic monthly income: interest (rate assets + day-count bank interest) and recurring in/out flows */
 export function monthlyAuto(assets, flows) {
-  let interest = 0, inflow = 0, outflow = 0;
+  let interest = 0, inflow = 0, outflow = 0, loanPay = 0, loanGet = 0, loanInterest = 0;
   for (const a of assets) {
-    if (a.archived || isLiability(a)) continue;
+    if (a.archived || a.mode !== 'loan') continue;
+    const st = loanState(a.loan);
+    if (st.done) continue;
+    const pay = st.next.payment;
+    if (isLiability(a)) { loanPay += pay; loanInterest += st.next.interest; } else loanGet += pay;
+  }
+  for (const a of assets) {
+    if (a.archived || isLiability(a) || a.mode === 'loan') continue;
     if (a.mode === 'rate') interest += rateMonthly(a.rate, rateValue(a.rate));
     if (a.mode === 'balance' && a.interest?.on) interest += (+a.balance || 0) * (+a.interest.annualPct || 0) / 100 / 12;
   }
@@ -498,7 +620,8 @@ export function monthlyAuto(assets, flows) {
     if (f.toId && !f.fromId) inflow += m;
     if (f.fromId && !f.toId) outflow += m;
   }
-  return { interest, inflow, outflow, net: interest + inflow - outflow };
+  // installments are cash leaving (or reaching) the accounts every month, even though they also pay down a debt
+  return { interest, inflow, outflow, loanPay, loanGet, loanInterest, net: interest + inflow - outflow - loanPay + loanGet };
 }
 
 /* ============================ snapshots & series ============================ */

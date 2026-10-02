@@ -10,7 +10,8 @@ function suggestions(st, pf) {
   const out = [];
   for (const r of pf.rows) {
     const a = r.asset;
-    if (a.mode === 'balance' && (a.category === 'fixed' || a.category === 'receivable')) out.push({ a, r, preset: { mode: 'rate' }, t: 'سود با نرخ ثابت', d: 'ارزش هر روز خودکار رشد کند و سود ماهانه واریز شود' });
+    if (a.mode === 'balance' && a.category === 'debt') out.push({ a, r, preset: { mode: 'loan' }, t: 'وام قسطی', d: 'مانده و قسط‌ها هر ماه خودکار حساب و از حساب کم می‌شوند' });
+    else if (a.mode === 'balance' && (a.category === 'fixed' || a.category === 'receivable')) out.push({ a, r, preset: { mode: 'rate' }, t: 'سود با نرخ ثابت', d: 'ارزش هر روز خودکار رشد کند و سود ماهانه واریز شود' });
     else if (a.mode === 'units' && a.price?.source !== 'market' && ['gold', 'gold_online', 'fx', 'crypto', 'stock', 'fixed'].includes(a.category)) out.push({ a, r, preset: { mode: 'units', source: 'market' }, t: 'اتصال به قیمت آنلاین', d: a.category === 'stock' || a.category === 'fixed' ? 'قیمت از TSETMC یا NAV فیپیران' : 'قیمت زنده از tgju یا نوبیتکس' });
     else if (a.mode === 'balance' && ['gold', 'gold_online', 'fx', 'crypto'].includes(a.category)) out.push({ a, r, preset: { mode: 'units', source: 'market' }, t: 'تعداد × قیمت آنلاین', d: 'مقدار را وارد کن تا ارزش با قیمت روز حساب شود' });
   }
@@ -70,6 +71,7 @@ export function AutomationPage({ st, pf, s, open }) {
   const byId = Object.fromEntries(st.assets.map((a) => [a.id, a]));
   const rates = pf.rows.filter((r) => r.asset.mode === 'rate');
   const banks = pf.rows.filter((r) => r.asset.mode === 'balance' && r.asset.interest?.on);
+  const loans = pf.rows.filter((r) => r.asset.mode === 'loan');
   const sugg = suggestions(st, pf);
   const up = E.upcoming(st.assets, st.flows, 45);
   const auto = E.monthlyAuto(st.assets, st.flows, st.quotes, s);
@@ -84,8 +86,8 @@ export function AutomationPage({ st, pf, s, open }) {
 
     <div class="kpis">
       <div class="kpi"><span class="t">سود ماهانه درآمد ثابت</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">${num(rates.length)} دارایی با نرخ ثابت</span></div>
-      <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow} s=${s} compact /></span><span class="s">حقوق، اجاره و…</span></div>
-      <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow} s=${s} compact /></span><span class="s">هزینه‌های ثابت</span></div>
+      <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow + auto.loanGet} s=${s} compact /></span><span class="s">حقوق، اجاره، قسط‌های دریافتی و…</span></div>
+      <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow + auto.loanPay} s=${s} compact /></span><span class="s">${auto.loanPay ? html`هزینه‌های ثابت و اقساط (<${Money} v=${auto.loanPay} s=${s} compact />)` : 'هزینه‌های ثابت و اقساط'}</span></div>
       <div class="kpi"><span class="t">خالص جریان خودکار</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span><span class="s">در ماه</span></div>
     </div>
 
@@ -132,19 +134,32 @@ export function AutomationPage({ st, pf, s, open }) {
       </div>
     </div>
 
+    ${loans.length > 0 && html`<div class="card">
+      <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />وام‌ها و طلب‌های قسطی</h3><span class="sub">قسط‌ها در موعد خودکار ثبت می‌شوند</span></div>
+      <div class="list">${loans.map((r) => {
+        const a = r.asset; const ls = E.loanState(a.loan); const liab = r.cat.liability;
+        return html`<div class="it" style="cursor:pointer;align-items:flex-start" onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
+          <div class="grow"><div class="sb">${a.name}</div>
+            <div class="xs muted">${ls.done ? 'تسویه شده' : html`قسط <${Money} v=${ls.next.payment} s=${s} compact />، ${num(ls.paid)} از ${num(ls.n)} پرداخت شده، سود ${num(+a.loan.annualPct || 0, 2)}٪`}</div>
+            ${!ls.done && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> قسط بعدی ${fmtJ(ls.next.date, 'dm')} — ${liab ? 'از' : 'به'} ${a.loan.account ? nm(a.loan.account) || 'حساب حذف‌شده' : 'حسابی ثبت نشده'}</div>`}
+            ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round(ls.paid / ls.n * 100)}%;background:${r.cat.color}`}></i></div>`}</div>
+          <div style="text-align:left"><div class="sb"><${Money} v=${liab ? -r.value : r.value} s=${s} /></div><div class="xs muted">${liab ? 'مانده بدهی' : 'مانده طلب'}</div></div></div>`;
+      })}</div>
+    </div>`}
+
     <div class="grid-ov">
       <div class="card"><div class="card-h"><h3><${Icon} n="calendar" cls="sm" />تقویم ۴۵ روز آینده</h3></div>
         ${up.length ? html`<div class="list">${up.slice(0, 12).map((e) => html`<div class="it">
           <div style="width:46px;text-align:center;flex:none"><div class="lg b" style="line-height:1">${num(isoToJ(e.date).jd)}</div><div class="xs muted">${fmtJ(e.date, 'dm').split(' ')[1]}</div></div>
-          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${e.kind === 'interest' ? 'واریز سود' : e.kind === 'maturity' ? 'سررسید' : 'جریان تکراری'}${e.toId && nm(e.toId) ? '، به ' + nm(e.toId) : ''}</div></div>
+          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${e.kind === 'interest' ? 'واریز سود' : e.kind === 'maturity' ? 'سررسید' : e.kind === 'loan' ? (e.fromId && e.fromId !== e.assetId && nm(e.fromId) ? 'قسط، از ' + nm(e.fromId) : e.toId && e.toId !== e.assetId && nm(e.toId) ? 'دریافت قسط، به ' + nm(e.toId) : 'قسط') : 'جریان تکراری'}${e.kind !== 'loan' && e.toId && nm(e.toId) ? '، به ' + nm(e.toId) : ''}</div></div>
           <span class="small"><${Money} v=${e.amount} s=${s} compact /></span></div>`)}</div>` : html`<div class="empty small">رویدادی برنامه‌ریزی نشده.</div>`}
       </div>
       <div class="card"><div class="card-h"><h3><${Icon} n="clock" cls="sm" />گزارش رویدادها</h3><span class="sub">قابل برگشت</span></div>
         ${events.length ? html`<div class="list">${events.map((e) => html`<div class="it" style=${e.undone ? 'opacity:.45' : ''}>
-          <span class="ava" style="background:var(--surface-3);color:var(--ink-2)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'trade' ? 'swap' : e.kind === 'capture' ? 'scan' : e.kind === 'adjust' || e.kind === 'edit' ? 'edit' : 'repeat'} /></span>
-          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${fmtJ(e.date)}، ${ago(e.at)}${e.undone ? '، برگشت داده شد' : ''}</div></div>
+          <span class="ava" style="background:var(--surface-3);color:var(--ink-2)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'loan' ? 'calendar' : e.kind === 'trade' ? 'swap' : e.kind === 'capture' ? 'scan' : e.kind === 'adjust' || e.kind === 'edit' ? 'edit' : 'repeat'} /></span>
+          <div class="grow"><div class="sb small">${e.title}</div><div class="xs muted">${fmtJ(e.date)}، ${ago(e.at)}${e.undone ? '، برگشت داده شد' : e.reversedBy ? '، برگشت خورد' : ''}</div></div>
           ${e.amount ? html`<span class="small"><${Money} v=${e.amount} s=${s} compact /></span>` : ''}
-          ${!e.undone && !e.noUndo && (e.changes?.length || e.restore) ? html`<button class="btn icon sm ghost" title="برگشت" onClick=${() => act.undoEvent(e)}><${Icon} n="undo" cls="sm" /></button>` : ''}</div>`)}</div>`
+          ${!e.undone && !e.noUndo && !e.reversedBy && (e.changes?.length || e.restore) ? html`<button class="btn icon sm ghost" title="برگشت" onClick=${() => act.undoEvent(e)}><${Icon} n="undo" cls="sm" /></button>` : ''}</div>`)}</div>`
           : html`<div class="empty small">هنوز رویدادی ثبت نشده.</div>`}
       </div>
     </div>

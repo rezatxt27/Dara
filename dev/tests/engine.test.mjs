@@ -706,3 +706,80 @@ test('price-source change made offline: the correction is filled in once the pri
   E.settlePending([a], events, { 'tgju:sekee': { price: 1000, at: Date.now() } });
   assert.equal(events[0].changes[0].value, 2000 - 300); assert.ok(!events[0].changes[0].pending && !a.price.pendingFix);
 });
+
+test('installment loans: bank formula, schedule, value and automatic installments', () => {
+  // 100M at 18% over 12 months → standard annuity 9,167,999.29
+  const L = { amount: 100_000_000, annualPct: 18, months: 12, firstDue: J.addJMonthsIso(iso, 1) };
+  const p = E.loanPlan(L);
+  close(p.A, 9_167_999.29, 0.01); assert.equal(p.n, 12);
+  close(p.rows.at(-1).balance, 0, 1e-6); close(p.rows.reduce((t, x) => t + x.principal, 0), 100_000_000, 1e-3);
+  assert.equal(E.loanPlan({ amount: 12e6, annualPct: 0, months: 12, firstDue: iso }).A, 1e6, 'zero-rate: equal parts');
+  // an old loan: 6 installments already passed (incl. today) → owed = schedule balance, nothing accrued yet today
+  const L2 = { ...L, firstDue: J.addJMonthsIso(iso, -5) };
+  const st = E.loanState(L2, iso);
+  assert.equal(st.paid, 6); close(st.owed, st.rows[5].balance, 1e-6); close(st.value, st.owed, 1e-6);
+  // a debt in this mode lowers net worth; settled ones count zero
+  const debt = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { ...L2, account: 'b', lastRun: E.loanLastDue(L2, iso) } };
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1e9 };
+  const t = Date.now();
+  const pf = E.portfolio([debt, bank], {}, {}, t);
+  close(pf.net, 1e9 - E.loanState(L2, iso, t).value, 1);
+  // installments before tracking aren't replayed; the next one moves money account → loan
+  assert.equal(E.applyAutomations([debt, bank], [], {}, iso).events.length, 0);
+  const due = st.next.date;
+  const { events } = E.applyAutomations([debt, bank], [], {}, due);
+  assert.equal(events.length, 1); assert.equal(events[0].kind, 'loan');
+  assert.equal(bank.balance, 1e9 - Math.round(st.next.payment));
+  assert.equal(events[0].fromId, 'b'); assert.equal(events[0].toId, 'l');
+  close(E.loanState(debt.loan, due).value, st.next.balance, 1e-6);
+  assert.equal(E.applyAutomations([debt, bank], [], {}, due).events.length, 0, 'never paid twice');
+  // upcoming and monthly cash
+  assert.ok(E.upcoming([debt], [], 40, iso).some((e) => e.kind === 'loan'));
+  close(E.monthlyAuto([debt], []).loanPay, st.next.payment, 1e-6);
+});
+
+test('installment loans: the interest is the cost, the installment is a transfer', () => {
+  const now = Date.now();
+  const L = { amount: 120_000_000, annualPct: 24, months: 12, firstDue: J.addJMonthsIso(iso, -2), account: 'b' };
+  const debt = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { ...L, lastRun: E.loanLastDue(L, J.addDaysIso(iso, -40)) } };
+  const bank = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 500_000_000, balanceAt: now };
+  // a snapshot 40 days ago, then the automation pays what fell due since
+  const d0 = J.addDaysIso(iso, -40);
+  const pf0 = E.portfolio([debt, bank], {}, {}, now, { asOf: d0 });
+  const snaps = { [d0]: { ...E.makeSnapshot(pf0, {}), at: now - 40 * 864e5 } };
+  const evs = E.applyAutomations([debt, bank], [], {}, iso).events.map((e) => ({ ...e, at: now - 1000 }));
+  assert.ok(evs.length >= 1);
+  const at = E.attribution([debt, bank], {}, {}, snaps, evs, 40, iso);
+  const r = at.rows.find((x) => x.id === 'l');
+  close(at.external, 0, 1e-6, 'paid from a tracked account: no money in or out');
+  // market effect of the loan = minus the interest that accrued over the period
+  const s0 = E.loanState(debt.loan, d0), s1 = E.loanState(debt.loan, iso, now);
+  const interest = s1.rows.filter((x) => x.date > d0 && x.date <= iso).reduce((t, x) => t + x.interest, 0) + s1.accrued - s0.accrued;
+  close(r.market, -interest, 2);
+});
+
+test('installment loans: extra payment, settlement and undo keep the books straight', () => {
+  const L = { amount: 50_000_000, annualPct: 20, months: 24, firstDue: J.addJMonthsIso(iso, -3) };
+  const a = { id: 'l', name: 'وام', category: 'debt', mode: 'loan', loan: { ...L, lastRun: E.loanLastDue(L, iso) } };
+  const t = Date.now();
+  const v0 = E.loanState(a.loan, iso, t).value; const n0 = E.loanState(a.loan, iso).n - E.loanState(a.loan, iso).paid;
+  const ch = E.applyDelta(a, 10_000_000);
+  close(v0 - E.loanState(a.loan, iso, t).value, 10_000_000, 1, 'owed drops by exactly the payment');
+  const st = E.loanState(a.loan, iso);
+  assert.ok(st.n - st.paid < n0, 'same installment, fewer installments');
+  close(st.A, E.loanPlan(L).A, 1e-6);
+  // undo brings the old terms back but keeps installments already applied
+  a.loan.lastRun = '2999-01-01';
+  E.undoEvent([a], { changes: ch });
+  close(E.loanState(a.loan, iso, t).value, v0, 1e-6); assert.equal(a.loan.lastRun, '2999-01-01');
+  // settle
+  E.applyDelta(a, E.loanState(a.loan, iso, Date.now()).value);
+  assert.equal(E.valueOf(a, {}, {}).value, 0); assert.equal(E.valueOf(a, {}, {}).status, 'settled');
+  assert.equal(E.portfolio([a], {}, {}).attention.length, 0);
+  // a receivable: money received lowers it
+  const rcv = { id: 'r', name: 'طلب', category: 'receivable', mode: 'loan', loan: { ...L } };
+  const r0 = E.loanState(rcv.loan, iso, t).value;
+  E.applyDelta(rcv, -5_000_000);
+  close(r0 - E.loanState(rcv.loan, iso, t).value, 5_000_000, 1);
+  assert.ok(E.valueOf(rcv, {}, {}).signedValue > 0);
+});

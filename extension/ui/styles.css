@@ -319,6 +319,14 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .tbl tr.r.open td { background: var(--surface-2); border-bottom-color: transparent; }
 .tbl tr.xrow td { background: var(--surface-2); padding: 4px 16px 18px; }
 .xpanel { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; }
+.xpanel-wrap { display: flex; flex-direction: column; gap: 14px; }
+.sched { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.sched .tbl th { position: sticky; top: 0; background: var(--surface-2); z-index: 1; }
+.sched .tbl td, .sched .tbl th { padding: 7px 10px; }
+.sched tr.paid td { color: var(--faint); }
+.sched tr.next td { background: var(--accent-soft); font-weight: 600; }
+.progress { height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.progress i { display: block; height: 100%; border-radius: 6px; }
 .xfacts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .xfacts .pcell { background: var(--surface); }
 .chev { transition: transform .2s; color: var(--muted); }

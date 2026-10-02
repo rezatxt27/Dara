@@ -171,8 +171,8 @@ export function toCSV(rows) {
   const lines = [head.map(esc).join(',')];
   for (const r of rows) {
     const a = r.asset;
-    const mode = a.mode === 'units' ? 'تعداد × قیمت' : a.mode === 'rate' ? `نرخ ${a.rate?.annualPct}٪` : 'مانده';
-    const src = a.mode === 'units' && a.price?.source === 'market' ? `${a.price.ref?.provider}:${a.price.ref?.symbol || a.price.ref?.key}` : a.mode === 'rate' ? 'خودکار' : 'دستی';
+    const mode = a.mode === 'units' ? 'تعداد × قیمت' : a.mode === 'rate' ? `نرخ ${a.rate?.annualPct}٪` : a.mode === 'loan' ? `قسطی ${a.loan?.annualPct}٪، ${a.loan?.months} قسط` : 'مانده';
+    const src = a.mode === 'units' && a.price?.source === 'market' ? `${a.price.ref?.provider}:${a.price.ref?.symbol || a.price.ref?.key}` : a.mode === 'rate' || a.mode === 'loan' ? 'خودکار' : 'دستی';
     lines.push([a.code, r.cat?.name, a.name, a.custodian, mode, a.mode === 'units' ? a.quantity : '', a.unit || '', r.unitPrice ? Math.round(r.unitPrice) : '',
       Math.round(r.signedValue), a.costBasis || '', r.pnl !== null && r.pnl !== undefined ? Math.round(r.pnl) : '', src, r.status, a.note || ''].map(esc).join(','));
   }

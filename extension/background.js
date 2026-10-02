@@ -149,7 +149,7 @@ async function notifyAutomations(events, assets, settings) {
   if (!events.length) return;
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   const interest = events.filter((e) => e.kind === 'interest');
-  const flows = events.filter((e) => e.kind === 'flow');
+  const flows = events.filter((e) => e.kind === 'flow' || e.kind === 'loan');
   const priv = settings.privacy;
   if (interest.length && settings.notify.interest) {
     const sum = interest.reduce((s, e) => s + e.amount, 0);

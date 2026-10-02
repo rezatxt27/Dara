@@ -1,5 +1,5 @@
-# A release for every new version: when extension/manifest.json on main carries a version that has no tag yet,
-# run the tests, zip the extension folder and publish release v<version> with the notes from changelog.js.
+# A release for every version: when extension/manifest.json changes on main (or on a manual run from the
+# Actions tab), run the tests and publish a release, with its zip and notes, for each version that has none yet.
 name: Release
 
 on:
@@ -25,25 +25,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      - name: Version
-        id: v
-        run: |
-          V=$(node -p "require('./extension/manifest.json').version")
-          echo "version=$V" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then echo "exists=1" >> "$GITHUB_OUTPUT"; fi
+          node-version: 22
 
       - name: Tests
-        if: steps.v.outputs.exists != '1'
         run: npm test
 
-      - name: Publish
-        if: steps.v.outputs.exists != '1'
+      - name: Publish missing releases
         env:
           GH_TOKEN: ${{ github.token }}
-          V: ${{ steps.v.outputs.version }}
-        run: |
-          node dev/release/notes.mjs "$V" > notes.md
-          (cd extension && zip -qr "../dara-extension-v$V.zip" . -x '.*')
-          gh release create "v$V" "dara-extension-v$V.zip" --title "دارا v$V" --notes-file notes.md --target "$GITHUB_SHA" --latest
+        run: bash dev/release/publish.sh

@@ -1,4 +1,4 @@
-import { html, useState, useEffect, Icon, Money, Delta, Sparkline, Modal, Seg, MoneyField, NumField, send, toast, refLabel, providerName, num, fmtJ } from '../components.js';
+import { html, useOnce, useState, useEffect, Icon, Money, Delta, Sparkline, Modal, Seg, MoneyField, NumField, send, toast, refLabel, providerName, num, fmtJ } from '../components.js';
 import { TGJU, NOBITEX, NOBITEX_BY_KEY, PROVIDERS, CRYPTO_DEFAULT } from '../../lib/catalog.js';
 import { TickerSearch, CryptoPicker } from '../pickers.js';
 import * as E from '../../lib/engine.js';
@@ -23,12 +23,13 @@ function useHistories(refs) {
 }
 
 function AlertModal({ s, init, onClose }) {
+  const [saving, once] = useOnce();
   const [ref, setRef] = useState(init.ref);
   const [op, setOp] = useState(init.op || 'gt');
   const [value, setValue] = useState(init.value || init.price || null);
   const usd = ref.provider === 'tgju' && TGJU.find((t) => t.key === ref.key)?.usd;
   const save = async () => { if (!(value > 0)) return; await act.saveAlert({ ...init, ref, op, value, active: true, firedAt: null }); toast('هشدار ثبت شد'); onClose(); };
-  return html`<${Modal} title=${`هشدار قیمت — ${refLabel(ref)}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ثبت هشدار</button>`}>
+  return html`<${Modal} title=${`هشدار قیمت — ${refLabel(ref)}`} onClose=${onClose} footer=${html`<button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" disabled=${saving} onClick=${() => once(save)}>ثبت هشدار</button>`}>
     ${init.price && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>قیمت فعلی: <b>${usd ? '$' + num(init.price, 2) : html`<${Money} v=${init.price} s=${s} />`}</b></div></div>`}
     <${Seg} value=${op} onChange=${setOp} options=${[['gt', 'وقتی بالاتر رفت از'], ['lt', 'وقتی پایین‌تر آمد از']]} />
     ${usd ? html`<${NumField} label="قیمت (دلار)" value=${value} onInput=${setValue} digits=${2} />` : html`<${MoneyField} label="قیمت" rial=${value} onRial=${setValue} s=${s} autoFocus />`}

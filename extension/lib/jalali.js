@@ -110,6 +110,7 @@ export function parseJ(text) {
   const m = t.match(/^\s*(\d{4})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*$/);
   if (!m) return null;
   const jy = +m[1], jm = +m[2], jd = +m[3];
+  if (jy < 1300 || jy > 1500) return null; // a typo like «۳۵۰۰» or «۰۰۰۱» is not a date anyone means
   if (jm < 1 || jm > 12 || jd < 1 || jd > monthLength(jy, jm)) return null;
   return jToIso(jy, jm, jd);
 }

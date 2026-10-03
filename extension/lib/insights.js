@@ -80,9 +80,7 @@ export function explainAsset(a, quotes = {}, settings = {}, now = Date.now()) {
     if (r.start) lines.push({ t: 'شروع', v: r.start, k: 'date' });
     if (r.maturity) lines.push({ t: 'سررسید', v: r.maturity, k: 'date' });
     if (r.mode === 'payout' || !r.mode) {
-      let since = r.lastPayout && r.lastPayout <= end ? r.lastPayout : r.start;
-      const prev = r.start ? E.prevMonthlyOnOrBefore(r.start, end) : since;
-      if (prev > since) since = prev;
+      const since = r.start ? E.payoutSince(r, end) : null;
       if (since) lines.push({ t: 'سود از آخرین واریز ماهانه', v: since, k: 'date', sub: `${Math.max(0, daysBetween(since, end))} روز` });
       formula = 'ارزش = اصل + سود روزهای بعد از آخرین واریز ماهانه (اصل × نرخ × روزها ÷ مبنا)';
     } else {

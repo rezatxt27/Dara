@@ -88,7 +88,7 @@ export function CapturePage({ st, s }) {
         const isMoney = n.moneyUnit || /ریال|تومان/.test(n.unit || '') || n.manual;
         const k = (n.moneyUnit || (/تومان/.test(n.unit || '') ? 'toman' : 'rial')) === 'toman' ? 10 : 1;
         if (!('field' in patch)) n.field = a.mode === 'units' ? 'quantity' : a.mode === 'rate' ? 'rate.principal' : a.mode === 'loan' ? 'loan.balance' : 'balance';
-        n.current = n.field === 'quantity' ? +a.quantity || 0 : n.field === 'balance' ? +a.balance || 0 : n.field === 'rate.principal' ? +a.rate?.principal || 0 : n.field === 'loan.balance' ? E.loanState(a.loan).value : +a.price?.value || 0;
+        n.current = n.field === 'quantity' ? +a.quantity || 0 : n.field === 'balance' ? +a.balance || 0 : n.field === 'rate.principal' ? (a.rate?.mode === 'payout' ? +a.rate?.principal || 0 : E.valueOf(a, st.quotes, {}).value) : n.field === 'loan.balance' ? E.loanState(a.loan).value : +a.price?.value || 0;
         n.value = n.field === 'quantity' ? n.amount : n.amount * (n.manual ? (s.currency === 'rial' ? 1 : 10) : k);
         n.on = true; n.create = false;
       }
@@ -112,9 +112,10 @@ export function CapturePage({ st, s }) {
   };
 
   if (page === undefined) return html`<div class="page"><div class="card muted">در حال خواندن…</div></div>`;
-  if (!page) return html`<div class="page" style="max-width:820px"><div class="card"><div class="empty"><div class="ico"><${Icon} n="scan" /></div>
+  if (!page) return html`<div class="page" style="max-width:820px;margin-inline:auto"><div class="card"><div class="empty"><div class="ico"><${Icon} n="scan" /></div>
     <div class="sb" style="margin-bottom:6px">صفحه‌ای برای ثبت انتخاب نشده</div>
-    <div class="small">در سایت بانک، کارگزاری، طلای آنلاین یا صرافی روی آیکون دارا بزن و «ثبت از این صفحه» را انتخاب کن، یا روی صفحه راست‌کلیک کن و «ثبت موجودی از این صفحه در دارا» را بزن.</div></div></div></div>`;
+    <div class="small">در سایت بانک، کارگزاری، طلای آنلاین یا صرافی روی آیکون دارا بزن و «ثبت از این صفحه» را انتخاب کن، یا روی صفحه راست‌کلیک کن و «ثبت موجودی از این صفحه در دارا» را بزن.</div>
+    <div class="row" style="justify-content:center;margin-top:12px"><a class="btn" href="#/assets"><${Icon} n="assets" cls="sm" />برگشت به دارایی‌ها</a></div></div></div></div>`;
 
   const changedCount = rows.filter((r) => r.on).length;
   return html`<div class="page" style="max-width:980px">

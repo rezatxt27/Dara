@@ -86,9 +86,18 @@ export function rateValue(r, nowIso = todayIso(), nowMs = null) {
 }
 /** Start of the current payout period (last payout, or the last monthly anniversary on/before `end`). */
 export function payoutSince(r, end) {
-  let since = r.lastPayout && r.lastPayout <= end ? r.lastPayout : r.start;
+  // the interest stays in the deposit until it's actually paid out (so its value doesn't dip on payout day before the
+  // payout lands in the account); older records without a payout date follow the schedule
+  if (r.lastPayout && r.lastPayout <= end) return r.lastPayout > r.start ? r.lastPayout : r.start;
   const prev = prevMonthlyOnOrBefore(r.start, end);
-  return prev > since ? prev : since;
+  return prev > r.start ? prev : r.start;
+}
+/** The next payout of a monthly-payout deposit: the next monthly date, or the maturity day for the last short period. */
+export function nextPayoutOf(r) {
+  const last = r.lastPayout || r.start;
+  const n = nextMonthlyAfter(r.start, last);
+  if (r.maturity && n > r.maturity) return last < r.maturity ? r.maturity : null;
+  return n;
 }
 
 export function rateDaily(r, value, iso = todayIso()) {
@@ -127,11 +136,12 @@ export function isPayDay(iso, payDay) {
 export function balanceInterestLive(a, nowIso = todayIso(), nowMs = null) {
   const it = a.interest;
   if (!it?.on || !(+it.annualPct)) return { accrued: 0, daily: 0 };
-  const daily = (+a.balance || 0) * (+it.annualPct / 100) / yearDays(nowIso, it.basis || 365);
+  const bal = Math.max(0, +a.balance || 0); // an overdrawn account earns nothing (and owes no «negative interest»)
+  const daily = bal * (+it.annualPct / 100) / yearDays(nowIso, it.basis || 365);
   const pending = +it.accrued || 0;
   // days not yet processed by the automation (e.g. the extension was closed)
   const from = it.lastAccrual ? addDaysIso(it.lastAccrual, 1) : (it.since || nowIso);
-  const missed = from < nowIso ? (+a.balance || 0) * (+it.annualPct / 100) * dayFactor(from, nowIso, it.basis || 365) : 0;
+  const missed = from < nowIso ? bal * (+it.annualPct / 100) * dayFactor(from, nowIso, it.basis || 365) : 0;
   // today's live part: from midnight, or from the moment interest was switched on if that was today
   const startFrac = !it.lastAccrual && it.since === nowIso && it.sinceMs ? fracOfDay(it.sinceMs) : 0;
   return { accrued: pending + missed + (nowMs ? daily * Math.max(0, fracOfDay(nowMs) - startFrac) : 0), daily };
@@ -541,7 +551,7 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
   let first = today;
   // deposits with a monthly payout (the next payout depends on the last one, so they are scheduled lazily)
   const payers = assets.filter((a) => !a.archived && a.mode === 'rate' && a.rate?.mode === 'payout' && a.rate.start && +a.rate.annualPct);
-  const nextPayout = (r) => { const n = nextMonthlyAfter(r.start, r.lastPayout || r.start); return r.maturity && n > r.maturity ? null : n; };
+  const nextPayout = nextPayoutOf;
   for (const a of payers) { const n = nextPayout(a.rate); if (n && n < first) first = n; }
   // installment loans
   for (const a of assets) {
@@ -642,7 +652,7 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
     if (d < today) for (const a of banks) {
       const it = a.interest;
       if (d < bankFrom(it)) continue;
-      it.accrued = (+it.accrued || 0) + (+a.balance || 0) * (+it.annualPct / 100) / yearDays(d, it.basis || 365);
+      it.accrued = (+it.accrued || 0) + Math.max(0, +a.balance || 0) * (+it.annualPct / 100) / yearDays(d, it.basis || 365);
       it.lastAccrual = d;
     }
   }
@@ -658,12 +668,11 @@ export function upcoming(assets, flows, days = 30, today = todayIso()) {
     if (a.mode === 'rate' && a.rate?.start && +a.rate.annualPct) {
       const r = a.rate;
       if (r.mode === 'payout') {
-        let last = prevMonthlyOnOrBefore(r.start, today); let g = 0;
-        if (r.lastPayout && r.lastPayout > last) last = r.lastPayout;
+        let last = r.lastPayout || prevMonthlyOnOrBefore(r.start, today); let g = 0;
         const liab = isLiability(a);
         while (g++ < 6) {
-          const next = nextMonthlyAfter(r.start, last);
-          if (next > until || (r.maturity && next > r.maturity)) break;
+          const next = nextPayoutOf({ ...r, lastPayout: last });
+          if (!next || next > until) break;
           const off = r.offset && r.offsetFrom === last ? +r.offset : 0; // money added mid-period earns from its own day
           list.push({ date: next, kind: 'interest', title: `${liab ? 'سود اضافه‌شده به' : 'سود'} «${a.name}»`, amount: Math.round(r.principal * r.annualPct / 100 * dayFactor(last, next, r.basis || 365) + off), assetId: a.id,
             toId: !liab && r.payoutTo && r.payoutTo !== 'self' ? r.payoutTo : a.id });
@@ -705,12 +714,15 @@ export function upcoming(assets, flows, days = 30, today = todayIso()) {
 }
 
 /**
- * A typical month, automatically: interest earned (deposits, day-count accounts, the interest part of installments
- * you receive), money in and out (recurring flows; a flow that pays a debt counts as money out), installments paid or
- * received, and interest owed on debts. net = what the month adds to (or takes from) your cash and wealth.
+ * A typical month, automatically. Two different answers, kept apart:
+ *  - cash: what reaches (+) or leaves (−) your accounts — installments in full, interest paid into an account, recurring
+ *    income and expenses, paying a debt from an account;
+ *  - net (wealth): how much richer the month makes you — all interest earned (even interest that stays in a deposit),
+ *    minus interest you pay, plus income minus expenses. Repaying principal or moving money between your own
+ *    accounts changes cash but not wealth.
  */
 export function monthlyAuto(assets, flows, today = todayIso()) {
-  let interest = 0, inflow = 0, outflow = 0, loanPay = 0, loanGet = 0, loanInterest = 0, debtInterest = 0, recvInterest = 0;
+  let interest = 0, cashInterest = 0, inflow = 0, outflow = 0, debtPay = 0, loanPay = 0, loanGet = 0, loanInterest = 0, debtInterest = 0, recvInterest = 0;
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
   for (const a of assets) {
     if (a.archived || a.mode !== 'loan') continue;
@@ -723,9 +735,10 @@ export function monthlyAuto(assets, flows, today = todayIso()) {
     if (a.archived || a.mode === 'loan') continue;
     if (a.mode === 'rate' && !(a.rate?.maturity && a.rate.maturity < today)) {
       const m = rateMonthly(a.rate, rateValue(a.rate, today));
-      if (isLiability(a)) debtInterest += m; else interest += m;
+      if (isLiability(a)) debtInterest += m;
+      else { interest += m; if (a.rate.mode === 'payout' && a.rate.payoutTo && a.rate.payoutTo !== 'self' && byId[a.rate.payoutTo] && !byId[a.rate.payoutTo].archived) cashInterest += m; }
     }
-    if (a.mode === 'balance' && a.interest?.on && !isLiability(a)) interest += (+a.balance || 0) * (+a.interest.annualPct || 0) / 100 / 12;
+    if (a.mode === 'balance' && a.interest?.on && !isLiability(a)) { const m = (+a.balance || 0) * (+a.interest.annualPct || 0) / 100 / 12; interest += m; cashInterest += m; }
   }
   const liabId = (id) => !!(id && byId[id] && isLiability(byId[id]));
   for (const f of flows) {
@@ -733,12 +746,11 @@ export function monthlyAuto(assets, flows, today = todayIso()) {
     const m = flowMonthly(f);
     if (f.toId && !f.fromId) inflow += m;
     else if (f.fromId && !f.toId) outflow += m;
-    else if (f.fromId && liabId(f.toId)) outflow += m; // paying a debt from an account
+    else if (f.fromId && liabId(f.toId)) debtPay += m; // paying a debt from an account: cash out, wealth unchanged
   }
-  // installments leave (or reach) the accounts every month; their interest part is the real cost (or income)
-  return { interest, inflow, outflow, loanPay, loanGet, loanInterest, debtInterest,
-    // (interest received on installments is inside loanGet already)
-    net: interest - recvInterest + inflow - outflow - loanPay + loanGet - debtInterest };
+  const cash = cashInterest + inflow - outflow - debtPay - loanPay + loanGet;
+  const net = interest - loanInterest - debtInterest + inflow - outflow;
+  return { interest, cashInterest, inflow, outflow: outflow + debtPay, debtPay, loanPay, loanGet, loanInterest, debtInterest, recvInterest, cash, net };
 }
 
 /* ============================ snapshots & series ============================ */
@@ -844,7 +856,11 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
   pf = pf || portfolio(assets, quotes, settings);
   const nowById = Object.fromEntries(pf.rows.map((r) => [r.asset.id, r]));
   const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
-  const { flow, edit, external, byAsset } = eventEffects(events, s, byId, nowById);
+  // edits recorded on an asset that was deleted later still need its kind (a debt's balance counts negative):
+  // the deletion keeps the record
+  const evById = { ...byId };
+  for (const e of events || []) if (e.restore?.id && !evById[e.restore.id]) evById[e.restore.id] = e.restore;
+  const { flow, edit, external, byAsset } = eventEffects(events, s, evById, nowById);
   const keys = Object.keys(snaps).sort().filter((k) => k > s.date);
   const sum = (list) => list.reduce((x, m) => x + m.amount, 0);
   const ids = new Set([...Object.keys(s.snap.v || {}), ...pf.rows.map((r) => r.asset.id), ...Object.keys(byAsset)]);
@@ -888,21 +904,29 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
     }
     rows.push({ id, asset: a, then, now, delta, flow: fl, edit: ed, market: delta - fl - ed, moves });
   }
+  // assets with no market price (deposits, loans, accounts with day-count interest) don't move with the market: what
+  // they gained or cost beyond the money moved is interest. `market` stays «return» (price + interest); `price` is the market part.
+  for (const r of rows) {
+    const a = r.asset;
+    const earns = a && (a.mode === 'rate' || a.mode === 'loan' || (a.mode === 'balance' && a.interest?.on));
+    r.interest = earns ? r.market : 0; r.price = r.market - r.interest;
+  }
   const total = pf.net - s.snap.t;
   const editsTotal = rows.reduce((x, r) => x + r.edit, 0);
   const marketTotal = rows.reduce((x, r) => x + r.market, 0);
+  const interestTotal = rows.reduce((x, r) => x + r.interest, 0);
   // Category roll-up of market effect
   const catMap = {};
   for (const r of rows) {
     const cat = CAT[r.asset?.category] || CAT.other;
     const k = r.asset ? (exposureOf(r.asset) === 'gold' && cat.id === 'stock' ? 'gold_etf' : cat.id) : 'other';
-    const c = catMap[k] ||= { id: k, name: k === 'gold_etf' ? 'صندوق‌های طلا' : cat.short, color: k === 'gold_etf' ? '#E0A800' : cat.color, market: 0, flow: 0, edit: 0, delta: 0 };
-    c.market += r.market; c.flow += r.flow; c.edit += r.edit; c.delta += r.delta;
+    const c = catMap[k] ||= { id: k, name: k === 'gold_etf' ? 'صندوق‌های طلا' : cat.short, color: k === 'gold_etf' ? '#E0A800' : cat.color, market: 0, price: 0, interest: 0, flow: 0, edit: 0, delta: 0 };
+    c.market += r.market; c.price += r.price; c.interest += r.interest; c.flow += r.flow; c.edit += r.edit; c.delta += r.delta;
   }
   const cats = Object.values(catMap).filter((c) => Math.abs(c.market) >= 1 || Math.abs(c.flow) >= 1 || Math.abs(c.edit) >= 1)
     .sort((a, b) => Math.abs(b.market) - Math.abs(a.market));
   return { from: s.date, est: !!s.snap.est, base: s.snap.t, now: pf.net, total, pct: s.snap.t ? total / Math.abs(s.snap.t) : 0,
-    market: marketTotal, external, edits: editsTotal, internal: rows.reduce((x, r) => x + r.flow, 0) - external, rows: rows.sort((a, b) => Math.abs(b.market) - Math.abs(a.market)), cats, added, byAsset, snap: s.snap };
+    market: marketTotal, interest: interestTotal, price: marketTotal - interestTotal, external, edits: editsTotal, internal: rows.reduce((x, r) => x + r.flow, 0) - external, rows: rows.sort((a, b) => Math.abs(b.market) - Math.abs(a.market)), cats, added, byAsset, snap: s.snap };
 }
 
 /* ============================ scenario simulator ============================ */

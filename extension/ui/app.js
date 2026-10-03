@@ -67,7 +67,7 @@ function Hero({ st, pf, s }) {
         <${Seg} value=${denom} onChange=${(v) => act.setSettings({ denom: v })} options=${[['money', s.currency === 'rial' ? 'ریال' : 'تومان'], ['usd', 'دلار'], ['gold', 'طلا'], ['coin', 'سکه']]} /></div>
       <div class="big num"><${DenomText} v=${net} denom=${denom} s=${s} /></div>
       ${denom === 'money' && s.compact && html`<div class="full num"><${Money} v=${pf.net} s=${s} /></div>`}
-      <div class="chg">${periods.map(([t, d], i) => html`<div class="box"><span class="row" style="gap:2px">${t}<${Explain} light s=${s} title=${`تغییر ${t} از کجا آمد؟`} get=${() => I.explainChange(st, [1, 7, 30][i], pf)} /></span><b title="اثر قیمت بازار؛ پولی که اضافه یا جابه‌جا کردی جدا حساب شده"><${Delta} p=${d?.pct} showAbs=${false} /></b>
+      <div class="chg">${periods.map(([t, d], i) => html`<div class="box"><span class="row" style="gap:2px">${t}<${Explain} light s=${s} title=${`تغییر ${t} از کجا آمد؟`} get=${() => I.explainChange(st, [1, 7, 30][i], pf)} /></span><b title="تغییر قیمت‌ها و سودها؛ پولی که اضافه، برداشت یا جابه‌جا کردی جدا حساب شده"><${Delta} p=${d?.pct} showAbs=${false} /></b>
         <span class="xs" style="opacity:.75">${d && isFinite(d.abs) ? html`<${Money} v=${d.abs} s=${s} compact sign unit=${false} />` : '—'}</span>
         ${d && Math.abs(d.moved) >= 10 && html`<span class="xs" style="opacity:.6" title="تغییر کل ارزش خالص، با پول جدید و جابه‌جایی‌ها">کل <${Money} v=${d.total} s=${s} compact sign unit=${false} /></span>`}</div>`)}</div>
       <div class="equiv" style="margin-top:auto;padding-top:14px">
@@ -89,24 +89,32 @@ function Hero({ st, pf, s }) {
 function WhyChanged({ st, pf, s, open }) {
   const [days, setDays] = useState(1);
   const at = useMemo(() => E.attribution(st.assets, st.quotes, s, st.snapshots, st.events, days, todayIso(), pf), [st.assets, st.quotes, st.snapshots, st.events, pf, days]);
-  const label = { 1: 'از دیروز', 7: 'در ۷ روز گذشته', 30: 'در ۳۰ روز گذشته' }[days];
+  const label = { 1: 'از دیروز تا حالا', 7: 'در ۷ روز گذشته', 30: 'در ۳۰ روز گذشته' }[days];
   const askQ = { 1: 'چرا ارزش دارایی‌هایم امروز تغییر کرد؟ اثر قیمت بازار را از واریز و برداشت جدا کن.', 7: 'ارزش دارایی‌هایم در ۷ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.', 30: 'ارزش دارایی‌هایم در ۳۰ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="sparkles" cls="sm" />چرا تغییر کرد؟</h3><div class="row" style="gap:8px"><${AskBtn} q=${askQ} label="توضیح بده" /><${Seg} value=${days} onChange=${setDays} options=${[[1, 'امروز'], [7, '۷ روز'], [30, '۳۰ روز']]} /></div></div>`;
   if (!at) return html`<div class="card">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این دوره هنوز عکس‌فوری ذخیره نشده.</div><${BackfillButton} st=${st} /></div></div>`;
-  const up = at.total >= 0;
-  const drivers = at.cats.filter((c) => Math.abs(c.market) >= 1);
+  // lead with the same number as the «امروز» chip: what prices and interest did (money moved or recorded is told apart)
+  // (when the last saved day is older than the period — the browser was closed — say from when, honestly)
+  const lead = at.from < E.addDaysIso(todayIso(), -days) ? `از ${fmtJ(at.from, 'dm')} تا حالا` : label;
+  const ret = at.market; const up = ret >= 0; const base = Math.abs(at.base) || 0;
+  const moved = at.total - at.market;
+  const drivers = at.cats.filter((c) => Math.abs(c.price) >= 1).sort((a, b) => Math.abs(b.price) - Math.abs(a.price));
   const top = drivers[0];
-  const bars = [...drivers.slice(0, 6).map((c) => ({ name: c.name, v: c.market, color: c.color })), ...(Math.abs(at.external) >= 1 ? [{ name: 'واریز و برداشت', v: at.external, color: 'var(--accent)' }] : []), ...(Math.abs(at.edits) >= 1 ? [{ name: 'ثبت و ویرایش دستی', v: at.edits, color: 'var(--faint)' }] : [])];
+  const bars = [...drivers.slice(0, 6).map((c) => ({ name: c.name, v: c.price, color: c.color })),
+    ...(Math.abs(at.interest) >= 1 ? [{ name: 'سود (سپرده، حساب، وام)', v: at.interest }] : []),
+    ...(Math.abs(at.external) >= 1 ? [{ name: 'واریز و برداشت', v: at.external }] : []),
+    ...(Math.abs(at.edits) >= 1 ? [{ name: 'ثبت و ویرایش دستی', v: at.edits }] : [])];
   const max = Math.max(1, ...bars.map((b) => Math.abs(b.v)));
-  const flowDominant = Math.abs(at.external + at.edits) > Math.abs(at.market);
   return html`<div class="card">${head}
     <div class="why">
       <div>
-        <div class="lead">ارزش خالص ${label} <b class=${up ? 'pos' : 'neg'}><span class="ltr">${pct(at.pct)}</span></b> (<${Money} v=${at.total} s=${s} compact sign />) ${up ? 'بالا رفت' : 'پایین آمد'}.
-          ${flowDominant ? ' بیشترِ آن از پولی بود که جابه‌جا یا ثبت شد، نه تغییر قیمت.' : top ? html` بیشترین اثر را <b>${top.name}</b> داشت (<${Money} v=${top.market} s=${s} compact sign />).` : ''}
+        <div class="lead">${lead} قیمت‌ها و سودها دارایی‌ات را <b class=${up ? 'pos' : 'neg'}><span class="ltr">${pct(base ? ret / base : 0)}</span></b> (<${Money} v=${ret} s=${s} compact sign />) ${up ? 'بیشتر' : 'کمتر'} کردند.
+          ${top ? html` بیشترین اثر قیمت را <b>${top.name}</b> داشت (<${Money} v=${top.price} s=${s} compact sign />).` : ''}
+          ${Math.abs(moved) >= 10 ? html`<div class="small muted" style="margin-top:4px">جدا از آن، <${Money} v=${moved} s=${s} compact sign /> پول جابه‌جا یا ثبت شد؛ پس کل ارزش خالص <${Money} v=${at.total} s=${s} compact sign /> عوض شد.</div>` : ''}
           ${at.est ? html`<div class="xs muted">مبنای مقایسه بازسازی‌شده است.</div>` : ''}</div>
         <div class="split">
-          <div class="pcell"><span class="n">اثر قیمت بازار</span><span class=${'v ' + (at.market >= 0 ? 'pos' : 'neg')}><${Money} v=${at.market} s=${s} compact sign /></span></div>
+          <div class="pcell"><span class="n">تغییر قیمت</span><span class=${'v ' + (at.price >= 0 ? 'pos' : 'neg')}><${Money} v=${at.price} s=${s} compact sign /></span></div>
+          <div class="pcell"><span class="n">سود</span><span class=${'v ' + (at.interest >= 0 ? 'pos' : 'neg')}><${Money} v=${at.interest} s=${s} compact sign /></span></div>
           <div class="pcell"><span class="n">واریز و برداشت</span><span class="v"><${Money} v=${at.external} s=${s} compact sign /></span></div>
           ${Math.abs(at.edits) >= 1 && html`<div class="pcell"><span class="n">ثبت و ویرایش دستی</span><span class="v"><${Money} v=${at.edits} s=${s} compact sign /></span></div>`}
         </div>
@@ -128,10 +136,10 @@ function Kpis({ st, pf, s }) {
   let autoVal = 0;
   for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'matured' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
   return html`<div class="kpis">
-    <div class="kpi"><span class="t"><${Icon} n="shield" cls="sm" />دارایی ضدتورمی</span>
+    <div class="kpi"><span class="t"><${Icon} n="shield" cls="sm" />محافظت‌شده در برابر تورم</span>
       <span class="v num">${pf.gross > 0 ? pct(hard / g, { sign: false }) : '—'}</span><${StackBar} items=${exItems} height=${6} />
       <span class="s">طلا ${pct((ex.gold || 0) / g, { sign: false })}، ارز ${pct(((ex.fx || 0) + (ex.crypto || 0)) / g, { sign: false })}، سهام ${pct((ex.equity || 0) / g, { sign: false })}</span></div>
-    <div class="kpi"><span class="t"><${Icon} n="droplet" cls="sm" />نقدشوندگی بالا</span>
+    <div class="kpi"><span class="t"><${Icon} n="droplet" cls="sm" />زود نقد می‌شود</span>
       <span class="v num">${pf.gross > 0 ? pct(liq.high / g, { sign: false }) : '—'}</span>
       <${StackBar} items=${[{ name: 'بالا', value: liq.high, color: '#14BCDB' }, { name: 'متوسط', value: liq.mid, color: '#8E70FF' }, { name: 'پایین', value: liq.low, color: '#D946A8' }]} height=${6} />
       <span class="s">قابل نقد در چند روز: <${Money} v=${liq.high} s=${s} compact /></span></div>
@@ -156,7 +164,7 @@ function Allocation({ pf, s }) {
       <div class="exp-strip">${exps.map(([k, v]) => html`<i title=${EXPOSURES[k]?.name} style=${`flex:${v};background:${EXPOSURES[k]?.color}`}></i>`)}</div>
       <div class="exp-legend">${exps.map(([k, v]) => html`<span><i style=${'background:' + EXPOSURES[k]?.color}></i>${EXPOSURES[k]?.name} <b class="num">${pct(v / g, { sign: false, digits: 0 })}</b></span>`)}</div>
       <div class="alloc2">${cats.map((c) => html`<a class="ar" href=${'#/assets?cat=' + c.id}>
-        <span class="an"><i style=${'background:' + c.color}></i><span class="ellipsis">${c.name}</span></span>
+        <span class="an"><i style=${'background:' + c.color}></i><span class="ellipsis">${c.short || c.name}</span></span>
         <span class="at"><b style=${`width:${c.value / max * 100}%;background:${c.color}`}></b></span>
         <span class="av num"><${Money} v=${c.value} s=${s} compact unit=${false} /></span>
         <span class="ap num">${pct(c.share, { sign: false })}</span></a>`)}</div>`
@@ -184,8 +192,8 @@ function WeeklyCard({ st }) {
   return html`<div class="card">
     <div class="card-h"><h3><${Icon} n="file" cls="sm" />گزارش هفتگی</h3>${r ? html`<span class="sub">${fmtJ(isoFromDate(new Date(r.createdAt)))}، ${r.by === 'ai' ? 'هوش مصنوعی' : 'خودکار'}</span>` : ''}</div>
     ${r ? html`<div class="report" style="max-height:230px;overflow:hidden;mask-image:linear-gradient(to bottom,#000 75%,transparent)"><${Markdown} text=${r.text} /></div>
-      <div class="row" style="margin-top:8px"><a class="btn sm" href="#/assistant?tab=reports">خواندن کامل</a><button class="btn sm ghost" onClick=${make} disabled=${busy}><${Icon} n="refresh" cls=${'sm' + (busy ? ' spin' : '')} />ساخت دوباره</button></div>`
-      : html`<div class="empty small" style="padding:16px">هر جمعه عصر یک گزارش کوتاه از تغییرات هفته ساخته می‌شود.<div style="margin-top:10px"><button class="btn sm primary" onClick=${make} disabled=${busy}>${busy ? 'در حال ساخت…' : 'ساخت گزارش این هفته'}</button></div></div>`}
+      <div class="row" style="margin-top:8px"><a class="btn sm" href="#/assistant?tab=reports">خواندن کامل</a><button class="btn sm ghost" onClick=${make} disabled=${busy}><${Icon} n="refresh" cls=${'sm' + (busy ? ' spin' : '')} />ساخت گزارش</button></div>`
+      : html`<div class="empty small" style="padding:16px">هر جمعه عصر یک گزارش کوتاه از تغییرات هفته ساخته می‌شود.<div style="margin-top:10px"><button class="btn sm primary" onClick=${make} disabled=${busy}>${busy ? 'در حال ساخت…' : 'ساخت گزارش'}</button></div></div>`}
   </div>`;
 }
 
@@ -199,7 +207,7 @@ function Upcoming({ st, pf, s, open }) {
       ${att.map((r) => html`<div class="it" style="cursor:pointer" onClick=${() => open(r.asset)}>
         <${Ava} cat=${r.asset.category} size=${32} />
         <div class="grow"><div class="sb ellipsis">${r.asset.name}</div><div class="xs muted">${r.status === 'stale' ? `آخرین به‌روزرسانی ${ago(r.at)}` : r.error || 'قیمت آنلاین قدیمی است'}</div></div>
-        <${StatusPill} status=${r.status} /></div>`)}
+        <${StatusPill} status=${r.status} at=${r.at} /></div>`)}
       ${up.map((e) => html`<div class="it">
         <span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'maturity' ? 'clock' : e.kind === 'loan' ? 'calendar' : 'repeat'} /></span>
         <div class="grow"><div class="sb ellipsis">${e.title}</div><div class="xs muted">${fmtJ(e.date)}${e.toId && byId[e.toId] && e.toId !== e.assetId ? '، به ' + byId[e.toId].name : ''}${e.estimate ? '، تخمینی' : ''}</div></div>
@@ -243,6 +251,7 @@ function UpdateBanner() {
     chrome.runtime.onMessage.addListener(onMsg);
     const onVis = async () => { if (document.visibilityState === 'visible') setV(await U.pendingVersion()); };
     document.addEventListener('visibilitychange', onVis);
+    onVis(); // loaded with another Dara tab open: the update waits for a click here instead of closing that tab
     (async () => {
       const { updateState: u } = await chrome.storage.local.get('updateState');
       if (u?.done && !u.shown && u.from && u.from !== u.to && u.to === chrome.runtime.getManifest().version && Date.now() - u.at < 3 * 60000) {
@@ -253,7 +262,7 @@ function UpdateBanner() {
     return () => { chrome.runtime.onMessage.removeListener(onMsg); document.removeEventListener('visibilitychange', onVis); };
   }, []);
   if (!v) return null;
-  return html`<div class="update-bar"><${Icon} n="sparkles" cls="sm" /><span class="grow">نسخه تازه دارا (${verFa(v)}) آماده است. با تازه‌سازی صفحه اعمال می‌شود و داده‌ها دست نمی‌خورد.</span>
+  return html`<div class="update-bar"><${Icon} n="sparkles" cls="sm" /><span class="grow">نسخه تازه دارا (${verFa(v)}) آماده است. اگر چیزی در حال نوشتنش نیستی، «به‌روزرسانی» را بزن؛ صفحه‌های باز دارا دوباره باز می‌شوند و داده‌ها دست نمی‌خورد.</span>
     <button class="btn sm primary" onClick=${() => U.applyUpdate(location.href)}>به‌روزرسانی</button></div>`;
 }
 
@@ -269,6 +278,8 @@ function App() {
     addEventListener('hashchange', h);
     const k = (e) => {
       if (e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
+      // a form or dialog is already open: its keys belong to it (never swap the asset being edited for a blank one)
+      if (document.querySelector('.drawer, .modal, .scrim')) return;
       if (e.key === 'n' || e.key === 'د') { e.preventDefault(); setEditing({}); }
       if (e.key === '/') { e.preventDefault(); document.querySelector('.search input')?.focus(); }
     };
@@ -295,7 +306,7 @@ function App() {
       <nav class="nav">${ROUTES.map((r) => html`<a href=${'#/' + r.id} class=${page === r.id ? 'on' : ''} title=${r.t} aria-label=${r.t} aria-current=${page === r.id ? 'page' : undefined}><${Icon} n=${r.icon} />${r.t}${r.id === 'assets' && attention ? html`<span class="count num">${num(attention)}</span>` : ''}</a>`)}</nav>
       <div class="foot">
         <div class="row between"><span class="muted">ارزش خالص</span><span class="b"><${Money} v=${pf.net} s=${s} compact /></span></div>
-        <div class="row between xs" style="margin-top:4px"><span class="muted">امروز (بازار)</span><${Delta} p=${todayMove?.pct} showAbs=${false} /></div>
+        <div class="row between xs" style="margin-top:4px"><span class="muted" title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">امروز</span><${Delta} p=${todayMove?.pct} showAbs=${false} /></div>
       </div>
     </aside>
     <main class="main">
@@ -320,7 +331,7 @@ function App() {
       ${page === 'welcome' && html`<${WelcomePage} ...${ctx} />`}
       ${page === 'capture' && html`<${CapturePage} ...${ctx} />`}
     </main>
-    ${editing && html`<${AssetEditor} st=${st} s=${s} asset=${editing.asset} preset=${editing.preset} onClose=${() => setEditing(null)} />`}
+    ${editing && html`<${AssetEditor} key=${editing.asset?.id || "new"} st=${st} s=${s} asset=${editing.asset} preset=${editing.preset} onClose=${() => setEditing(null)} />`}
     <${Toasts} />
   </div>`;
 }

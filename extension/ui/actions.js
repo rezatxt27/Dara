@@ -26,6 +26,14 @@ const catchUp = () => send('automate').catch(() => null);
 function relink(st, ev) {
   const last = ev.date && ev.date < todayIso() ? E.addDaysIso(todayIso(), -1) : null;
   st.flows = st.flows.map((f) => ((ev.flowIds || []).includes(f.id) ? { ...f, active: true, paused: undefined, ...(last && (f.lastRun || '') < last ? { lastRun: last } : {}) } : f));
+  // a restored loan or deposit doesn't replay, in one burst, the installments and payouts that fell while it was gone
+  // (same as its flows): its schedule simply carries on from today
+  const back = ev.restore && last ? st.assets.find((y) => y.id === ev.restore.id) : null;
+  if (back?.mode === 'loan' && back.loan?.firstDue) { const d = E.loanLastDue(back.loan, last); if (d && (back.loan.lastRun || '') < d) back.loan = { ...back.loan, lastRun: d }; }
+  if (back?.mode === 'rate' && back.rate?.mode === 'payout' && back.rate.start) {
+    const p = E.prevMonthlyOnOrBefore(back.rate.start, last);
+    if (p > back.rate.start && (back.rate.lastPayout || '') < p) back.rate = { ...back.rate, lastPayout: p, offset: 0, offsetFrom: undefined };
+  }
   for (const u of ev.unlinked || []) {
     const x = st.assets.find((y) => y.id === u.id); if (!x) continue;
     const back = (ev.restore || ev.prev).id;
@@ -160,13 +168,16 @@ export const act = {
         const liab = E.isLiability(rec);
         const acc = opts.fund?.accountId ? list.find((x) => x.id === opts.fund.accountId && !x.archived) : null;
         const paid = acc ? Math.round(+opts.fund.amount || 0) : 0;
-        if (acc && paid > 0 && !liab && rec.mode !== 'rate' && !(+rec.costBasis > 0)) rec.costBasis = paid; // what it actually cost
+        if (acc && paid > 0 && !liab && rec.mode === 'units' && !(+rec.costBasis > 0)) rec.costBasis = paid; // what it actually cost
         list.push({ ...rec, createdAt: now });
         if (acc && paid > 0) {
           // one transfer: out of the account into the new asset (a loan's money: into the account)
           const accChanges = E.applyDelta(acc, liab ? paid : -paid, quotes);
           ev = { id: uid('e'), kind: 'edit', date: today, at: now, title: `افزودن «${rec.name}» ${liab ? 'با واریز به' : 'از'} «${acc.name}»`, amount: paid,
-            fund: { accountId: acc.id, amount: paid }, changes: [{ assetId: id, field: 'add', delta: 0, value: liab ? -paid : paid }, ...accChanges] };
+            // a purchase comes in at what was paid (paying above today's price is a real cost, seen in its return);
+            // a deposit or loan comes in at what it's worth (one that already earned, a loan whose fee the bank kept):
+            // that difference is a recorded change, never a market move
+            fund: { accountId: acc.id, amount: paid }, changes: [{ assetId: id, field: 'add', delta: 0, value: rec.mode === 'units' ? (liab ? -paid : paid) : E.valueOf(rec, quotes, {}).signedValue }, ...accChanges] };
         } else {
           // Record what was added, so later analysis treats it as money brought in, not as a market gain.
           const v = E.valueOf(rec, quotes, {}).signedValue;

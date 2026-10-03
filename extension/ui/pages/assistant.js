@@ -28,10 +28,10 @@ function Reports({ st, s }) {
   const make = async () => { setBusy(true); const r = await send('weekly', { force: true }); setBusy(false); if (!r?.ok) toast(r?.error || 'ساخت گزارش ممکن نشد'); else toast('گزارش ساخته شد'); };
   const latest = list[0];
   return html`<div class="card" id="reports">
-    <div class="card-h"><h3><${Icon} n="file" cls="sm" />گزارش هفتگی</h3><button class="btn sm" onClick=${make} disabled=${busy}><${Icon} n=${busy ? 'refresh' : 'plus'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال ساخت…' : 'ساخت الان'}</button></div>
+    <div class="card-h"><h3><${Icon} n="file" cls="sm" />گزارش هفتگی</h3><button class="btn sm" onClick=${make} disabled=${busy}><${Icon} n=${busy ? 'refresh' : 'plus'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال ساخت…' : 'ساخت گزارش'}</button></div>
     ${latest ? html`<div class="xs muted" style="margin-bottom:6px">${fmtJ(isoFromDate(new Date(latest.createdAt)))}، ${latest.by === 'ai' ? 'نوشته هوش مصنوعی' : 'خلاصه خودکار'}${latest.aiError ? ' (هوش مصنوعی در دسترس نبود)' : ''}</div>
       <div class="report"><${Markdown} text=${latest.text} /></div>`
-      : html`<div class="empty small">هر جمعه عصر خودکار ساخته می‌شود. با «ساخت الان» گزارش ۷ روز گذشته را ببین.</div>`}
+      : html`<div class="empty small">هر جمعه عصر خودکار ساخته می‌شود. با «ساخت گزارش» گزارش ۷ روز گذشته را ببین.</div>`}
     ${list.length > 1 && html`<hr class="sep" /><div class="xs muted sb" style="margin-bottom:4px">گزارش‌های قبلی</div>
       <div class="list">${list.slice(1, 12).map((r) => html`<div class="it" style="cursor:pointer;padding:7px 2px" onClick=${() => setView(r)}><${Icon} n="file" cls="sm" /><span class="grow small">هفته منتهی به ${fmtJ(r.weekOf)}</span><span class="xs muted">${r.by === 'ai' ? 'AI' : 'خودکار'}</span></div>`)}</div>`}
     ${view && html`<${Modal} title=${`گزارش هفته منتهی به ${fmtJ(view.weekOf)}`} onClose=${() => setView(null)}><div class="report"><${Markdown} text=${view.text} /></div></${Modal}>`}
@@ -92,7 +92,7 @@ export function AssistantPage({ st, s, route }) {
       <div class="card chat">
         <div class="row between" style="padding:14px 18px;border-bottom:1px solid var(--line)">
           <div class="row"><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="sparkles" /></span>
-            <div><div class="sb">دستیار دارا</div><div class="xs muted">${active ? html`${active.name}، <span class="ltr latin">${active.model}</span>` : 'اتصالی تعریف نشده'}، ${st.ai.privacy === 'percent' ? 'فقط درصدها ارسال می‌شود' : 'ارسال اطلاعات کامل'}</div></div></div>
+            <div><div class="sb">دستیار دارا</div><div class="xs muted">${active ? html`${active.name}، <span class="ltr latin">${active.model}</span>، ${st.ai.privacy === 'percent' ? 'فقط درصدها ارسال می‌شود' : 'ارسال اطلاعات کامل'}` : 'هنوز به هوش مصنوعی وصل نیست'}</div></div></div>
           ${msgs.length > 0 && html`<button class="btn sm ghost" onClick=${() => persist([])}><${Icon} n="reset" cls="sm" />گفتگوی تازه</button>`}
         </div>
         <div class="chat-log" ref=${logRef}>

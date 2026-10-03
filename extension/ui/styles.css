@@ -497,3 +497,12 @@ details.more[open] > summary { margin-bottom: 10px; }
 .mode { position: relative; }
 .mode .badge-sug { position: absolute; top: -9px; left: 10px; margin: 0; background: var(--surface); border: 1px solid var(--accent-line); }
 @media (max-width: 560px) { .kpi .v { font-size: 17px; } .kpi .v .money, .main .money { white-space: normal; } }
+
+/* a calendar inside a dialog opens in the flow (an absolute one was cut off by the dialog's edge) */
+.modal .cal { position: static; margin-top: 6px; width: 100%; max-width: 300px; box-shadow: var(--shadow); }
+/* an «off» switch must still be visible as a switch (≥3:1 against the card) */
+.toggle:not(.on) { background: color-mix(in srgb, var(--muted) 60%, var(--surface)); }
+/* debts sit apart from what you own in the category grid */
+.catsep { grid-column: 1 / -1; font-size: 12px; font-weight: 700; color: var(--muted); border-top: 1px dashed var(--line-2); padding-top: 8px; margin-top: 2px; }
+/* with the side form open, messages rise above its buttons instead of covering them */
+body:has(.drawer) .toasts { bottom: 86px; }

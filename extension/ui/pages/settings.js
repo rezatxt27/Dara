@@ -59,7 +59,8 @@ function ImportPanel({ s, onDone, compact }) {
   };
   const commit = async (mode) => {
     try {
-      if (res.backup) await store.importBackup(res.backup, { merge: mode === 'merge' });
+      let count = res.assets.length;
+      if (res.backup) { const r = await store.importBackup(res.backup, { merge: mode === 'merge' }); if (mode === 'merge') count = r.added ?? count; }
       else {
         await store.snapshotBeforeImport();
         await store.mutate(['assets', 'meta'], (st) => {
@@ -67,13 +68,15 @@ function ImportPanel({ s, onDone, compact }) {
           let n = Math.max(+st.meta.lastCode || 0, ...st.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
           const keep = mode === 'replace' ? [] : st.assets;
           const used = new Set(keep.map((x) => x.code));
-          const add = res.assets.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
+          const later = new Set(res.assets.map((a) => a.code).filter(Boolean));
+          const next = () => { let c; do c = 'A-' + String(++n).padStart(3, '0'); while (used.has(c) || later.has(c)); return c; };
+          const add = res.assets.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: next() }; used.add(a.code); return a; });
           st.assets = keep.concat(add); st.meta = { ...st.meta, lastCode: n };
         });
       }
       await act.setSettings({ onboarded: true });
       send('refresh');
-      toast(`${num(res.assets.length)} دارایی وارد شد؛ قیمت‌های آنلاین در حال دریافت است…`,
+      toast(count ? `${num(count)} دارایی وارد شد؛ قیمت‌های آنلاین در حال دریافت است…` : 'همه این دارایی‌ها از قبل بودند؛ چیزی اضافه نشد',
         { label: 'برگشت', fn: async () => { try { await store.undoImport(); toast('داده‌های قبل از ورود برگشت'); } catch (e) { toast(e.message); } } });
       setRes(null); onDone && onDone();
     } catch (e) { toast(e.message || 'ورود اطلاعات انجام نشد'); }
@@ -128,7 +131,7 @@ export function WelcomePage({ st, s, open, inline }) {
     <div class="grid3">
       <button class="card mode" style="padding:18px" onClick=${() => { act.setSettings({ onboarded: true }); open(null); }}><span class="ava" style="background:var(--pos-bg);color:var(--pos)"><${Icon} n="plus" /></span><span class="mt" style="font-size:15px;margin-top:8px">شروع از صفر</span><span class="md">اولین دارایی را دستی اضافه کن</span></button>
       <button class="card mode" style="padding:18px" onClick=${() => setStep('import')}><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="file" /></span><span class="mt" style="font-size:15px;margin-top:8px">ورود از گوگل‌شیت یا اکسل</span><span class="md">فایل CSV، لینک گوگل‌شیت یا پشتیبان دارا</span></button>
-      <button class="card mode" style="padding:18px" onClick=${async () => { await store.locked(() => store.save({ assets: sampleData() })); await act.setSettings({ onboarded: true }); send('refresh'); toast('داده نمونه بارگذاری شد'); location.hash = '#/overview'; }}><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="sparkles" /></span><span class="mt" style="font-size:15px;margin-top:8px">دیدن با داده نمونه</span><span class="md">برای آشنایی؛ بعداً از تنظیمات پاک کن</span></button>
+      ${!st.assets.length && html`<button class="card mode" style="padding:18px" onClick=${async () => { await store.locked(async () => { const { assets } = await store.load('assets'); if (!assets?.length) await store.save({ assets: sampleData() }); }); await act.setSettings({ onboarded: true }); send('refresh'); toast('داده نمونه بارگذاری شد'); location.hash = '#/overview'; }}><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="sparkles" /></span><span class="mt" style="font-size:15px;margin-top:8px">دیدن با داده نمونه</span><span class="md">برای آشنایی؛ بعداً از تنظیمات پاک کن</span></button>`}
     </div>
     ${step === 'import' && html`<div class="card"><div class="card-h"><h3>ورود اطلاعات</h3></div><${ImportPanel} s=${s} onDone=${() => (location.hash = '#/overview')} /></div>`}
   </div>`;
@@ -220,23 +223,23 @@ export function SettingsPage({ st, pf, s }) {
     <div class="card"><div class="card-h"><h3><${Icon} n="eye" cls="sm" />نمایش</h3></div>
       <${Row} t="واحد نمایش مبالغ" d="همه مبالغ داخلی به ریال ذخیره می‌شوند"><${Seg} value=${s.currency} onChange=${(v) => set({ currency: v })} options=${[['toman', 'تومان'], ['rial', 'ریال']]} /></${Row}>
       <${Row} t="ارقام"><${Seg} value=${s.digits} onChange=${(v) => set({ digits: v })} options=${[['fa', '۱۲۳ فارسی'], ['en', '123 لاتین']]} /></${Row}>
-      <${Row} t="اعداد بزرگ خلاصه" d="مثلاً ۶٫۲۶ میلیارد به‌جای عدد کامل در سربرگ‌ها"><${Toggle} on=${s.compact} onChange=${(v) => set({ compact: v })} /></${Row}>
+      <${Row} t="اعداد بزرگ خلاصه" d="مثلاً ۶٫۲۶ میلیارد به‌جای عدد کامل در سربرگ‌ها"><${Toggle} title="اعداد بزرگ خلاصه" on=${s.compact} onChange=${(v) => set({ compact: v })} /></${Row}>
       <${Row} t="تم"><${Seg} value=${s.theme} onChange=${(v) => set({ theme: v })} options=${[['auto', 'خودکار'], ['light', 'روشن'], ['dark', 'تیره']]} /></${Row}>
-      <${Row} t="حالت حریم خصوصی" d="مبالغ تار می‌شوند (با نگه‌داشتن ماوس نمایش داده می‌شوند)؛ مناسب اشتراک صفحه"><${Toggle} on=${s.privacy} onChange=${(v) => set({ privacy: v })} /></${Row}>
-      <${Row} t="نشان روی آیکون افزونه"><${Seg} value=${s.badge} onChange=${(v) => set({ badge: v })} options=${[['change', 'تغییر امروز ٪'], ['gold', 'طلا (م.ت)'], ['usd', 'دلار (ه.ت)'], ['none', 'هیچ']]} /></${Row}>
+      <${Row} t="حالت حریم خصوصی" d="مبالغ تار می‌شوند (با نگه‌داشتن ماوس نمایش داده می‌شوند)؛ مناسب اشتراک صفحه"><${Toggle} title="حالت حریم خصوصی" on=${s.privacy} onChange=${(v) => set({ privacy: v })} /></${Row}>
+      <${Row} t="نشان روی آیکون افزونه"><${Seg} value=${s.badge} onChange=${(v) => set({ badge: v })} options=${[['change', 'تغییر امروز ٪'], ['gold', 'گرم طلا (میلیون تومان)'], ['usd', 'دلار (هزار تومان)'], ['none', 'هیچ']]} /></${Row}>
     </div>
 
     <${AIConnections} st=${st} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="refresh" cls="sm" />به‌روزرسانی خودکار</h3></div>
       <${Row} t="فاصله دریافت قیمت‌ها"><${Seg} value=${s.refreshMinutes} onChange=${(v) => set({ refreshMinutes: v })} options=${[[15, '۱۵ دقیقه'], [30, '۳۰ دقیقه'], [60, '۱ ساعت'], [180, '۳ ساعت']]} /></${Row}>
-      ${Object.entries(PROVIDERS).map(([k, p]) => html`<${Row} t=${p.title}><${Toggle} on=${s.providers[k] !== false} onChange=${(v) => set({ providers: { ...s.providers, [k]: v } })} /></${Row}>`)}
+      ${Object.entries(PROVIDERS).map(([k, p]) => html`<${Row} t=${p.title}><${Toggle} title=${p.title} on=${s.providers[k] !== false} onChange=${(v) => set({ providers: { ...s.providers, [k]: v } })} /></${Row}>`)}
       <${Row} t="یادآوری قیمت‌های دستی" d="بعد از این مدت، دارایی «نیاز به به‌روزرسانی» می‌شود"><${Seg} value=${s.remindDays.price} onChange=${(v) => set({ remindDays: { ...s.remindDays, price: v } })} options=${[[3, '۳ روز'], [7, '۱ هفته'], [30, '۱ ماه']]} /></${Row}>
       <${Row} t="یادآوری مانده حساب‌ها"><${Seg} value=${s.remindDays.balance} onChange=${(v) => set({ remindDays: { ...s.remindDays, balance: v } })} options=${[[7, '۱ هفته'], [30, '۱ ماه'], [90, '۳ ماه']]} /></${Row}>
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="bell" cls="sm" />اعلان‌ها</h3></div>
-      ${[['interest', 'واریز سود درآمد ثابت'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت'], ['stale', 'یادآوری دارایی‌های قدیمی (هر ۳ روز)']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
+      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="download" cls="sm" />داده‌ها</h3><span class="sub">${num(st.assets.length)} دارایی، ${num(Object.keys(st.snapshots).length)} روز تاریخچه</span></div>

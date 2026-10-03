@@ -254,10 +254,10 @@ async def main():
             check('tooltip opens on hover with plain-language text', 'حقوق' in txt and 'طلا' in txt, txt[:90])
             await pg.mouse.move(5, 5); await pg.wait_for_timeout(400)
             check('tooltip closes when the pointer leaves', await pg.locator('.tippop').count() == 0)
-            await pg.locator('.card:has-text("نردبان نقدشوندگی") .card-h .tipbtn').click(); await pg.wait_for_selector('.tippop')
+            await pg.locator('.card:has-text("چقدر زود نقد می‌شود؟") .card-h .tipbtn').click(); await pg.wait_for_selector('.tippop')
             await pg.mouse.move(5, 5); await pg.wait_for_timeout(400)
             check('tooltip pinned by click stays open', await pg.locator('.tippop').count() == 1)
-            await pg.locator('.card:has-text("نردبان نقدشوندگی") .card-h').screenshot(path=f'{SH}/tooltip-{THEME}.png') if False else None
+            await pg.locator('.card:has-text("چقدر زود نقد می‌شود؟") .card-h').screenshot(path=f'{SH}/tooltip-{THEME}.png') if False else None
             await pg.screenshot(path=f'{SH}/tooltip-{THEME}.png')
             await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200)
             check('tooltip closes with Escape', await pg.locator('.tippop').count() == 0)

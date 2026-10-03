@@ -143,7 +143,7 @@ export function makeTools(ctx) {
         const s = st(); const up = E.upcoming(s.assets, s.flows, Math.min(120, days || 30)); const auto = E.monthlyAuto(s.assets, s.flows);
         return { upcoming: up.slice(0, 20).map((e) => ({ date: fmtJ(e.date), title: e.title, ...(P() ? {} : { amount: disp(e.amount, s.settings) }) })),
           monthly_auto: P() ? undefined : { interest: disp(auto.interest, s.settings), inflow: disp(auto.inflow, s.settings), outflow: disp(auto.outflow, s.settings),
-            loan_installments_out: disp(auto.loanPay, s.settings), loan_installments_in: disp(auto.loanGet, s.settings), loan_interest_cost: disp(auto.loanInterest, s.settings), net: disp(auto.net, s.settings) } };
+            loan_installments_out: disp(auto.loanPay, s.settings), loan_installments_in: disp(auto.loanGet, s.settings), loan_interest_cost: disp(auto.loanInterest, s.settings), net_wealth_change: disp(auto.net, s.settings), net_cash_to_accounts: disp(auto.cash, s.settings) } };
       },
     },
     {
@@ -379,7 +379,7 @@ export function captureProposals(json, assets, quotes, settings) {
           if (up > 0) { field = 'quantity'; value = (moneyUnit === 'toman' ? amt * 10 : amt) / up; current = +a.quantity || 0; }
         }
       } else if (a.mode === 'balance') { field = 'balance'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.balance || 0; }
-      else if (a.mode === 'rate') { field = 'rate.principal'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = +a.rate?.principal || 0; }
+      else if (a.mode === 'rate') { field = 'rate.principal'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = a.rate?.mode === 'payout' ? +a.rate?.principal || 0 : E.valueOf(a, quotes, {}).value; } // same basis applyCapture moves it on
       else if (a.mode === 'loan') { field = 'loan.balance'; value = moneyUnit === 'toman' ? amt * 10 : amt; current = E.loanState(a.loan).value; }
     }
     const pageMoney = cu === 'toman' ? 10 : 1;

@@ -132,7 +132,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       quotes = E.mergeQuotes(cur.quotes, fresh, errors);
       autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
       E.rememberLastPrices(autos.assets, quotes);
-      events = autos.events.concat(cur.events).slice(0, E.EVENTS_MAX);
+      events = autos.events.slice().reverse().concat(cur.events).slice(0, E.EVENTS_MAX);
       E.settlePending(autos.assets, events, quotes);
       pf = E.portfolio(autos.assets, quotes, cur.settings);
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
@@ -341,7 +341,7 @@ const handlers = {
     let autos, settings;
     await store.mutate(['assets', 'flows', 'events', 'quotes', 'settings'], (st) => {
       autos = E.applyAutomations(st.assets, st.flows, st.quotes, todayIso()); settings = st.settings;
-      if (autos.events.length) Object.assign(st, { assets: autos.assets, flows: autos.flows, events: autos.events.concat(st.events).slice(0, E.EVENTS_MAX) });
+      if (autos.events.length) Object.assign(st, { assets: autos.assets, flows: autos.flows, events: autos.events.slice().reverse().concat(st.events).slice(0, E.EVENTS_MAX) });
     });
     if (autos.events.length) await notifyAutomations(autos.events, autos.assets, settings);
     return { events: autos.events.length };
@@ -413,7 +413,10 @@ chrome.notifications?.onClicked.addListener((id) => {
   chrome.notifications.clear(id);
 });
 
+// any change to what the badge shows (an inline edit, a transfer, an undo — from any page) refreshes it, once things settle
+let badgeTimer = 0;
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes.assets || changes.events)) { clearTimeout(badgeTimer); badgeTimer = setTimeout(() => handlers.badge().catch(() => null), 1500); }
   if (area !== 'local' || !changes.settings) return;
   const a = changes.settings.oldValue || {}, b = changes.settings.newValue || {};
   if (a.refreshMinutes !== b.refreshMinutes) schedule();

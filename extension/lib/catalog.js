@@ -3,7 +3,7 @@
 /** exposure: rial | gold | fx | crypto | equity | real | commodity | other */
 export const CATEGORIES = [
   { id: 'bank', name: 'حساب بانکی و نقد', short: 'بانک', color: '#12B5D9', icon: 'bank', exposure: 'rial', liquidity: 'high', defaultMode: 'balance' },
-  { id: 'fixed', name: 'درآمد ثابت و سپرده', short: 'درآمد ثابت', color: '#3D7BF7', icon: 'shield', exposure: 'rial', liquidity: 'high', defaultMode: 'rate' },
+  { id: 'fixed', name: 'سپرده و درآمد ثابت', short: 'سپرده و درآمد ثابت', color: '#3D7BF7', icon: 'shield', exposure: 'rial', liquidity: 'high', defaultMode: 'rate' },
   { id: 'gold_online', name: 'طلای آب‌شده آنلاین', short: 'طلای آنلاین', color: '#F2B705', icon: 'gold', exposure: 'gold', liquidity: 'mid', defaultMode: 'units' },
   { id: 'gold', name: 'طلای فیزیکی و سکه', short: 'طلا و سکه', color: '#C98A0B', icon: 'coin', exposure: 'gold', liquidity: 'mid', defaultMode: 'units' },
   { id: 'metal', name: 'نقره، مس و سایر فلزات', short: 'فلزات', color: '#6E8CA8', icon: 'weight', exposure: 'commodity', liquidity: 'mid', defaultMode: 'units' },
@@ -117,8 +117,8 @@ export const GOLD_PRESETS = [
 export const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گوهر', 'آلتون', 'نفیس', 'لیان', 'تابان', 'زرفام', 'جواهر', 'گنج', 'قیراط', 'درخشان', 'ناب', 'زرین', 'رز', 'آتش', 'نهال'];
 
 export const PROVIDERS = {
-  tgju: { name: 'tgju', title: 'طلا، سکه، ارز و فلزات (tgju)' },
-  tsetmc: { name: 'TSETMC', title: 'بورس تهران (TSETMC)' },
+  tgju: { name: 'بازار آزاد (tgju)', title: 'طلا، سکه، ارز و فلزات (tgju)' },
+  tsetmc: { name: 'بورس تهران', title: 'بورس تهران (TSETMC)' },
   fipiran: { name: 'فیپیران', title: 'صندوق‌های سرمایه‌گذاری (فیپیران)' },
   nobitex: { name: 'نوبیتکس', title: 'رمزارز (نوبیتکس + پشتیبان tgju)' },
 };

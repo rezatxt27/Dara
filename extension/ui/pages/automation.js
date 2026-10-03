@@ -1,4 +1,4 @@
-import { html, useState, useTick, Icon, Money, Ava, Modal, Seg, NumField, MoneyField, JDateField, Toggle, StatusPill, toast, num, pct, fmtJ } from '../components.js';
+import { html, useOnce, useState, useTick, Icon, Money, Ava, Modal, Seg, NumField, MoneyField, JDateField, Toggle, StatusPill, toast, num, pct, fmtJ } from '../components.js';
 import { CAT, FLOW_TEMPLATES } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { todayIso, isoToJ, addDaysIso, isoFromDate } from '../../lib/jalali.js';
@@ -20,6 +20,7 @@ function suggestions(st, pf) {
 
 /* -------------------- flow editor -------------------- */
 function FlowModal({ st, s, flow, onClose }) {
+  const [saving, once] = useOnce();
   const [f, setF] = useState(() => flow || { id: uid('f'), title: '', amount: null, fromId: '', toId: '', freq: 'monthly', day: isoToJ(todayIso()).jd, start: todayIso(), end: null, count: null, active: true, done: 0 });
   const set = (p) => setF((x) => ({ ...x, ...p }));
   const accounts = st.assets.filter((a) => !a.archived);
@@ -42,13 +43,13 @@ function FlowModal({ st, s, flow, onClose }) {
     if (f.fromId && f.fromId === f.toId) return toast('حساب مبدأ و مقصد یکی است');
     if (f.end && f.start && f.end < f.start) return toast('تاریخ پایان باید بعد از تاریخ شروع باشد');
     const loanSide = [f.fromId, f.toId].map((id) => accounts.find((a) => a.id === id)).find((a) => a?.mode === 'loan');
-    if (loanSide && /قسط/.test(f.title) && !confirmLoan) { setConfirmLoan(true); return; }
+    if (loanSide && !confirmLoan) { setConfirmLoan(true); return; }
     const out = { ...f, fromId: f.fromId || null, toId: f.toId || null };
     if (!flow && past > 0 && !confirmPast) { out.lastRun = yday; out.done = past; } // don't back-apply old occurrences unless asked
     await act.saveFlow(out); onClose();
   };
   const toAsset = accounts.find((a) => a.id === f.toId);
-  return html`<${Modal} title=${flow ? 'ویرایش جریان تکراری' : 'جریان تکراری جدید'} onClose=${onClose} footer=${html`${flow && html`<button class="btn danger" onClick=${() => { act.deleteFlow(f.id); onClose(); }}>حذف</button>`}<span class="grow"></span><button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" onClick=${save}>ذخیره</button>`}>
+  return html`<${Modal} title=${flow ? 'ویرایش جریان تکراری' : 'جریان تکراری جدید'} onClose=${onClose} footer=${html`${flow && html`<button class="btn danger" onClick=${() => { act.deleteFlow(f.id); onClose(); }}>حذف</button>`}<span class="grow"></span><button class="btn" onClick=${onClose}>انصراف</button><button class="btn primary" disabled=${saving} onClick=${() => once(save)}>ذخیره</button>`}>
     ${!flow && html`<div class="row wrap" style="gap:6px">${FLOW_TEMPLATES.map((t) => html`<button class="chip" onClick=${() => applyTpl(t)} title=${t.hint}>${t.title}</button>`)}</div>`}
     <div class="field"><label>عنوان</label><input class="input" value=${f.title} onInput=${(e) => set({ title: e.target.value })} placeholder="مثلاً: حقوق ماهانه" /></div>
     <${MoneyField} label="مبلغ هر بار" rial=${f.amount} onRial=${(v) => set({ amount: v })} s=${s} />
@@ -83,6 +84,7 @@ export function AutomationPage({ st, pf, s, open }) {
   const loans = pf.rows.filter((r) => r.asset.mode === 'loan');
   const sugg = suggestions(st, pf);
   const up = E.upcoming(st.assets, st.flows, 45);
+  const nextPay = (id) => up.find((x) => x.kind === 'interest' && x.assetId === id); // the same amount the calendar shows (and what is paid)
   const auto = E.monthlyAuto(st.assets, st.flows);
   const [moreEv, setMoreEv] = useState(false);
   const events = st.events.slice(0, moreEv ? 200 : 12);
@@ -91,14 +93,15 @@ export function AutomationPage({ st, pf, s, open }) {
   return html`<div class="page">
     <div class="callout"><${Icon} n="zap" cls="sm" /><div>
       <b>دارا چه چیزهایی را خودش به‌روز می‌کند؟</b> قیمت طلا، سکه، ارز، نمادهای بورسی، NAV صندوق‌ها و رمزارزها هر ${num(s.refreshMinutes)} دقیقه دریافت می‌شود؛
-      دارایی‌های <b>درآمد ثابت</b> هر روز طبق نرخ سود رشد می‌کنند و سود ماهانه‌شان به حساب مقصد واریز می‌شود؛ و <b>جریان‌های تکراری</b> مثل حقوق، قسط و خرید ماهانه طلا در موعدشان روی موجودی‌ها اعمال می‌شوند. همه رویدادها قابل برگشت‌اند.
+      <b>سپرده‌ها</b> هر روز طبق نرخ سود رشد می‌کنند و سود ماهانه‌شان به حساب مقصد واریز می‌شود؛ قسط وام‌ها در موعدشان کم می‌شود؛ و <b>جریان‌های تکراری</b> مثل حقوق، اجاره و خرید ماهانه طلا روی موجودی‌ها اعمال می‌شوند. ثبت‌های دستی قابل برگشت‌اند.
     </div></div>
 
     <div class="kpis">
       <div class="kpi"><span class="t">سود ماهانه (تقریبی)</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">سپرده‌ها، حساب‌های سوددار و طلب‌ها</span></div>
       <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow + auto.loanGet} s=${s} compact /></span><span class="s">حقوق، اجاره، قسط‌های دریافتی و…</span></div>
       <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow + auto.loanPay} s=${s} compact /></span><span class="s">${auto.loanPay ? html`هزینه‌های ثابت و اقساط (<${Money} v=${auto.loanPay} s=${s} compact />)` : 'هزینه‌های ثابت و اقساط'}</span></div>
-      <div class="kpi"><span class="t">خالص جریان خودکار</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span><span class="s">در ماه</span></div>
+      <div class="kpi"><span class="t">هر ماه چقدر پولدارتر می‌شوی</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span>
+        <span class="s" title="پولی که هر ماه به حساب‌هایت می‌رسد یا از آنها کم می‌شود؛ پرداخت اصل وام و جابه‌جایی بین حساب‌هایت پول نقد را کم و زیاد می‌کند ولی دارایی خالص را نه.">پول نقد حساب‌ها: <${Money} v=${auto.cash} s=${s} compact sign /></span></div>
     </div>
 
     ${sugg.length > 0 && html`<div class="card">
@@ -118,18 +121,19 @@ export function AutomationPage({ st, pf, s, open }) {
             <div class="grow"><div class="sb">${r.asset.name}</div>
               <div class="xs muted">حساب روزشمار، ${num(it.annualPct, 2)}٪ سالانه، سود هر روز <${Money} v=${(+r.asset.balance || 0) * it.annualPct / 100 / 365} s=${s} compact /></div>
               <div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(nd, 'dm')}</div></div>
-            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${r.accrued} s=${s} unit=${false} /> سود انباشته</div></div></div>`;
+            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${r.accrued} s=${s} unit=${false} /> سود جمع‌شده</div></div></div>`;
         })}</div>`}
         ${rates.length ? html`<div class="list">${rates.map((r) => {
           const a = r.asset, rt = a.rate;
           const accrued = r.value - rt.principal;
           const matured = r.status === 'matured';
-          const next = rt.mode === 'payout' && !matured ? E.nextMonthlyAfter(rt.start, rt.start > todayIso() ? rt.start : todayIso()) : null;
+          const np = rt.mode === 'payout' && !matured ? nextPay(a.id) : null;
+          const next = np?.date || null;
           return html`<div class="it" style="cursor:pointer;align-items:flex-start" onClick=${() => open(a)}><${Ava} cat=${a.category} size=${34} />
             <div class="grow"><div class="sb">${a.name}</div>
               <div class="xs muted">روزشمار ${num(rt.annualPct, 2)}٪، ${rt.mode === 'payout' ? 'واریز ماهانه' : rt.mode === 'compound' ? 'مرکب' : 'ساده'}، سود هر روز <${Money} v=${E.rateDaily(rt, r.value)} s=${s} compact />، اصل <${Money} v=${rt.principal} s=${s} compact />${rt.maturity ? '، سررسید ' + fmtJ(rt.maturity) : ''}</div>
               ${matured && html`<div class="xs" style="margin-top:3px"><${StatusPill} status="matured" /> از ${fmtJ(rt.maturity)} سودی نمی‌گیرد؛ در صفحه دارایی‌ها منتقل یا تمدیدش کن.</div>`}
-              ${rt.mode === 'payout' && next && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(next, 'dm')} — حدود <${Money} v=${E.rateMonthly(rt, r.value)} s=${s} compact /> به ${rt.payoutTo && rt.payoutTo !== 'self' ? (nm(rt.payoutTo) || 'حساب حذف‌شده') : 'خود دارایی'}</div>`}</div>
+              ${rt.mode === 'payout' && next && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(next, 'dm')} — <${Money} v=${np.amount} s=${s} compact /> به ${rt.payoutTo && rt.payoutTo !== 'self' ? (nm(rt.payoutTo) || 'حساب حذف‌شده') : 'خود دارایی'}</div>`}</div>
             <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${accrued} s=${s} unit=${false} /> سود ${rt.mode === 'payout' ? 'این دوره' : 'تاکنون'}</div></div></div>`;
         })}</div>` : !banks.length ? html`<div class="empty small">سپرده، صندوق درآمد ثابت یا شراکتی که سود سالانه مشخص دارد را اضافه کن؛ سودش هر روز حساب و به ارزش اضافه می‌شود. برای حساب کوتاه‌مدت بانکی، «سود روزشمار» را در خود حساب روشن کن.</div>` : ''}
       </div>

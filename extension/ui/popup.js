@@ -1,4 +1,4 @@
-import { html, render, useState, useMemo, useStore, useTick, Icon, Money, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
+import { html, render, useState, useMemo, useEffect, useStore, useTick, Icon, Money, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
 import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, hasWords } from '../lib/format.js';
@@ -19,7 +19,9 @@ async function captureCurrent() {
 
 function QuickRow({ r, s }) {
   const a = r.asset; const k = s.currency === 'rial' ? 1 : 10;
-  const cur = a.mode === 'balance' ? r.value : r.unitPrice;
+  // an interest-bearing account: the balance the bank shows (its accrued interest is kept apart and paid on pay day)
+  const withInt = a.mode === 'balance' && a.interest?.on;
+  const cur = a.mode === 'balance' ? (withInt ? +a.balance || 0 : r.value) : r.unitPrice;
   const [txt, setTxt] = useState('');
   const unit = s.currency === 'rial' ? 'ریال' : 'تومان';
   const save = async () => {
@@ -33,9 +35,9 @@ function QuickRow({ r, s }) {
   const onIn = (e) => { const v = e.target.value; setTxt(hasWords(v) ? v : (getDigits() === 'fa' ? groupTyping(v).replace(/,/g, '٬') : groupTyping(v))); };
   const ph = a.mode === 'balance' ? (E.APPRAISED.has(a.category) ? `ارزش جدید (${unit})` : `مانده جدید (${unit})`) : `قیمت هر واحد (${unit})`;
   return html`<div class="pp-row">
-    <div class="grow" style="min-width:0"><div class="sb ellipsis" title=${a.name}>${r.status === 'stale' && html`<span class="warn" title="مدتی به‌روز نشده">● </span>`}${a.name}</div><div class="xs muted">${a.mode === 'balance' ? 'مانده' : 'قیمت واحد'}: <${Money} v=${cur} s=${s} unit=${false} />، ${ago(r.at)}</div></div>
+    <div class="grow" style="min-width:0"><div class="sb ellipsis" title=${a.name}>${r.status === 'stale' && html`<span class="warn" title="مدتی به‌روز نشده">● </span>`}${a.name}</div><div class="xs muted">${a.mode === 'balance' ? (E.APPRAISED.has(a.category) ? 'ارزش' : withInt ? 'مانده (بدون سود این ماه)' : 'مانده') : 'قیمت واحد'}: <${Money} v=${cur} s=${s} unit=${false} />، ${ago(r.at)}</div></div>
     <input class="input num-in qin" placeholder=${ph} title=${ph} value=${txt} onInput=${onIn} onKeyDown=${(e) => e.key === 'Enter' && save()} />
-    <button class="btn icon sm" disabled=${!txt} onClick=${save}><${Icon} n="check" cls="sm" /></button>
+    <button class="btn icon sm" disabled=${!txt} onClick=${save} title="ثبت" aria-label="ثبت"><${Icon} n="check" cls="sm" /></button>
   </div>`;
 }
 
@@ -45,6 +47,9 @@ function QuickEntry({ st, s }) {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null); // {proposals, problems, question}
   const conns = AI.orderedConnections(st.ai);
+  // without an AI connection the sentence box can't work: offer the way to connect instead of a dead input
+  if (!conns.length) return html`<button class="btn ghost" style="justify-content:flex-start" onClick=${() => openApp('#/settings')} title="برای ثبت با یک جمله، یک اتصال هوش مصنوعی لازم است">
+    <${Icon} n="sparkles" cls="sm" />ثبت با یک جمله<span class="grow"></span><span class="xs muted">اول هوش مصنوعی را وصل کن</span></button>`;
   const go = async () => {
     const t = text.trim(); if (!t || busy) return;
     if (!conns.length) { toast('برای ثبت با یک جمله، اول یک اتصال هوش مصنوعی اضافه کن'); openApp('#/settings'); return; }
@@ -82,6 +87,8 @@ function Popup() {
   const [tab, setTab] = useState('prices');
   const [busy, setBusy] = useState(false);
   useTick(15000);
+  // bring automations up to date (a payout or installment due today) before anything is shown or typed here
+  useEffect(() => { send('automate').catch(() => null); }, []);
   const pf = useMemo(() => (st ? E.portfolio(st.assets, st.quotes, st.settings) : null), [st?.assets, st?.quotes, st?.settings, Math.floor(Date.now() / 15000)]);
   if (!st) return html`<div class="pp muted">…</div>`;
   const s = st.settings;
@@ -92,6 +99,9 @@ function Popup() {
     .sort((a, b) => (b.status === 'stale') - (a.status === 'stale') || b.value - a.value);
   const refresh = async () => { setBusy(true); const r = await send('refresh'); setBusy(false); toast(r?.ok ? 'قیمت‌ها به‌روز شد' : 'خطا در به‌روزرسانی'); };
   const att = pf.attention.length;
+  // what needs attention but can't be fixed by typing a number here (matured deposits, errors) opens in the app
+  const attQuick = pf.attention.filter((r) => manual.some((m) => m.asset.id === r.asset.id)).length;
+  const onAtt = () => (attQuick === att ? setTab('quick') : openApp('#/assets?f=attention'));
 
   if (!st.assets.length) return html`<div class="pp">
     <div class="pp-h"><span class="logo"><${Icon} n="layers" /></span><span class="nm grow">دارا</span></div>
@@ -105,7 +115,7 @@ function Popup() {
       <button class="btn icon sm ghost" title=${s.privacy ? 'نمایش مبالغ' : 'پنهان‌کردن مبالغ'} onClick=${() => act.setSettings({ privacy: !s.privacy })}><${Icon} n=${s.privacy ? 'eyeOff' : 'eye'} cls="sm" /></button>
       <button class="btn icon sm ghost" title="به‌روزرسانی قیمت‌ها" onClick=${refresh} disabled=${busy}><${Icon} n="refresh" cls=${'sm' + (busy ? ' spin' : '')} /></button>
       <button class="btn icon sm ghost" title="دارایی جدید" aria-label="دارایی جدید" onClick=${() => openApp('#/assets?new=1')}><${Icon} n="plus" cls="sm" /></button>
-      <button class="btn sm" onClick=${() => openApp('#/overview')}><${Icon} n="overview" cls="sm" />داشبورد</button>
+      <button class="btn sm" onClick=${() => openApp('#/overview')}><${Icon} n="overview" cls="sm" />نمای کلی</button>
     </div>
 
     <div class="pp-hero">
@@ -113,20 +123,20 @@ function Popup() {
       <div class="v num"><${Money} v=${pf.net} s=${s} compact=${s.compact} unit=${false} /><span class="u">${s.currency === 'rial' ? 'ریال' : 'تومان'}</span></div>
       ${s.compact && html`<div class="f num"><${Money} v=${pf.net} s=${s} /></div>`}
       <div class="r">
-        <span title="اثر قیمت بازار؛ پول جدید جدا حساب شده">امروز <${Delta} p=${d1.pct} abs=${d1.abs} s=${s} /></span>
+        <span title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">امروز <${Delta} p=${d1.pct} abs=${d1.abs} s=${s} /></span>
         ${rates.usd && html`<span>≈ <b class="money"><span class="n"><span class="ltr">${num(pf.net / rates.usd)}</span></span></b> دلار</span>`}
         ${rates.gold && html`<span>≈ <b class="money"><span class="n"><span class="ltr">${num(pf.net / rates.gold, 1)}</span></span></b> گرم طلا</span>`}
       </div>
     </div>
 
     <div class="pp-card">
-      <${StackBar} items=${cats.map((c) => ({ name: c.name, value: c.value, color: c.color }))} height=${8} />
+      <${StackBar} items=${cats.map((c) => ({ name: c.short || c.name, value: c.value, color: c.color }))} height=${8} />
       <div class="pp-leg">${cats.slice(0, 6).map((c) => html`<span><i style=${'background:' + c.color}></i>${c.short} <b class="num">${pct(c.share, { sign: false, digits: 0 })}</b></span>`)}</div>
     </div>
 
     <${QuickEntry} st=${st} s=${s} />
-    <button class="btn" style="justify-content:flex-start" onClick=${captureCurrent} title="موجودی‌های همین صفحه (بانک، کارگزاری، طلای آنلاین، صرافی) را بخوان"><${Icon} n="scan" cls="sm" />ثبت موجودی از این صفحه<span class="grow"></span><span class="xs muted">${st.ai.connections?.length ? 'با هوش مصنوعی' : 'دستی'}</span></button>
-    ${att > 0 && html`<button class="callout warn" style="border:0;cursor:pointer;text-align:right" onClick=${() => setTab('quick')}><${Icon} n="alert" cls="sm" /><div><b class="num">${num(att)}</b> دارایی نیاز به به‌روزرسانی دارد — به‌روزرسانی سریع</div></button>`}
+    <button class="btn" style="justify-content:flex-start" onClick=${captureCurrent} title="موجودی‌های همین صفحه (بانک، کارگزاری، طلای آنلاین، صرافی) را بخوان"><${Icon} n="scan" cls="sm" />ثبت موجودی از این صفحه<span class="grow"></span>${st.ai.connections?.length ? html`<span class="xs muted">با هوش مصنوعی</span>` : ''}</button>
+    ${att > 0 && html`<button class="callout warn" style="border:0;cursor:pointer;text-align:right" onClick=${onAtt}><${Icon} n="alert" cls="sm" /><div><b class="num">${num(att)}</b> دارایی نیاز به توجه دارد — ${attQuick === att ? 'به‌روزرسانی سریع' : 'دیدن فهرست'}</div></button>`}
 
     <div class="pp-tabs"><${Seg} value=${tab} onChange=${setTab} options=${[['prices', 'قیمت‌های لحظه‌ای'], ['quick', `به‌روزرسانی سریع (${num(manual.length)})`]]} /></div>
 

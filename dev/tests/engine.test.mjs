@@ -810,7 +810,20 @@ test('monthly automation: debts cost interest, matured deposits earn nothing, a 
   const flows = [{ id: 'f', active: true, amount: 50, freq: 'monthly', fromId: 'b', toId: 'x' }];
   const m = E.monthlyAuto(assets, flows, iso);
   close(m.interest, 10, 1e-9); close(m.debtInterest, 20, 1e-9); close(m.outflow, 50, 1e-9);
-  close(m.net, 10 - 50 - 20, 1e-9);
+  // paying a debt from an account moves cash but doesn't make you poorer; interest that stays in a deposit isn't cash
+  close(m.net, 10 - 20, 1e-9, 'wealth: interest earned − interest owed');
+  close(m.cash, -50, 1e-9, 'cash: the debt payment leaves the account');
+});
+
+test('monthly automation: installments are cash, only their interest is a cost', () => {
+  const assets = [
+    { id: 'b', category: 'bank', mode: 'balance', balance: 0 },
+    { id: 'L', category: 'debt', mode: 'loan', loan: { amount: 1.2e9, annualPct: 0, months: 12, firstDue: J.addDaysIso(iso, 20), account: 'b' } },
+    { id: 'D', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addDaysIso(iso, -5), mode: 'payout', payoutTo: 'b' } },
+  ];
+  const m = E.monthlyAuto(assets, [], iso);
+  close(m.cash, 20e6 - 100e6, 1, 'interest paid to the account − installment');
+  close(m.net, 20e6, 1, 'a 0% loan costs nothing; the deposit earns 20M');
 });
 
 test('same-day payouts: one deposit paying into another does not change what the other pays', () => {
@@ -954,4 +967,47 @@ test('review fixes (1.5): cost basis, full withdrawal, payouts, finished flows, 
   E.applyDelta(ln, -1e7, {}, iso);
   const st1 = E.loanState(ln.loan, iso);
   assert.equal(st1.paid + st1.before, st0.paid);
+});
+
+test('review 1.5 (round 2): payouts, maturity stub, interest vs price, deleted assets, overdrawn accounts', () => {
+  // a) the deposit keeps its interest until the payout actually lands (no dip on payout day before the worker runs)
+  const start = J.addJMonthsIso(iso, -1);
+  const r = { principal: 1e9, annualPct: 24, start, mode: 'payout', lastPayout: start };
+  const v = E.rateValue(r, iso);
+  close(v, 1e9 + 1e9 * 0.24 * E.dayFactor(start, iso, 365), 1, 'interest since the last real payout is still in it');
+  // b) the last short period is paid out on the maturity day
+  const mat = J.addDaysIso(J.addJMonthsIso(iso, -1), 10);
+  const d = { id: 'd', name: 'D', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 24, start: J.addJMonthsIso(iso, -2), maturity: mat, mode: 'payout', payoutTo: 'b', lastPayout: J.addJMonthsIso(iso, -1) } };
+  const b = { id: 'b', name: 'B', category: 'bank', mode: 'balance', balance: 0 };
+  const out = E.applyAutomations([d, b], [], {}, iso);
+  const stub = out.events.find((e) => e.kind === 'interest' && e.date === mat);
+  assert.ok(stub, 'a payout on the maturity day');
+  close(stub.amount, 1e9 * 0.24 * E.dayFactor(J.addJMonthsIso(iso, -1), mat, 365), 1);
+  close(E.rateValue(d.rate, iso), 1e9, 1, 'nothing left inside after maturity but the principal');
+  // c) attribution: a deposit's growth is interest, a gold price move is price
+  const y = J.addDaysIso(iso, -1);
+  const dep = { id: 'dep', name: 'dep', category: 'fixed', mode: 'rate', rate: { principal: 1e9, annualPct: 36.5, start: J.addDaysIso(iso, -10), mode: 'simple' } };
+  const gold = { id: 'g', name: 'g', category: 'gold', mode: 'units', quantity: 1, price: { source: 'manual', value: 110 } };
+  const snaps = { [y]: { t: E.rateValue(dep.rate, y) + 100, v: { dep: E.rateValue(dep.rate, y), g: 100 }, est: true } };
+  const at = E.attribution([dep, gold], {}, {}, snaps, [], 1, iso);
+  close(at.price, 10, 1e-6, 'gold +10 is a price move');
+  const depNow = E.portfolio([dep], {}, {}).rows[0].value; // includes the live part of today
+  close(at.interest, depNow - E.rateValue(dep.rate, y), 1, 'the deposit earned interest');
+  close(at.market, at.price + at.interest, 1e-6);
+  // d) an edit on an account that was deleted later stays an edit (not a market move)
+  const acc = { id: 'x', name: 'X', category: 'bank', mode: 'balance', balance: 1.2e9 };
+  const snap2 = { [y]: { t: 1e9, v: { x: 1e9 }, at: Date.now() - 3600e3 } };
+  const evs = [
+    { id: 'e2', kind: 'edit', date: iso, at: Date.now(), title: 'del', amount: 0, restore: { ...acc }, changes: [{ assetId: 'x', field: 'remove', delta: 0, value: -1.2e9 }] },
+    { id: 'e1', kind: 'edit', date: iso, at: Date.now() - 1000, title: 'fix', amount: 0, changes: [{ assetId: 'x', field: 'balance', delta: 2e8 }] },
+  ];
+  const at2 = E.attribution([], {}, {}, snap2, evs, 1, iso);
+  close(at2.market, 0, 1, 'no fake market move');
+  // e) an overdrawn account earns no (negative) interest
+  const od = { id: 'o', name: 'o', category: 'bank', mode: 'balance', balance: -1e8, interest: { on: true, annualPct: 10, since: J.addDaysIso(iso, -40), payDay: 0 } };
+  const r2 = E.applyAutomations([od], [], {}, iso);
+  assert.ok(!(r2.assets[0].interest.accrued < 0), 'no negative accrual');
+  // f) a year nobody means isn't a date (and doesn't throw)
+  assert.equal(J.parseJ('3500/01/01'), null);
+  assert.equal(J.parseJ('0001/01/01'), null);
 });

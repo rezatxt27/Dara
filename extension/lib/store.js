@@ -59,7 +59,9 @@ const MODES = new Set(['units', 'balance', 'rate', 'loan']);
 /** Drop rows that would break every page (null, wrong type, no id) — e.g. from a damaged or hand-edited backup. */
 export function cleanList(key, v) {
   if (!Array.isArray(v)) return [];
-  return v.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (key !== 'assets' || (x.id && MODES.has(x.mode) && typeof x.category === 'string')) && (key !== 'flows' || (x.id && /^\d{4}-\d\d-\d\d$/.test(x.start || ''))));
+  return v.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (key !== 'assets' || (x.id && MODES.has(x.mode) && typeof x.category === 'string'
+    // a deposit or loan without its terms can't be valued (and would break the pages that show it)
+    && (x.mode !== 'rate' || (x.rate && typeof x.rate === 'object')) && (x.mode !== 'loan' || (x.loan && typeof x.loan === 'object')))) && (key !== 'flows' || (x.id && /^\d{4}-\d\d-\d\d$/.test(x.start || ''))));
 }
 
 function withDefaults(key, value) {
@@ -177,14 +179,19 @@ export async function importBackup(obj, { merge = false } = {}) {
   for (const k of LISTS) if (k in d) d[k] = cleanList(k, d[k]);
   await snapshotBeforeImport();
   if (merge) {
+    let added = 0;
     // inside the lock: a background run or another tab can't write in between and get overwritten
     await mutate(['assets', 'flows', 'meta', 'events', 'quotes'], (cur) => {
       const ids = new Set(cur.assets.map((a) => a.id));
       // codes stay unique: an incoming code that is already taken gets the next free one
       const used = new Set(cur.assets.map((a) => a.code));
       let n = Math.max(+cur.meta?.lastCode || 0, ...cur.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
-      const incoming = (d.assets || []).filter((a) => !ids.has(a.id)).map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: 'A-' + String(++n).padStart(3, '0') }; used.add(a.code); return a; });
-      cur.assets = cur.assets.concat(incoming);
+      const rows = (d.assets || []).filter((a) => !ids.has(a.id));
+      // a new code must clash neither with what's stored nor with a code a later incoming row already carries
+      const later = new Set(rows.map((a) => a.code).filter(Boolean));
+      const next = () => { let c; do c = 'A-' + String(++n).padStart(3, '0'); while (used.has(c) || later.has(c)); return c; };
+      const incoming = rows.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: next() }; used.add(a.code); return a; });
+      cur.assets = cur.assets.concat(incoming); added = incoming.length;
       const fids = new Set(cur.flows.map((a) => a.id));
       cur.flows = cur.flows.concat((d.flows || []).filter((a) => !fids.has(a.id)));
       cur.meta = { ...cur.meta, lastCode: n };
@@ -199,7 +206,7 @@ export async function importBackup(obj, { merge = false } = {}) {
         cur.events = [{ id, kind: 'edit', date: todayIso(), at: Date.now(), title: `ورود ${incoming.length} دارایی از فایل پشتیبان`, amount: 0, noUndo: true, changes }, ...cur.events];
       }
     });
-    return chk;
+    return { ...chk, added };
   }
   const toSave = {};
   for (const k of KEYS) if (k in d && !['meta', 'ai', 'chat', 'history'].includes(k)) toSave[k] = d[k];

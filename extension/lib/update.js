@@ -51,6 +51,9 @@ export async function checkOnLoad() {
   const v = await pendingVersion();
   if (!v) return false;
   const here = location.pathname.endsWith('/app.html') ? location.href : null;
+  // another Dara tab may hold unsaved typing or a running job: then the page shows «نسخه تازه آماده است» instead
+  const urls = await openTabUrls();
+  if (urls === null || urls.length > (here ? 1 : 0)) return false;
   await applyUpdate(here);
   return true;
 }

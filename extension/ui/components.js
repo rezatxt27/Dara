@@ -105,9 +105,11 @@ export const STATUS = {
   stale: { t: 'نیاز به به‌روزرسانی', cls: 'stale' }, delayed: { t: 'قیمت قدیمی', cls: 'delayed' }, error: { t: 'خطای دریافت', cls: 'error' },
   matured: { t: 'سررسید شده', cls: 'stale' }, settled: { t: 'تسویه شده', cls: '' },
 };
-export function StatusPill({ status, title }) {
+export function StatusPill({ status, title, at }) {
   const s = STATUS[status] || STATUS.manual;
-  return html`<span class=${'pill ' + s.cls} title=${title || ''}>${status === 'live' && html`<i class="blink"></i>`}${s.t}</span>`;
+  // «زنده» only while the price is fresh (within the hour); an older online price is just «آنلاین»
+  const fresh = status !== 'live' || !at || Date.now() - at < 3600e3;
+  return html`<span class=${'pill ' + s.cls} title=${title || ''}>${status === 'live' && fresh && html`<i class="blink"></i>`}${status === 'live' && !fresh ? 'آنلاین' : s.t}</span>`;
 }
 
 export function refLabel(ref) {
@@ -120,6 +122,12 @@ export function refLabel(ref) {
 }
 export const providerName = (p) => PROVIDERS[p]?.name || p;
 
+/** A submit that runs once: a double-click (or Enter twice) can't record the same deposit or purchase twice. */
+export function useOnce() {
+  const [busy, setBusy] = useState(false); const r = useRef(false);
+  const go = async (fn) => { if (r.current) return; r.current = true; setBusy(true); try { await fn(); } finally { r.current = false; setBusy(false); } };
+  return [busy, go];
+}
 export function Toggle({ on, onChange, title }) {
   return html`<button type="button" class=${'toggle' + (on ? ' on' : '')} title=${title} role="switch" aria-checked=${on ? 'true' : 'false'} aria-label=${title || undefined} onClick=${() => onChange(!on)}></button>`;
 }
@@ -128,7 +136,12 @@ export function Seg({ value, options, onChange, cls = '' }) {
 }
 
 /* ---------------- inputs ---------------- */
-const fmtVal = (v) => (v === null || v === undefined || v === '' || !isFinite(v) ? '' : localSep(groupTyping(String(+(+v).toFixed(8)))));
+// (very large numbers would turn into «1e+21» notation and lose their digits: shown as plain digits instead)
+const plain = (v) => (Math.abs(v) >= 1e21 ? BigInt(Math.round(v)).toString() : String(+(+v).toFixed(8)));
+const fmtVal = (v) => (v === null || v === undefined || v === '' || !isFinite(v) ? '' : localSep(groupTyping(plain(+v))));
+let _fid = 0;
+/** A stable id that ties a field's <label> to its input (screen readers announce the label). */
+export function useFieldId() { const r = useRef(null); if (r.current === null) r.current = 'fld' + (++_fid); return r.current; }
 const localSep = (g) => (getDigits() === 'fa' ? g.replace(/,/g, '٬') : g);
 
 /**
@@ -138,6 +151,7 @@ const localSep = (g) => (getDigits() === 'fa' ? g.replace(/,/g, '٬') : g);
 export function NumField({ label, value, onInput, suffix, hint, placeholder, digits = 'auto', autoFocus, err, words = false, wordsUnit = '', prev = null, compact = false, unit = null }) {
   const [txt, setTxt] = useState(fmtVal(value));
   const ref = useRef();
+  const id = useFieldId();
   useEffect(() => { if (document.activeElement !== ref.current) setTxt(fmtVal(value)); }, [value]);
   const onIn = (e) => {
     const el = e.target; const raw = el.value; const caret = el.selectionStart ?? raw.length;
@@ -162,9 +176,9 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
   const ratio = has && prev > 0 && v > 0 ? v / prev : 1;
   const warn = ratio >= 8 || ratio <= 1 / 8;
   return html`<div class="field">
-    ${label && html`<label>${label}</label>`}
+    ${label && html`<label for=${id}>${label}</label>`}
     <div class="input-wrap">
-      <input ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn}
+      <input id=${id} ref=${ref} class=${'input num-in' + (err ? ' err' : '') + (warn ? ' warn' : '')} inputmode="decimal" placeholder=${placeholder || ''} autoFocus=${autoFocus} value=${txt} onInput=${onIn}
         onBlur=${() => { if (hasWords(txt)) { const v = parseNum(txt, { unit }); setTxt(isFinite(v) ? fmtVal(v) : txt); } }} aria-invalid=${err ? 'true' : undefined} />
       ${suffix && html`<span class=${'suffix' + (String(suffix).length <= 2 ? ' short' : '')}>${suffix}</span>`}
     </div>
@@ -173,6 +187,7 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
       ${warn && html`<span class="warn-line"><${Icon} n="alert" cls="sm" /> ${ratio >= 8 ? `حدود ${num(ratio, 0)} برابرِ مقدار قبلی است؛ تعداد صفرها را چک کن` : `حدود ${num(1 / ratio, 0)} برابر کمتر از مقدار قبلی است؛ تعداد صفرها را چک کن`}</span>`}
       ${hint && html`<span>${hint}</span>`}
     </span>`}
+    ${typeof err === 'string' && err && html`<span class="err-msg">${err}</span>`}
   </div>`;
 }
 
@@ -195,7 +210,13 @@ export function JCalendar({ value, onPick, onClear, onClose }) {
     const h = (e) => { if (box.current && !box.current.contains(e.target)) onClose(); };
     // Escape closes the calendar only, not the form around it
     const k = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
-    setTimeout(() => { document.addEventListener('mousedown', h); if (!box.current?.closest('.modal')) box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 0); document.addEventListener('keydown', k);
+    setTimeout(() => {
+      document.addEventListener('mousedown', h);
+      const m = box.current?.closest('.modal');
+      // inside a dialog the calendar opens in place: scroll the dialog itself (not the page behind it) to show it whole
+      if (m) { const r = box.current.getBoundingClientRect(), mr = m.getBoundingClientRect(); if (r.bottom > mr.bottom) m.scrollTop += r.bottom - mr.bottom + 12; }
+      else box.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, 0); document.addEventListener('keydown', k);
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
   }, []);
   const first = jToIso(ym.jy, ym.jm, 1);
@@ -227,6 +248,7 @@ export function JDateField({ label, iso, onIso, hint, allowEmpty, err, onBad }) 
   const [bad, setBad] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef();
+  const id = useFieldId();
   const mark = (b) => { setBad(b); onBad?.(b); };
   // the stored date only rewrites the text when the owner isn't typing in it (else «۱۴۰۶/۰۴/۳» becomes «۰۳» mid-typing)
   useEffect(() => { if (document.activeElement !== ref.current) { setTxt(iso ? fmtJ(iso, 'short') : ''); mark(false); } }, [iso]);
@@ -240,9 +262,9 @@ export function JDateField({ label, iso, onIso, hint, allowEmpty, err, onBad }) 
     else mark(final || (!v && complete));
   };
   return html`<div class="field" style="position:relative">
-    ${label && html`<label>${label}</label>`}
+    ${label && html`<label for=${id}>${label}</label>`}
     <div class="input-wrap">
-      <input ref=${ref} class=${'input num-in' + (bad || err ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
+      <input id=${id} ref=${ref} class=${'input num-in' + (bad || err ? ' err' : '')} placeholder=${allowEmpty ? 'بدون تاریخ' : '۱۴۰۵/۰۷/۰۹'} value=${txt} style="padding-left:44px"
         aria-invalid=${bad || err ? 'true' : undefined}
         onFocus=${() => setOpen(true)}
         onInput=${(e) => { setTxt(e.target.value); commit(e.target.value, false); }}

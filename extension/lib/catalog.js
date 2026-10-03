@@ -148,4 +148,6 @@ export const SCENARIOS = [
   { id: 'cryptowinter', name: 'زمستان رمزارز', shocks: { crypto: -0.5 } },
   { id: 'bourse', name: 'رکود بورس', shocks: { equity: -0.25 } },
   { id: 'inflation', name: 'تورم شدید', shocks: { usd: 0.4, equity: 0.25, real: 0.35, private: 0.2 } },
+  // shown only when coins or gold funds are held
+  { id: 'bubblepop', name: 'تخلیه حباب سکه و صندوق طلا', shocks: { bubble: -1 }, needs: 'bubble' },
 ];

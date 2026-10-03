@@ -10,6 +10,7 @@ import { CORE_REFS, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY } from './lib/catalog.js';
 import { todayIso, addDaysIso, isoFromDate } from './lib/jalali.js';
 import { money, pct, uid } from './lib/format.js';
 import * as U from './lib/update.js';
+import * as BB from './lib/bubble.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir'];
 const REFERERS = {
@@ -119,8 +120,16 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
 
     // 2) Fetch quotes
     const refs = E.collectRefs(assets, st.alerts, [...CORE_REFS, ...TGJU.map((t) => ({ provider: 'tgju', key: t.key })), ...(settings.watch || [])]);
-    const { quotes: fresh, errors } = await P.fetchAll(refs, settings.providers);
-    const okCount = Object.keys(fresh).length;
+    // NAVs of exchange-traded funds, for their bubble. Optional: a symbol with no NAV (a plain share) is noted and
+    // skipped for a week; its error is never shown or stored.
+    const navs = E.navRefs(assets, settings.watch || [], st.alerts, st.meta.navMiss || {});
+    const { quotes: fresh, errors } = await P.fetchAll([...refs, ...navs.filter((r) => !refs.some((x) => P.quoteId(x) === P.quoteId(r)))], settings.providers);
+    // auxiliary NAV errors are never stored or shown; «this symbol has no NAV» is remembered for a week, a hit clears it
+    const nav = E.sortNavResults(navs, refs, fresh, errors);
+    if (Object.keys(nav.miss).length || nav.hit.some((k) => st.meta.navMiss?.[k])) {
+      await store.update('meta', (m) => { const nm = { ...(m.navMiss || {}), ...nav.miss }; for (const k of nav.hit) delete nm[k]; return { ...m, navMiss: nm }; });
+    }
+    const okCount = Object.keys(fresh).filter((k) => !nav.aux.has(k)).length;
     // Only errors on prices you actually use count as problems (the rest of the board is optional)
     const relevant = new Set(E.collectRefs(assets, st.alerts, CORE_REFS).map((r) => P.quoteId(r)));
     const relErrors = Object.fromEntries(Object.entries(errors).filter(([k]) => relevant.has(k)));
@@ -190,6 +199,10 @@ function refName(ref) {
 async function notifyAlerts(fired, settings) {
   if (!settings.notify.alerts) return;
   for (const a of fired) {
+    if (a.kind === 'bubble') {
+      notify('dara-alert-' + a.id, `هشدار حباب: ${refName(a.ref)}`, `حباب ${a.op === 'gt' ? 'به بالای' : 'به زیر'} ${pct(a.value, { sign: false })} رسید — حباب فعلی ${pct(a.price, { sign: false })}`);
+      continue;
+    }
     const usd = a.ref.provider === 'tgju' && TGJU_BY_KEY[a.ref.key]?.usd;
     const price = usd ? `$${a.price.toLocaleString('en-US')}` : money(a.price, settings);
     notify('dara-alert-' + a.id, `هشدار قیمت: ${refName(a.ref)}`, `${a.op === 'gt' ? 'به بالای' : 'به زیر'} سطح تعیین‌شده رسید — قیمت فعلی ${price}`);
@@ -373,6 +386,22 @@ const handlers = {
     // a small cache: the 40 most recent series
     await store.update('history', (h) => Object.fromEntries(Object.entries({ ...h, [id]: { at: Date.now(), points } }).sort((a, b) => b[1].at - a[1].at).slice(0, 40)));
     return { points };
+  },
+  /** Daily coin bubbles over `days` (coin close ÷ gold inside it at ounce × dollar), with average and today's level. */
+  async bubbleStats({ keys = BB.COIN_KEYS, days = 90 } = {}) {
+    const ons = await handlers.history({ ref: { provider: 'tgju', key: 'ons' }, days });
+    if (!ons.points?.length) return { stats: {}, error: ons.error || 'تاریخچه انس دریافت نشد' };
+    const { quotes } = await store.load('quotes');
+    const stats = {};
+    for (const key of keys.filter((k) => BB.COINS[k])) {
+      try {
+        const c = await handlers.history({ ref: { provider: 'tgju', key }, days });
+        const series = BB.coinBubbleSeries(key, c.points || [], ons.points);
+        const now = BB.coinBubble(key, quotes);
+        stats[key] = { series, ...(BB.bubbleStats(series, now && !now.stale ? now.bubble : null) || {}) };
+      } catch (e) { stats[key] = { series: [], error: String(e.message || e) }; }
+    }
+    return { stats };
   },
   async backfill({ days = 365 }) { return backfill(days); },
   async weekly({ force = true, days = 7 }) { return generateWeekly({ force, days }); },

@@ -106,3 +106,28 @@ test('review fixes (1.5): rate change applies from today, undo with a deleted as
   close(E.loanState(L2.loan, J.addDaysIso(iso, 40)).owed, E.loanPlan(L2.loan).rows.find((x) => x.date > iso).balance, 1, 'value follows the schedule');
   assert.equal(E.valueOf(L, {}, {}).status, 'error', 'shows up in «needs attention»');
 });
+
+test('buying a coin records the bubble in the price paid; undo drops it; sells, backdated and non-coin buys record none', async () => {
+  const t = Date.now();
+  const Q = (price) => ({ price, changePct: 0, at: t - 60000, fetchedAt: t - 60000 });
+  const quotes = { 'tgju:ons': Q(4000), 'tgju:price_dollar_rl': Q(1_000_000), 'tgju:rob': Q(300_000_000), 'tgju:geram18': Q(96_000_000) };
+  const I = 2.03325 * 0.9 * 4000 * 1_000_000 / 31.1034768;
+  const coin = { id: 'c', name: 'ربع', category: 'gold', mode: 'units', quantity: 1, unit: 'عدد', price: { source: 'market', ref: { provider: 'tgju', key: 'rob' }, factor: 1 } };
+  const raw = { id: 'g', name: 'آب‌شده', category: 'gold_online', mode: 'units', quantity: 1, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, factor: 1 } };
+  await reset({ assets: [coin, raw], quotes });
+  const ev = await act.trade({ assetId: 'c', side: 'buy', qty: 2, price: I * 1.15 });
+  close(ev.bub.b, 0.15, 1e-9, 'bubble paid'); assert.equal(ev.bub.qty, 2);
+  const sell = await act.trade({ assetId: 'c', side: 'sell', qty: 1, price: 3e8 });
+  assert.equal(sell.bub, undefined, 'a sale records nothing');
+  const old = await act.trade({ assetId: 'c', side: 'buy', qty: 1, price: 3e8, date: J.addDaysIso(iso, -30) });
+  assert.equal(old.bub, undefined, 'a backdated buy is not measured against today\'s gold');
+  const g = await act.trade({ assetId: 'g', side: 'buy', qty: 1, price: 96e6 });
+  assert.equal(g.bub, undefined, 'raw gold has no bubble');
+  const BB = await import('../../extension/lib/bubble.js');
+  let s = await store.load('assets', 'events', 'quotes');
+  const a = s.assets.find((x) => x.id === 'c');
+  close(BB.buyBubble(a, s.events, s.quotes).avg, 0.15, 1e-9);
+  await act.undoEvent(ev);
+  s = await store.load('assets', 'events', 'quotes');
+  assert.equal(BB.buyBubble(s.assets.find((x) => x.id === 'c'), s.events, s.quotes), null, 'undone buy no longer counts');
+});

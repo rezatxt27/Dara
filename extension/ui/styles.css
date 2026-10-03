@@ -506,3 +506,12 @@ details.more[open] > summary { margin-bottom: 10px; }
 .catsep { grid-column: 1 / -1; font-size: 12px; font-weight: 700; color: var(--muted); border-top: 1px dashed var(--line-2); padding-top: 8px; margin-top: 2px; }
 /* with the side form open, messages rise above its buttons instead of covering them */
 body:has(.drawer) .toasts { bottom: 86px; }
+
+/* bubbles (حباب سکه و صندوق) */
+.pill.bub { gap: 3px; }
+.pill.bub .xs { font-size: 9px; line-height: 1; }
+.bubtbl .refrow td { background: var(--surface-2); }
+.bubtbl td { vertical-align: middle; }
+.bubtbl td:first-child { min-width: 120px; }
+@media (max-width: 1100px) { .bubtbl th:nth-child(3), .bubtbl td:nth-child(3), .bubtbl th:nth-child(6), .bubtbl td:nth-child(6) { display: none; } }
+@media (max-width: 860px) { .bubtbl th:nth-child(5), .bubtbl td:nth-child(5) { display: none; } }

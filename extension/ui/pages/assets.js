@@ -5,6 +5,9 @@ import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, toEnDigits, hasWords } from '../../lib/format.js';
 import { act, doneToast } from '../actions.js';
+import * as BB from '../../lib/bubble.js';
+import { BubblePill, useBubbleStats } from '../bubbles.js';
+import { T } from '../tips.js';
 
 /** Quantity column for an installment loan: installment amount and progress. */
 function loanCell(a, s) {
@@ -230,11 +233,21 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   const evs = st.events.filter((e) => !e.undone && e.kind !== 'loan' && (e.toId === a.id || e.fromId === a.id || e.changes?.some((c) => c.assetId === a.id))).slice(0, 5);
   const series = view === 'price' ? priceSeries : valueSeries;
   const loan = a.mode === 'loan';
+  // coin or exchange fund: the bubble in today's price, its 3-month normal (coins) and the bubble paid on recorded buys
+  const bub = BB.assetBubble(a, st.quotes, r.value);
+  const coinKey = bub?.kind === 'coin' ? a.price.ref.key : null;
+  const bstats = useBubbleStats(coinKey ? [coinKey] : []);
+  const bstat = coinKey ? bstats?.[coinKey] : null;
+  const paid = bub ? BB.buyBubble(a, st.events, st.quotes) : null;
   const showChart = !loan && (isMarket || valueSeries.length >= 2);
   const facts = loan ? [] : [
     ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : E.APPRAISED.has(a.category) ? 'برآورد دستی' : a.interest?.on ? 'مانده دستی + سود خودکار' : 'مانده دستی'],
     [r.status === 'matured' ? 'سررسید' : 'آخرین به‌روزرسانی', r.status === 'auto' ? 'هر لحظه (خودکار)' : r.status === 'matured' ? fmtJ(a.rate.maturity) : r.at ? `${fmtJ(isoFromDate(new Date(r.at)))}، ${ago(r.at)}` : '—'],
     ...(a.mode === 'units' ? [['مقدار', `${num(a.quantity, 'auto')} ${a.unit || ''}`], ['قیمت واحد', html`<${Money} v=${r.unitPrice} s=${s} />`]] : []),
+    ...(bub ? [[html`<span class="row" style="gap:2px">حباب امروز${T(bub.kind === 'fund' ? 'bubbleFund' : 'bubble')}</span>`, html`<span class="row" style="gap:6px;flex-wrap:wrap"><${BubblePill} b=${bub} stat=${bstat} />${bub.amount !== null && bub.amount > 0 ? html`<span class="xs muted">≈ <${Money} v=${bub.amount} s=${s} compact /> از ارزش</span>` : ''}</span>
+      ${bstat?.avg !== undefined ? html`<div class="xs muted">میانگین ۳ ماه <span class="ltr">${pct(bstat.avg, { sign: false })}</span>${bstat.level === 'high' ? '، الان بالاتر از معمول' : bstat.level === 'low' ? '، الان پایین‌تر از معمول' : ''}</div>` : ''}`]] : []),
+    ...(paid ? [[html`<span class="row" style="gap:2px">حباب هنگام خرید${T('buyBubble')}</span>`, html`<span class="ltr">${pct(paid.avg, { sign: false })}</span> <span class="xs muted">(${num(paid.count)} خرید ثبت‌شده)</span>
+      ${paid.effect !== null && Math.abs(paid.effect) >= 1 ? html`<div class="xs"><span class=${paid.effect >= 0 ? 'pos' : 'neg'}>تغییر حباب از آن موقع: <${Money} v=${paid.effect} s=${s} compact sign /></span></div>` : ''}`]] : []),
     ...(a.mode === 'rate' ? [['اصل', html`<${Money} v=${a.rate.principal} s=${s} />`], ['سود روزانه', html`<${Money} v=${E.rateDaily(a.rate, r.value)} s=${s} />`]] : []),
     ...(a.interest?.on ? [['سود جمع‌شده (هنوز واریز نشده)', html`<${Money} v=${r.accrued} s=${s} />`]] : []),
     ...(r.pnl !== null ? [['سود / زیان', html`<span class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign /> <span class="ltr">(${pct(r.ret)})</span></span>`]] : []),

@@ -2,6 +2,7 @@
 import * as E from './engine.js';
 import * as I from './insights.js';
 import * as AI from './ai.js';
+import * as BB from './bubble.js';
 import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
@@ -95,11 +96,39 @@ export function makeTools(ctx) {
         const known = new Map([...s.assets.map((a) => a.price?.ref).filter(Boolean), ...(s.settings.watch || [])].map((r) => [E.quoteId(r), r]));
         for (const [id, q] of Object.entries(s.quotes)) {
           if (!(q.price > 0)) continue;
+          if (id.endsWith(':nav') && !known.has(id)) continue; // fetched only for a fund's bubble
           const [prov, key] = id.split(':');
           const usd = prov === 'tgju' && TGJU_BY_KEY[key]?.usd;
           out[refName(known.get(id) || { provider: prov, key })] = { price: usd ? q.price : disp(q.price, s.settings), unit: usd ? 'دلار' : unitName(s.settings), day_change_pct: pct(q.changePct || 0), as_of: q.asOf || fmtJ(isoFromDate(new Date(q.at || Date.now()))) };
         }
         return out;
+      },
+    },
+    {
+      name: 'get_gold_bubbles',
+      description: 'حباب سکه‌ها (قیمت بازار در برابر ارزش طلای داخلش با انس × دلار آزاد)، قیمت هر گرم طلای خالص در هر گزینه و کمترین قیمت هر گرم طلای خالص، حباب صندوق‌های بورسی (قیمت در برابر NAV ابطال) که کاربر دارد یا دنبال می‌کند، و حبابی که در خریدهای ثبت‌شده پرداخته. برای سؤال‌هایی مثل «حباب سکه چقدر است؟» یا «هر گرم طلا در کدام گزینه گران‌تر است؟». توصیه خرید نده؛ اعداد و ریسک حباب را بگو.',
+      schema: { type: 'object', properties: {}, required: [] },
+      run: async () => {
+        const s = st(); const pf = pfOf();
+        const { rows, best, gold } = BB.coinBubbles(s.quotes);
+        if (!gold) return { error: 'قیمت انس جهانی یا دلار بازار آزاد در دسترس نیست' };
+        // 3-month average per coin (from the worker's price history), when it can be had
+        let hist = {};
+        if (ctx.bubbleStats) { try { hist = (await ctx.bubbleStats(BB.COIN_KEYS)) || {}; } catch { hist = {}; } }
+        const avg = (key) => (hist[key]?.avg !== undefined ? pct(hist[key].avg) : null);
+        const funds = [...new Map([...s.assets.map((a) => a.price?.ref), ...(s.settings.watch || [])].filter((r) => BB.isTseRef(r)).map((r) => [r.key, r])).values()]
+          .map((r) => ({ ref: r, b: BB.fundBubble(r, s.quotes) })).filter((x) => x.b)
+          .map(({ ref, b }) => ({ name: refName(ref), bubble_pct: pct(b.bubble), stale: b.stale || undefined }));
+        const held = pf.rows.map((r) => ({ r, b: BB.assetBubble(r.asset, s.quotes, r.value) })).filter((x) => x.b)
+          .map(({ r, b }) => { const pb = BB.buyBubble(r.asset, s.events, s.quotes); return { name: r.asset.name, bubble_pct: pct(b.bubble), bubble_part: b.amount !== null ? money(b.amount, pf.net) : undefined,
+            paid_bubble_pct: pb ? pct(pb.avg) : undefined, bubble_change_effect: pb?.effect !== null && pb?.effect !== undefined ? money(pb.effect, pf.net) : undefined }; });
+        return {
+          basis: `انس $${Math.round(gold.ounce)} × دلار آزاد ${disp(gold.usd, s.settings)?.toLocaleString('en-US')} ${unitName(s.settings)}${gold.stale ? ' (قیمت‌ها قدیمی است)' : ''}`,
+          note: 'اجرت و کارمزد خرید و فروش حساب نشده. سکه‌های کوچک همیشه مقداری حباب دارند؛ حباب امروز را با میانگین همان سکه مقایسه کن. این‌ها توصیه خرید یا فروش نیست.',
+          coins: rows.map((r) => ({ name: r.name, bubble_pct: pct(r.bubble), avg_3m_bubble_pct: r.kind === 'coin' ? avg(r.key) ?? undefined : undefined,
+            price_per_pure_gram: disp(r.perPure, s.settings), above_lowest_per_gram_pct: r.vsBest === null ? undefined : pct(r.vsBest), reference: r.kind === 'ref' || undefined, stale: r.stale || undefined })),
+          lowest_per_pure_gram: best ? best.name : null, funds, held,
+        };
       },
     },
     {
@@ -122,11 +151,13 @@ export function makeTools(ctx) {
       schema: { type: 'object', properties: {
         usd_pct: { type: 'number', description: 'تغییر نرخ دلار در بازار آزاد' }, gold_ounce_pct: { type: 'number', description: 'تغییر انس جهانی طلا (دلاری)' },
         crypto_pct: { type: 'number', description: 'تغییر دلاری رمزارزها' }, metals_pct: { type: 'number', description: 'تغییر دلاری نقره/مس' },
-        bourse_pct: { type: 'number', description: 'تغییر بورس تهران' }, private_pct: { type: 'number', description: 'تغییر ارزش سهام غیربورسی' }, real_estate_pct: { type: 'number' } }, required: [] },
+        bourse_pct: { type: 'number', description: 'تغییر بورس تهران' }, private_pct: { type: 'number', description: 'تغییر ارزش سهام غیربورسی' }, real_estate_pct: { type: 'number' },
+        bubble_pct: { type: 'number', description: 'تغییر اندازه حباب سکه‌ها و صندوق‌های طلای بورسی نسبت به حباب فعلی؛ −100 یعنی حباب کاملاً تخلیه شود' } }, required: [] },
       run: (a = {}) => {
         const s = st();
         const shocks = { usd: (a.usd_pct || 0) / 100, gold: (a.gold_ounce_pct || 0) / 100, crypto: (a.crypto_pct || 0) / 100, metals: (a.metals_pct || 0) / 100, equity: (a.bourse_pct || 0) / 100, real: (a.real_estate_pct || 0) / 100 };
         if (a.private_pct !== undefined) shocks.private = a.private_pct / 100;
+        if (a.bubble_pct) shocks.bubble = Math.max(-1, Math.min(1, a.bubble_pct / 100));
         const r = E.simulate(s.assets, s.quotes, s.settings, shocks);
         const m = (v) => (P() ? undefined : disp(v, s.settings));
         return { change_pct: pct(r.pct), net_before: m(r.before), net_after: m(r.after), change: m(r.delta),
@@ -423,8 +454,8 @@ export function newAssetFromCapture(r, { site = '', category, now = Date.now(), 
 }
 
 /* ---------------- natural-language scenario ---------------- */
-export const SCENARIO_RANGES = { usd: [-50, 150], gold: [-50, 100], equity: [-60, 150], crypto: [-80, 200], metals: [-50, 100], private: [-80, 200], real: [-50, 150] };
-export const SCENARIO_LABELS = { usd: 'نرخ دلار', gold: 'انس جهانی طلا', equity: 'بورس تهران', crypto: 'رمزارز (دلاری)', metals: 'نقره و مس (دلاری)', private: 'سهام غیربورسی', real: 'ملک و خودرو' };
+export const SCENARIO_RANGES = { usd: [-50, 150], gold: [-50, 100], equity: [-60, 150], crypto: [-80, 200], metals: [-50, 100], private: [-80, 200], real: [-50, 150], bubble: [-100, 100] };
+export const SCENARIO_LABELS = { usd: 'نرخ دلار', gold: 'انس جهانی طلا', equity: 'بورس تهران', crypto: 'رمزارز (دلاری)', metals: 'نقره و مس (دلاری)', private: 'سهام غیربورسی', real: 'ملک و خودرو', bubble: 'اندازه حباب سکه و صندوق طلا' };
 export function scenarioSystem() {
   return 'You turn a described economic event into explicit, editable market assumptions for an Iranian household portfolio. You do not predict; you state plausible assumptions. Output strictly one JSON object.';
 }
@@ -433,9 +464,9 @@ export function scenarioPrompt(text, quotes) {
   return `کاربر می‌خواهد این اتفاق را روی دارایی‌هایش امتحان کند: «${text}»
 وضعیت فعلی بازار: دلار آزاد ${q('tgju:price_dollar_rl') ? Math.round(q('tgju:price_dollar_rl') / 10).toLocaleString('en-US') + ' تومان' : 'نامشخص'}، انس طلا ${q('tgju:ons') ? '$' + Math.round(q('tgju:ons')) : 'نامشخص'}.
 برای هر متغیر یک فرض درصدی معقول بده (عدد صحیح، 0 یعنی بدون تغییر). متغیرها:
-usd: تغییر نرخ دلار بازار آزاد ایران، gold: تغییر انس جهانی طلا به دلار (طلای داخلی خودکار = انس × دلار)، equity: بورس تهران، crypto: رمزارز به دلار، metals: نقره و مس به دلار، private: سهام غیربورسی، real: ملک و خودرو.
+usd: تغییر نرخ دلار بازار آزاد ایران، gold: تغییر انس جهانی طلا به دلار (طلای داخلی خودکار = انس × دلار)، equity: بورس تهران، crypto: رمزارز به دلار، metals: نقره و مس به دلار، private: سهام غیربورسی، real: ملک و خودرو، bubble: تغییر اندازه حباب سکه و صندوق‌های طلا نسبت به حباب فعلی (−100 یعنی حباب کاملاً تخلیه شود، +100 یعنی دو برابر شود).
 قواعد: فقط متغیرهایی را که این اتفاق واقعاً رویشان اثر دارد تغییر بده؛ برای هر متغیر تغییرکرده یک دلیل کوتاه یک‌جمله‌ای فارسی بنویس؛ اعداد را در بازه‌های واقع‌بینانه نگه دار؛ اگر اتفاق مبهم است، رایج‌ترین برداشت را بگیر.
-خروجی فقط JSON: {"title":"عنوان کوتاه سناریو","shocks":{"usd":0,"gold":0,"equity":0,"crypto":0,"metals":0,"private":0,"real":0},"reasons":{"usd":"..."}}`;
+خروجی فقط JSON: {"title":"عنوان کوتاه سناریو","shocks":{"usd":0,"gold":0,"equity":0,"crypto":0,"metals":0,"private":0,"real":0,"bubble":0},"reasons":{"usd":"..."}}`;
 }
 /** Clamp model output to the simulator's ranges; keep a reason per changed variable. */
 export function parseScenario(json) {

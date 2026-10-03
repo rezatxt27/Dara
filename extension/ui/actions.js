@@ -2,6 +2,7 @@
 // (store.mutate), so a page and the background worker can't overwrite each other's changes.
 import * as store from '../lib/store.js';
 import * as E from '../lib/engine.js';
+import * as BB from '../lib/bubble.js';
 import { uid } from '../lib/format.js';
 import { todayIso } from '../lib/jalali.js';
 import { send, toast } from './components.js';
@@ -407,6 +408,8 @@ export const act = {
       a.updatedAt = Date.now();
       if (cashId && byId[cashId]) changes.push(...E.applyDelta(byId[cashId], side === 'buy' ? -amount : amount, st.quotes));
       ev = { id: uid('e'), kind: 'trade', date: date || todayIso(), at: Date.now(), title: `${side === 'buy' ? 'خرید' : 'فروش'} «${a.name}»`, amount, fromId: side === 'buy' ? cashId || null : assetId, toId: side === 'buy' ? assetId : cashId || null, changes };
+      // a coin or fund bought today: remember the bubble in the price paid (vs today's gold or NAV), to show later what it did
+      if (side === 'buy' && (!date || date === todayIso())) { const b = BB.paidBubble(a, price, st.quotes); if (b !== null) ev.bub = { qty, b }; }
       logEv(st, ev);
     });
     return ev;

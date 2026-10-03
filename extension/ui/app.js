@@ -2,6 +2,7 @@ import { isoFromDate } from '../lib/jalali.js';
 import { html, render, useState, useEffect, useMemo, useStore, useTick, Icon, Toasts, send, toast, Money, Delta, Seg, money, num, pct, fmtJ, AreaChart, StackBar, Ava, StatusPill, refLabel, Markdown, BackfillButton, Explain, AskBtn } from './components.js';
 import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
+import * as BB from '../lib/bubble.js';
 import { CAT, EXPOSURES } from '../lib/catalog.js';
 import { ago, timeHM, signed } from '../lib/format.js';
 import { todayIso } from '../lib/jalali.js';
@@ -105,12 +106,16 @@ function WhyChanged({ st, pf, s, open }) {
     ...(Math.abs(at.external) >= 1 ? [{ name: 'واریز و برداشت', v: at.external }] : []),
     ...(Math.abs(at.edits) >= 1 ? [{ name: 'ثبت و ویرایش دستی', v: at.edits }] : [])];
   const max = Math.max(1, ...bars.map((b) => Math.abs(b.v)));
+  // the coins' part of this period: how much was gold (ounce × dollar) and how much their bubble
+  const split = BB.coinMoveSplit(at, st.quotes);
+  const showSplit = split && Math.abs(split.total) >= 1 && Math.abs(split.bubble) >= Math.max(1, Math.abs(split.total) * 0.05);
   return html`<div class="card">${head}
     <div class="why">
       <div>
         <div class="lead">${lead} قیمت‌ها و سودها دارایی‌ات را <b class=${up ? 'pos' : 'neg'}><span class="ltr">${pct(base ? ret / base : 0)}</span></b> (<${Money} v=${ret} s=${s} compact sign />) ${up ? 'بیشتر' : 'کمتر'} کردند.
           ${top ? html` بیشترین اثر قیمت را <b>${top.name}</b> داشت (<${Money} v=${top.price} s=${s} compact sign />).` : ''}
           ${Math.abs(moved) >= 10 ? html`<div class="small muted" style="margin-top:4px">جدا از آن، <${Money} v=${moved} s=${s} compact sign /> پول جابه‌جا یا ثبت شد؛ پس کل ارزش خالص <${Money} v=${at.total} s=${s} compact sign /> عوض شد.</div>` : ''}
+          ${showSplit ? html`<div class="small muted" style="margin-top:4px" title="تقریبی: قیمت سکه، انس و دلار در لحظه‌های کمی متفاوت ثبت می‌شوند">از این، سکه‌هایت <${Money} v=${split.total} s=${s} compact sign />: <${Money} v=${split.gold} s=${s} compact sign /> از قیمت طلا و <b class=${split.bubble >= 0 ? 'pos' : 'neg'}><${Money} v=${split.bubble} s=${s} compact sign /></b> از ${split.bubble >= 0 ? 'بزرگ‌تر شدن' : 'کوچک‌تر شدن'} حباب.</div>` : ''}
           ${at.est ? html`<div class="xs muted">مبنای مقایسه بازسازی‌شده است.</div>` : ''}</div>
         <div class="split">
           <div class="pcell"><span class="n">تغییر قیمت</span><span class=${'v ' + (at.price >= 0 ? 'pos' : 'neg')}><${Money} v=${at.price} s=${s} compact sign /></span></div>

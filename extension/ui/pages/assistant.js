@@ -66,7 +66,8 @@ export function AssistantPage({ st, s, route }) {
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
     try {
-      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p) });
+      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p),
+        bubbleStats: async (keys) => { const r = await send('bubbleStats', { keys, days: 90 }); return r?.ok ? r.stats : {}; } });
       // in «only percentages» mode, earlier answers written with full amounts are not sent again
       const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));
       const res = await AI.runAgent({ ai: stRef.current.ai, system: A.systemPrompt(stRef.current, privacy), messages: history, tools, signal: ctl.signal,

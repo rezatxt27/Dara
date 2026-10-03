@@ -7,6 +7,8 @@ import * as A from '../../lib/assistant.js';
 import * as store from '../../lib/store.js';
 import { ago, parseNum } from '../../lib/format.js';
 import { act } from '../actions.js';
+import { T as TT } from '../tips.js';
+import * as BB from '../../lib/bubble.js';
 
 /* Plain-language help for each section (for people new to these ideas). */
 const TIPS = {
@@ -225,7 +227,8 @@ function Targets({ pf, s, assets }) {
 
 
 /* ---------------- scenario simulator ---------------- */
-const ZERO = { usd: 0, gold: 0, crypto: 0, metals: 0, equity: 0, private: 0, real: 0 };
+const ZERO = { usd: 0, gold: 0, crypto: 0, metals: 0, equity: 0, private: 0, real: 0, bubble: 0 };
+const MORE_KEYS = ['crypto', 'metals', 'private', 'real', 'bubble'];
 function Scenario({ st, pf, s }) {
   const [sh, setSh] = useState(ZERO);
   const [more, setMore] = useState(false);
@@ -243,7 +246,7 @@ function Scenario({ st, pf, s }) {
       const sc = A.parseScenario(res.json);
       if (!sc.assumptions.length) throw new Error('برای این اتفاق فرض قابل‌استفاده‌ای ساخته نشد؛ دقیق‌تر بنویس');
       setSh({ ...ZERO, ...sc.shocks }); setPreset(null);
-      if (['crypto', 'metals', 'private', 'real'].some((k) => sc.shocks[k])) setMore(true);
+      if (MORE_KEYS.some((k) => sc.shocks[k])) setMore(true);
       setAi({ title: sc.title || text, text, assumptions: sc.assumptions });
     } catch (e) { setNlErr(e.message); }
     setNlBusy(false);
@@ -251,7 +254,9 @@ function Scenario({ st, pf, s }) {
   const shocks = Object.fromEntries(Object.entries(sh).map(([k, v]) => [k, v / 100]));
   const r = useMemo(() => E.simulate(st.assets, st.quotes, s, shocks, pf), [st.assets, st.quotes, pf, JSON.stringify(sh)]);
   const set = (k) => (v) => { setPreset(null); setSh((x) => ({ ...x, [k]: v })); };
-  const pick = (sc) => { setPreset(sc.id); setSh({ ...ZERO, ...Object.fromEntries(Object.entries(sc.shocks).map(([k, v]) => [k, Math.round(v * 100)])) }); };
+  const pick = (sc) => { setPreset(sc.id); setSh({ ...ZERO, ...Object.fromEntries(Object.entries(sc.shocks).map(([k, v]) => [k, Math.round(v * 100)])) }); if (MORE_KEYS.some((k) => sc.shocks[k])) setMore(true); };
+  // the bubble slider and preset only matter when coins or exchange-traded gold funds are held
+  const hasBubble = useMemo(() => pf.rows.some((x) => x.exposure === 'gold' && BB.assetBubble(x.asset, st.quotes)), [pf, st.quotes]);
   const goldLocal = ((1 + sh.usd / 100) * (1 + sh.gold / 100) - 1) * 100;
   const usdTerms = r.usdBefore ? r.usdAfter / r.usdBefore - 1 : null;
   const goldTerms = r.goldBefore ? r.goldAfter / r.goldBefore - 1 : null;
@@ -272,7 +277,7 @@ function Scenario({ st, pf, s }) {
       ${ai.assumptions.map((x) => html`<div class="arow"><span class="sb">${x.label}</span><span class=${'num ltr ' + (sh[x.key] >= 0 ? 'pos' : 'neg')}>${sh[x.key] > 0 ? '+' : ''}${num(sh[x.key])}٪</span><span class="muted grow">${x.reason}</span></div>`)}
       <div class="xs muted">این‌ها فرض‌اند، نه پیش‌بینی. با لغزنده‌های پایین هر کدام را عوض کن تا نتیجه همان لحظه به‌روز شود.</div>
     </div>`}
-    <div class="row wrap" style="gap:6px;margin-bottom:14px">${SCENARIOS.map((sc) => html`<button class=${'chip' + (preset === sc.id ? ' on' : '')} onClick=${() => { pick(sc); setAi(null); }}>${sc.name}</button>`)}</div>
+    <div class="row wrap" style="gap:6px;margin-bottom:14px">${SCENARIOS.filter((sc) => sc.needs !== 'bubble' || hasBubble).map((sc) => html`<button class=${'chip' + (preset === sc.id ? ' on' : '')} onClick=${() => { pick(sc); setAi(null); }}>${sc.name}</button>`)}</div>
     <div class="why" style="grid-template-columns:1fr 1fr">
       <div class="col" style="gap:14px">
         <${Slider} label="نرخ دلار (بازار آزاد)" value=${sh.usd} onChange=${set('usd')} min=${-50} max=${150} note="روی ارز، طلا، رمزارز و فلزات اثر می‌گذارد" />
@@ -282,7 +287,8 @@ function Scenario({ st, pf, s }) {
           <${Slider} label="رمزارز (دلاری)" value=${sh.crypto} onChange=${set('crypto')} min=${-80} max=${200} />
           <${Slider} label="نقره و مس (دلاری)" value=${sh.metals} onChange=${set('metals')} min=${-50} max=${100} />
           <${Slider} label="سهام غیربورسی" value=${sh.private} onChange=${set('private')} min=${-80} max=${200} />
-          <${Slider} label="ملک و خودرو" value=${sh.real} onChange=${set('real')} min=${-50} max=${150} />`
+          <${Slider} label="ملک و خودرو" value=${sh.real} onChange=${set('real')} min=${-50} max=${150} />
+          ${(hasBubble || sh.bubble !== 0) && html`<${Slider} label=${html`<span class="row" style="gap:2px">اندازه حباب سکه و صندوق طلا${TT('bubble')}</span>`} value=${sh.bubble} onChange=${set('bubble')} min=${-100} max=${100} note="−۱۰۰ یعنی حباب کاملاً تخلیه شود و سکه به ارزش طلایش برسد؛ +۱۰۰ یعنی حباب دو برابر شود" />`}`
           : html`<button class="btn sm ghost" style="align-self:flex-start" onClick=${() => setMore(true)}><${Icon} n="chevronDown" cls="sm" />متغیرهای بیشتر</button>`}
       </div>
       <div class="col" style="gap:12px">

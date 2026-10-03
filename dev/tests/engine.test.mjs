@@ -483,7 +483,9 @@ test('new money fills the shortfalls first and never sells', () => {
 
 test('NL scenario: clamped to slider ranges, reasons kept', () => {
   const sc = A.parseScenario({ title: 'توافق', shocks: { usd: -25, equity: 30, gold: 500, crypto: 'x' }, reasons: { usd: 'ارز ارزان‌تر', equity: 'خوش‌بینی', gold: 'بی‌ربط' } });
-  assert.deepEqual(sc.shocks, { usd: -25, gold: 100, equity: 30, crypto: 0, metals: 0, private: 0, real: 0 });
+  assert.deepEqual(sc.shocks, { usd: -25, gold: 100, equity: 30, crypto: 0, metals: 0, private: 0, real: 0, bubble: 0 });
+  // the bubble variable is clamped to −100…+100 like the slider
+  assert.equal(A.parseScenario({ shocks: { bubble: -250 } }).shocks.bubble, -100);
   assert.equal(sc.assumptions.find((x) => x.key === 'gold').clamped, true);
   assert.equal(sc.assumptions.find((x) => x.key === 'usd').reason, 'ارز ارزان‌تر');
   assert.equal(sc.assumptions.length, 3);

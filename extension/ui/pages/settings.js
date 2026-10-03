@@ -239,7 +239,7 @@ export function SettingsPage({ st, pf, s }) {
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="bell" cls="sm" />اعلان‌ها</h3></div>
-      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
+      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="download" cls="sm" />داده‌ها</h3><span class="sub">${num(st.assets.length)} دارایی، ${num(Object.keys(st.snapshots).length)} روز تاریخچه</span></div>

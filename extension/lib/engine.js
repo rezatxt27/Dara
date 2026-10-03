@@ -4,6 +4,7 @@ import { CAT, CATEGORIES, EXPOSURES, GOLD_ETFS, TGJU_BY_KEY } from './catalog.js
 import { quoteId, isUsdRef } from './providers.js';
 import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
 import { uid, num } from './format.js';
+import * as BB from './bubble.js';
 
 export { quoteId, isUsdRef, addDaysIso };
 const DAY = 86400000;
@@ -759,7 +760,10 @@ export function makeSnapshot(pf, quotes, extra = {}) {
   // an asset whose price hasn't arrived yet is left out, so its first real value counts as its start, not as a gain
   const v = {}; for (const r of pf.rows) if (!(r.status === 'error' && !r.value)) v[r.asset.id] = Math.round(r.signedValue);
   const d = denomRates(quotes);
-  return { t: Math.round(pf.net), g: Math.round(pf.gross), l: Math.round(pf.debt), usd: d.usd, gold: d.gold, coin: d.coin, cats, v, at: Date.now(), ...extra };
+  // the global gold price (ounce × free-market dollar, Rial): later splits a coin's move into gold and bubble
+  const gx = !extra.est && quotes['tgju:ons']?.price > 0 && quotes['tgju:price_dollar_rl']?.price > 0 && !quotes['tgju:ons'].error && !quotes['tgju:price_dollar_rl'].error
+    ? Math.round(quotes['tgju:ons'].price * quotes['tgju:price_dollar_rl'].price) : undefined;
+  return { t: Math.round(pf.net), g: Math.round(pf.gross), l: Math.round(pf.debt), usd: d.usd, gold: d.gold, coin: d.coin, ...(gx ? { gx } : {}), cats, v, at: Date.now(), ...extra };
 }
 export function pruneSnapshots(snaps, keepDays = 1500) {
   const keys = Object.keys(snaps).sort();
@@ -934,13 +938,16 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
  * shocks (fractions): usd (rial/dollar), gold (ounce in USD), crypto (USD), metals (USD), equity (TSE), private, real.
  * Gold in Iran ≈ ounce × dollar, so a dollar jump lifts gold, crypto and metals too.
  */
-export function shockFactor(a, s = {}) {
+export function shockFactor(a, s = {}, bubble = null) {
   if (isLiability(a)) return 1;
   const usd = 1 + (+s.usd || 0);
   const exp = exposureOf(a);
+  // a coin or gold fund sells for its gold × (1 + bubble); s.bubble scales the bubble itself (−1 = it disappears)
+  const k = +s.bubble || 0;
+  const bf = k && isFinite(bubble) && bubble > -1 ? (1 + bubble * (1 + k)) / (1 + bubble) : 1;
   switch (exp) {
     case 'fx': return usd;
-    case 'gold': return usd * (1 + (+s.gold || 0));
+    case 'gold': return usd * (1 + (+s.gold || 0)) * bf;
     case 'commodity': return usd * (1 + (+s.metals || 0));
     case 'crypto': return usd * (1 + (+s.crypto || 0));
     case 'equity': return a.category === 'private' ? 1 + (s.private ?? s.equity ?? 0) : 1 + (+s.equity || 0);
@@ -950,7 +957,8 @@ export function shockFactor(a, s = {}) {
 }
 export function simulate(assets, quotes, settings, shocks = {}, pf = null) {
   pf = pf || portfolio(assets, quotes, settings);
-  const rows = pf.rows.map((r) => { const f = shockFactor(r.asset, shocks); return { asset: r.asset, cat: r.cat, exposure: r.exposure, before: r.signedValue, after: r.signedValue * f, factor: f }; });
+  const now = Date.now();
+  const rows = pf.rows.map((r) => { const f = shockFactor(r.asset, shocks, shocks.bubble ? ((b) => (b && !b.stale ? b.bubble : null))(BB.assetBubble(r.asset, quotes, null, now)) : null); return { asset: r.asset, cat: r.cat, exposure: r.exposure, before: r.signedValue, after: r.signedValue * f, factor: f }; });
   const after = rows.reduce((x, r) => x + r.after, 0);
   const before = pf.net;
   const rates = denomRates(quotes);
@@ -1068,14 +1076,22 @@ export function percentify(obj, net) {
 }
 
 /* ============================ alerts, rebalancing, quotes ============================ */
-export function checkAlerts(alerts, quotes) {
+export function checkAlerts(alerts, quotes, now = Date.now()) {
   const fired = [];
   for (const al of alerts) {
-    if (!al.active) continue;
-    const q = quotes[quoteId(al.ref)];
-    if (!q || !(q.price > 0) || q.error) continue;
-    const hit = al.op === 'gt' ? q.price >= al.value : q.price <= al.value;
-    if (hit) { al.active = false; al.firedAt = Date.now(); al.firedPrice = q.price; fired.push({ ...al, price: q.price }); }
+    if (!al.active || !al.ref) continue;
+    let v;
+    if (al.kind === 'bubble') {
+      // a bubble is judged only with fresh coin/fund, ounce and dollar (or NAV) prices — a stale one would fire falsely
+      v = BB.alertBubble(al, quotes, now);
+      if (v === null || !isFinite(+al.value)) continue;
+    } else {
+      const q = quotes[quoteId(al.ref)];
+      if (!q || !(q.price > 0) || q.error) continue;
+      v = q.price;
+    }
+    const hit = al.op === 'gt' ? v >= al.value : v <= al.value;
+    if (hit) { al.active = false; al.firedAt = now; al.firedPrice = v; fired.push({ ...al, price: v }); }
   }
   return fired;
 }
@@ -1096,6 +1112,37 @@ export function collectRefs(assets, alerts = [], extra = []) {
   for (const al of alerts) if (al.active && al.ref) refs.push(al.ref);
   if (refs.some((r) => isUsdRef(r))) refs.push({ provider: 'tgju', key: 'price_dollar_rl' });
   return refs;
+}
+
+/**
+ * NAV refs for exchange-traded funds held, watched or under a bubble alert (their bubble = price ÷ NAV). A symbol whose NAV
+ * lookup failed (a plain share, not a fund) is skipped for a week (miss: {insCode: ms}).
+ */
+export function navRefs(assets = [], watch = [], alerts = [], miss = {}, now = Date.now()) {
+  const refs = [
+    ...assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source === 'market').map((a) => a.price.ref),
+    ...watch, ...alerts.filter((al) => al.active && al.kind === 'bubble').map((al) => al.ref),
+  ].filter((r) => BB.isTseRef(r) && !(now - (miss[r.key] || 0) < 7 * DAY));
+  return [...new Map(refs.map((r) => [r.key, BB.navRef(r)])).values()];
+}
+
+/**
+ * After a fetch: drop the errors of auxiliary NAVs (mutates `errors`) and sort them into misses — the exchange answered
+ * the symbol's price but said it has no NAV (a plain share) — and hits. Throttling or a timeout is neither: next cycle retries.
+ * Returns { aux: Set of auxiliary NAV ids, miss: {insCode: ms}, hit: [insCode] }.
+ */
+export function sortNavResults(navs, refs, fresh, errors, now = Date.now()) {
+  const primary = new Set(refs.map((r) => quoteId(r)));
+  const aux = new Set(navs.map((r) => quoteId(r)).filter((id) => !primary.has(id)));
+  const miss = {}; const hit = [];
+  for (const id of aux) {
+    const key = id.split(':')[1];
+    if (fresh[id]) { hit.push(key); continue; }
+    if (errors[id] === undefined) continue;
+    if (/NAV/.test(errors[id]) && Object.keys(fresh).some((k) => k.startsWith(`tsetmc:${key}:`) && !aux.has(k))) miss[key] = now;
+    delete errors[id];
+  }
+  return { aux, miss, hit };
 }
 
 /** Merge freshly fetched quotes; on error keep the last good price and mark it. */

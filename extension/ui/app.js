@@ -132,29 +132,63 @@ function WhyChanged({ st, pf, s, open }) {
   </div>`;
 }
 
-function Kpis({ st, pf, s }) {
-  const ex = pf.byExposure; const g = pf.gross || 1;
-  const hard = g - (ex.rial || 0);
-  const exItems = Object.entries(EXPOSURES).map(([k, v]) => ({ name: v.name, color: v.color, value: ex[k] || 0 }));
-  const liq = pf.byLiquidity;
-  const auto = E.monthlyAuto(st.assets, st.flows);
+/** Four cards, each a number, what it means, and the next step. Logic: lib/insights.js (inflationCard, liquidityCard,
+ *  incomeCard, attentionItems). */
+function Kpis({ st, pf, s, open }) {
+  const inf = I.inflationCard(st, pf), liq = I.liquidityCard(pf), inc = I.incomeCard(st);
+  const att = I.attentionItems(st, pf);
+  const attN = att.reduce((t, it) => t + (it.n || 1), 0);
+  const [allAtt, setAllAtt] = useState(false);
+  const p0 = (x) => pct(x, { sign: false, digits: 0 });
+  const pts = (d) => { const v = Math.abs(d * 100); return v < 0.5 ? null : `${num(v, v < 10 ? 1 : 0).replace(/[.٫]0$/, '')} واحد ${d > 0 ? 'بیشتر' : 'کمتر'} از ماه پیش`; };
   let autoVal = 0;
   for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'matured' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
-  return html`<div class="kpis">
-    <div class="kpi"><span class="t"><${Icon} n="shield" cls="sm" />محافظت‌شده در برابر تورم</span>
-      <span class="v num">${pf.gross > 0 ? pct(hard / g, { sign: false }) : '—'}</span><${StackBar} items=${exItems} height=${6} />
-      <span class="s">طلا ${pct((ex.gold || 0) / g, { sign: false })}، ارز ${pct(((ex.fx || 0) + (ex.crypto || 0)) / g, { sign: false })}، سهام ${pct((ex.equity || 0) / g, { sign: false })}</span></div>
-    <div class="kpi"><span class="t"><${Icon} n="droplet" cls="sm" />زود نقد می‌شود</span>
-      <span class="v num">${pf.gross > 0 ? pct(liq.high / g, { sign: false }) : '—'}</span>
-      <${StackBar} items=${[{ name: 'بالا', value: liq.high, color: '#14BCDB' }, { name: 'متوسط', value: liq.mid, color: '#8E70FF' }, { name: 'پایین', value: liq.low, color: '#D946A8' }]} height=${6} />
-      <span class="s">قابل نقد در چند روز: <${Money} v=${liq.high} s=${s} compact /></span></div>
-    <div class="kpi"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span>
-      <span class="v"><${Money} v=${auto.interest + auto.inflow} s=${s} compact /></span>
-      <span class="s">سود <${Money} v=${auto.interest} s=${s} compact unit=${false} />، ورودی‌ها <${Money} v=${auto.inflow} s=${s} compact unit=${false} /></span></div>
-    <div class="kpi"><span class="t"><${Icon} n="live" cls="sm" />به‌روزرسانی خودکار</span>
-      <span class="v num">${pf.gross > 0 ? pct(autoVal / g, { sign: false }) : '—'}</span>
-      <${StackBar} items=${[{ name: 'خودکار', value: autoVal, color: '#0E9F6E' }, { name: 'دستی', value: g - autoVal, color: 'var(--line-2)' }]} height=${6} />
-      <span class="s">از ارزش دارایی‌ها خودکار به‌روز می‌شود</span></div>
+  const g = pf.gross || 1;
+  const badge = (tone, text) => html`<span class=${'kb ' + tone}>${text}</span>`;
+  const goAtt = (it) => (it.assetId ? open(st.assets.find((a) => a.id === it.assetId)) : (location.hash = it.href));
+  const tierColor = { high: '#14BCDB', mid: '#8E70FF', low: 'var(--line-2)' };
+  return html`<div class="kpis ov">
+    <div class="kpi">
+      <div class="kh"><span class="t"><${Icon} n="shield" cls="sm" />محافظت در برابر تورم</span>
+        ${inf?.status === 'ok' ? badge('pos', 'در حد هدف') : inf?.status === 'near' ? badge('warn', 'نزدیک هدف') : inf?.status === 'below' ? badge('warn', `${num(Math.ceil((inf.target - inf.share) * 100 - 1e-9))} واحد زیر هدف`) : ''}</div>
+      ${inf ? html`
+        <div class="kv"><span class="v num">${p0(inf.share)}</span>${inf.delta !== null && html`<span class=${'kd ' + (pts(inf.delta) ? (inf.delta > 0 ? 'pos' : 'neg') : 'muted')}>${pts(inf.delta) || 'تقریباً بدون تغییر از ماه پیش'}</span>`}</div>
+        <div class="kbar">
+          <div class="segs">${[...inf.parts, { key: 'rial', name: 'ریالی (بی‌محافظ)', color: 'var(--line-2)', value: inf.unprotectedShare * pf.gross, share: inf.unprotectedShare }].filter((x) => x.share > 0)
+            .map((x) => html`<i title=${`${x.name}: ${p0(x.share)}`} style=${`flex:${x.share};background:${x.color}`}></i>`)}</div>
+          ${inf.target !== null && html`<span class="tgt" style=${`right:${inf.target * 100}%`} title="هدف از «تخصیص هدف» در تحلیل"></span><span class="tgl" style=${`right:${inf.target * 100}%`}>هدف ${p0(inf.target)}</span>`}
+        </div>
+        <div class="klg">${inf.parts.slice(0, 4).map((x) => html`<span><i style=${`background:${x.color}`}></i>${x.name} ${p0(x.share)}</span>`)}</div>
+        <div class="kf">${inf.unprotected.length ? html`<b>بی‌محافظ ${p0(inf.unprotectedShare)}:</b> ${inf.unprotected.slice(0, 2).map((u) => `${u.name} ${p0(u.share)}`).join(' و ')}${inf.unprotected.length > 2 ? ' و …' : ''}` : 'همه دارایی‌ها در برابر تورم محافظت شده‌اند'}</div>`
+      : html`<span class="v">—</span>`}
+    </div>
+
+    <div class="kpi">
+      <div class="kh"><span class="t"><${Icon} n="droplet" cls="sm" />نقدشوندگی</span></div>
+      ${liq ? html`
+        <div class="kv"><span class="v num">${p0(liq.share)}</span><span class="kd muted">در چند روز نقد می‌شود</span></div>
+        <div class="kbar"><div class="segs">${['high', 'mid', 'low'].map((k) => liq.tiers[k]).map((t, i) => t.share > 0 && html`<i title=${`${t.name}: ${money(t.value, s, { compact: true })}${t.names.length ? ' — ' + t.names.join('، ') : ''}`} style=${`flex:${t.share};background:${tierColor[['high', 'mid', 'low'][i]]}`}></i>`)}</div></div>
+        <div class="klg">${['high', 'mid', 'low'].map((k) => html`<span title=${liq.tiers[k].names.join('، ')}><i style=${`background:${tierColor[k]}`}></i>${liq.tiers[k].name} ${p0(liq.tiers[k].share)}</span>`)}</div>
+        <div class="kf"><b>اگر پول لازم شد:</b> <${Money} v=${liq.high} s=${s} compact /> در چند روز در دسترس است</div>`
+      : html`<span class="v">—</span>`}
+    </div>
+
+    <div class="kpi">
+      <div class="kh"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span></div>
+      ${inc.total > 0 || inc.next ? html`
+        <div class="kv">${inc.total > 0 ? html`<span class="v"><${Money} v=${inc.total} s=${s} compact /></span><span class="kd muted">در ماه</span>` : html`<span class="v">—</span><span class="kd muted">سود یا درآمد تکراری ثبت نشده</span>`}</div>
+        <div class="klg">${inc.interest > 0 && html`<span><i style="background:var(--accent)"></i>سود <${Money} v=${inc.interest} s=${s} compact unit=${false} /></span>`}${inc.inflow > 0 && html`<span><i style="background:var(--cyan)"></i>درآمد تکراری <${Money} v=${inc.inflow} s=${s} compact unit=${false} /></span>`}</div>
+        <div class="kf">${inc.next ? html`<b>واریز بعدی ${fmtJ(inc.next.date)}:</b> ${inc.next.title}، <${Money} v=${inc.next.amount} s=${s} compact />${inc.next.estimate ? ' (تقریبی)' : ''}` : 'در ۴۵ روز آینده واریز خودکاری ثبت نشده'}</div>`
+      : html`<span class="v">—</span><div class="kf">سود سپرده‌ها و درآمدهای تکراری را در <a href="#/automation">خودکارسازی</a> ثبت کن تا اینجا حساب شود.</div>`}
+    </div>
+
+    <div class=${'kpi' + (att.length ? ' hot' : '')}>
+      <div class="kh"><span class="t"><${Icon} n="bell" cls="sm" />نیاز به توجه</span>${att.length ? html`<span class="kb solid num">${num(attN)} مورد</span>` : badge('pos', 'مرتب')}</div>
+      ${att.length ? html`<div class="katt">${(allAtt ? att : att.slice(0, 3)).map((it) => html`<button class="ka" onClick=${() => goAtt(it)}><i class=${it.tone}></i><span class="grow">${it.text}</span><${Icon} n="chevronLeft" cls="sm" /></button>`)}
+          ${att.length > 3 && html`<button class="kmore" onClick=${() => setAllAtt(!allAtt)}>${allAtt ? 'کمتر' : `و ${num(att.length - 3)} مورد دیگر`}</button>`}</div>`
+        : html`<div class="kf" style="border:0;padding:0;margin:0">همه‌چیز به‌روز است و در هفته پیش رو قسط یا سررسیدی نیست.</div>`}
+      <div class="kf"><div class="kmini"><i style=${`width:${Math.round(autoVal / g * 100)}%`}></i></div>${p0(autoVal / g)} ارزش دارایی‌ها خودکار به‌روز می‌شود</div>
+    </div>
   </div>`;
 }
 
@@ -202,22 +236,18 @@ function WeeklyCard({ st }) {
   </div>`;
 }
 
-function Upcoming({ st, pf, s, open }) {
-  const up = E.upcoming(st.assets, st.flows, 14).slice(0, 5);
-  const att = pf.attention.slice(0, 5);
+/** What's coming in the next 14 days. Things to act on are in the «نیاز به توجه» card above. */
+function Upcoming({ st, s }) {
+  const up = E.upcoming(st.assets, st.flows, 14).slice(0, 6);
   const byId = Object.fromEntries(st.assets.map((a) => [a.id, a]));
   return html`<div class="card">
-    <div class="card-h"><h3>نیازمند توجه و پیش رو</h3><span class="sub">۱۴ روز آینده</span></div>
+    <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />پیش رو</h3><span class="sub">۱۴ روز آینده</span></div>
     <div class="list">
-      ${att.map((r) => html`<div class="it" style="cursor:pointer" onClick=${() => open(r.asset)}>
-        <${Ava} cat=${r.asset.category} size=${32} />
-        <div class="grow"><div class="sb ellipsis">${r.asset.name}</div><div class="xs muted">${r.status === 'stale' ? `آخرین به‌روزرسانی ${ago(r.at)}` : r.error || 'قیمت آنلاین قدیمی است'}</div></div>
-        <${StatusPill} status=${r.status} at=${r.at} /></div>`)}
       ${up.map((e) => html`<div class="it">
         <span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n=${e.kind === 'interest' ? 'percent' : e.kind === 'maturity' ? 'clock' : e.kind === 'loan' ? 'calendar' : 'repeat'} /></span>
         <div class="grow"><div class="sb ellipsis">${e.title}</div><div class="xs muted">${fmtJ(e.date)}${e.toId && byId[e.toId] && e.toId !== e.assetId ? '، به ' + byId[e.toId].name : ''}${e.estimate ? '، تخمینی' : ''}</div></div>
         <span class="small sb"><${Money} v=${e.amount} s=${s} compact /></span></div>`)}
-      ${!att.length && !up.length && html`<div class="empty"><div class="ico"><${Icon} n="check" /></div>همه‌چیز به‌روز است و رویدادی در دو هفته آینده نیست.</div>`}
+      ${!up.length && html`<div class="empty"><div class="ico"><${Icon} n="check" /></div>در دو هفته آینده رویداد خودکاری نیست.</div>`}
     </div>
   </div>`;
 }
@@ -229,7 +259,7 @@ function Overview(ctx) {
   return html`<div class="page">
     <${Hero} st=${st} pf=${pf} s=${s} />
     <${WhyChanged} st=${st} pf=${pf} s=${s} open=${open} />
-    <${Kpis} st=${st} pf=${pf} s=${s} />
+    <${Kpis} st=${st} pf=${pf} s=${s} open=${open} />
     <div class="grid-ov"><${Allocation} pf=${pf} s=${s} /><${PriceBoard} st=${st} s=${s} /></div>
     <div class="grid-ov"><${Upcoming} st=${st} pf=${pf} s=${s} open=${open} /><${WeeklyCard} st=${st} /></div>
   </div>`;

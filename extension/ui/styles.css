@@ -169,6 +169,39 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .kpi .v { font-size: 20px; font-weight: 800; }
 .kpi .s { font-size: 11.5px; color: var(--muted); }
 .kpi .bar { height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; display: flex; margin-top: 4px; }
+/* dashboard cards: number, meaning, next step */
+.kpis.ov .kpi { gap: 9px; padding: 15px 17px; }
+.kpis.ov .kpi.hot { border-color: var(--accent-line); }
+.kpis.ov .kh { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 22px; }
+.kpis.ov .kh .t { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.kpis.ov .kv { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.kpis.ov .kv .v { font-size: 24px; font-weight: 900; line-height: 1.25; }
+.kpis.ov .kd { font-size: 12px; font-weight: 700; }
+.kpis.ov .kd.pos { color: var(--pos); } .kpis.ov .kd.neg { color: var(--neg); } .kpis.ov .kd.muted { color: var(--muted); font-weight: 600; }
+.kb { font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 9px; white-space: nowrap; }
+.kb.pos { color: var(--pos); background: var(--pos-bg); } .kb.warn { color: var(--warn); background: var(--warn-bg); }
+.kb.solid { color: #fff; background: var(--violet); font-weight: 800; }
+.kpis.ov .kbar { position: relative; }
+.kpis.ov .kbar .segs { display: flex; gap: 2px; height: 9px; border-radius: 6px; overflow: hidden; background: var(--surface-3); }
+.kpis.ov .kbar .segs i { display: block; min-width: 2px; }
+.kpis.ov .kbar .tgt { position: absolute; top: -3px; width: 2px; height: 15px; margin-right: -1px; border-radius: 1px; background: var(--ink); }
+.kpis.ov .kbar .tgl { position: absolute; top: 13px; transform: translateX(50%); font-size: 10.5px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.kpis.ov .kbar:has(.tgl) { margin-bottom: 12px; }
+.kpis.ov .klg { display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
+.kpis.ov .klg span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.kpis.ov .klg i { width: 7px; height: 7px; border-radius: 2px; display: block; }
+.kpis.ov .kf { margin-top: auto; border-top: 1px solid var(--surface-3); padding-top: 9px; font-size: 11.5px; color: var(--ink-2); line-height: 1.75; }
+.kpis.ov .kf b { color: var(--ink); }
+.kpis.ov .katt { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; }
+.kpis.ov .ka { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0; background: none; border-radius: 9px; font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); text-align: right; cursor: pointer; min-height: 32px; }
+.kpis.ov .ka:hover { background: var(--surface-2); }
+.kpis.ov .ka .grow { flex: 1; min-width: 0; line-height: 1.5; }
+.kpis.ov .ka > i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--cyan); }
+.kpis.ov .ka > i.warn { background: #E6980A; } .kpis.ov .ka > i.neg { background: var(--neg); }
+.kpis.ov .ka svg { color: var(--faint); flex: none; }
+.kpis.ov .kmore { align-self: flex-start; border: 0; background: none; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--violet-ink); padding: 4px 8px; cursor: pointer; }
+.kpis.ov .kmini { height: 4px; border-radius: 4px; background: var(--surface-3); overflow: hidden; margin-bottom: 5px; }
+.kpis.ov .kmini i { display: block; height: 100%; background: var(--pos); }
 .grid-ov { display: grid; grid-template-columns: 1.15fr 1fr; gap: 18px; }
 .grid-ov3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; }
 .alloc { display: grid; grid-template-columns: 190px 1fr; gap: 18px; align-items: center; }

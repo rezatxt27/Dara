@@ -304,3 +304,145 @@ export function defaultDepositPct(st) {
     .sort((a, b) => (+b.rate.principal || 0) - (+a.rate.principal || 0));
   return fixed.length ? +fixed[0].rate.annualPct : 25;
 }
+
+/* ============================ the dashboard's four cards ============================ */
+// Each card answers one question with a number, what it means, and the next step. Pure; money is Rial.
+
+/** Share of assets (debts left out) not tied to the Rial, on a past snapshot. Assets deleted since then can't be
+ *  classified: when they were more than 5% of that day's assets the answer would be a guess, so there is none. */
+export function protectedShareAt(snap, assets = []) {
+  if (!snap?.v) return null;
+  const byId = Object.fromEntries(assets.map((a) => [a.id, a]));
+  let gross = 0, prot = 0, unknown = 0;
+  for (const [id, val] of Object.entries(snap.v)) {
+    if (!(+val > 0)) continue;
+    const a = byId[id];
+    if (!a) { unknown += +val; continue; }
+    if (E.isLiability(a)) continue;
+    gross += +val;
+    if (E.exposureOf(a) !== 'rial') prot += +val;
+  }
+  if (!gross || unknown > 0.05 * (gross + unknown)) return null;
+  return prot / gross;
+}
+
+/** The protected share the owner's own target mix implies (category targets, percent). Only a mix that adds up to
+ *  100% (±1) says anything; otherwise there is no target. */
+export function protectedTarget(targets = {}) {
+  const ent = Object.entries(targets || {}).filter(([k, v]) => CAT[k] && !CAT[k].liability && +v > 0);
+  const sum = ent.reduce((s, [, v]) => s + +v, 0);
+  if (!ent.length || Math.abs(sum - 100) > 1) return null;
+  return ent.reduce((s, [k, v]) => s + (CAT[k].exposure !== 'rial' ? +v : 0), 0) / 100;
+}
+
+/** «محافظت در برابر تورم»: share not tied to the Rial, its move over ~30 days, the owner's target, and what isn't protected. */
+export function inflationCard(st, pf, today = todayIso()) {
+  // assets only, and only what is worth something: an overdrawn account is a shortfall (flagged in «نیاز به توجه»),
+  // not a negative slice — so share, parts and the unprotected list always add up, as on a past snapshot
+  const pos = pf.rows.filter((r) => !r.cat.liability && r.value > 0);
+  const g = pos.reduce((t, r) => t + r.value, 0);
+  if (!(g > 0)) return null;
+  const ex = {};
+  for (const r of pos) ex[r.exposure] = (ex[r.exposure] || 0) + r.value;
+  const share = (g - (ex.rial || 0)) / g;
+  const parts = Object.entries(ex).filter(([k, v]) => k !== 'rial' && v > 0)
+    .map(([k, v]) => ({ key: k, name: EXPOSURES[k]?.name || k, color: EXPOSURES[k]?.color || '#B9BED0', value: v, share: v / g }))
+    .sort((a, b) => b.value - a.value);
+  // what isn't protected, by category (a deposit, an account, money owed to you…)
+  const rialBy = {};
+  for (const r of pos) if (r.exposure === 'rial') rialBy[r.cat.id] = (rialBy[r.cat.id] || 0) + r.value;
+  const unprotected = Object.entries(rialBy).map(([id, v]) => ({ id, name: CAT[id]?.short || id, value: v, share: v / g })).sort((a, b) => b.value - a.value);
+  // the move: against a snapshot about a month old (not one from long ago standing in for «last month»)
+  let delta = null;
+  const past = E.snapshotBefore(st.snapshots || {}, 30, today);
+  if (past && daysBetween(past.date, today) <= 45) {
+    const then = protectedShareAt(past.snap, st.assets);
+    if (then !== null) delta = share - then;
+  }
+  const target = protectedTarget(st.settings?.targets);
+  let status = null;
+  if (target !== null) status = share >= target - 0.0005 ? 'ok' : target - share <= 0.05 + 1e-9 ? 'near' : 'below';
+  return { share, delta, target, status, parts, unprotected, unprotectedShare: (ex.rial || 0) / g };
+}
+
+/** «نقدشوندگی»: how much turns into cash in days / weeks / months, with the largest assets of each tier. */
+export function liquidityCard(pf) {
+  const rows = pf.rows.filter((r) => !r.cat.liability && r.value > 0).sort((a, b) => b.value - a.value);
+  const g = rows.reduce((t, r) => t + r.value, 0);
+  if (!(g > 0)) return null;
+  const tiers = { high: { name: 'چند روز', value: 0, names: [] }, mid: { name: 'چند هفته', value: 0, names: [] }, low: { name: 'طولانی‌تر', value: 0, names: [] } };
+  for (const r of rows) {
+    const t = tiers[r.asset.liquidity || r.cat.liquidity] || tiers.mid;
+    t.value += r.value;
+    if (t.names.length < 3) t.names.push(r.asset.name);
+  }
+  for (const t of Object.values(tiers)) t.share = t.value / g;
+  return { tiers, high: tiers.high.value, share: tiers.high.share };
+}
+
+/** Money that comes in by itself (interest earned + recurring income) and the next time some actually arrives. */
+export function incomeCard(st, today = todayIso()) {
+  const auto = E.monthlyAuto(st.assets, st.flows || [], today);
+  const byId = Object.fromEntries(st.assets.map((a) => [a.id, a]));
+  const incoming = (e) => {
+    const a = e.assetId ? byId[e.assetId] : null;
+    if (e.kind === 'interest') return !!a && !E.isLiability(a);
+    if (e.kind === 'loan') return !!a && !E.isLiability(a);          // an installment someone pays you
+    if (e.kind === 'flow') return !!e.toId && !e.fromId;             // salary, rent received…
+    return false;                                                    // maturities move your own money, they don't add any
+  };
+  const next = E.upcoming(st.assets, st.flows || [], 45, today).find((e) => e.date > today && incoming(e) && e.amount > 0) || null;
+  return { total: auto.interest + auto.inflow, interest: auto.interest, inflow: auto.inflow, next };
+}
+
+const DAY_MS = 86400000;
+const whenFa = (n) => (n <= 0 ? 'امروز' : n === 1 ? 'فردا' : `${num(n)} روز دیگر`);
+/**
+ * «نیاز به توجه»: what to do, most urgent first. Assets whose number can't be trusted (matured, no price, not updated,
+ * old online price), installments due within 7 days (and whether the paying account has enough), maturities within 14.
+ * Each item: { tone: 'neg'|'warn'|'info', text, assetId?, href? }.
+ */
+export function attentionItems(st, pf, today = todayIso(), now = Date.now()) {
+  const items = [];
+  const by = (s) => pf.attention.filter((r) => r.status === s);
+  for (const r of by('matured')) items.push({ tone: 'warn', text: `«${r.asset.name}» سررسید شده`, assetId: r.asset.id, rank: 1 });
+  for (const r of pf.rows) if (!r.cat.liability && r.value < -0.5) items.push({ tone: 'neg', text: `موجودی «${r.asset.name}» منفی است`, assetId: r.asset.id, rank: 0 });
+  for (const r of by('error')) items.push({ tone: 'warn', text: r.asset.mode === 'units' ? `قیمت «${r.asset.name}» دریافت نشد` : `«${r.asset.name}»: ${r.error || 'نیاز به بررسی'}`, assetId: r.asset.id, rank: 2 });
+  const stale = by('stale');
+  if (stale.length === 1) {
+    const r = stale[0]; const d = r.at ? Math.floor((now - r.at) / DAY_MS) : null;
+    items.push({ tone: 'warn', text: d ? `«${r.asset.name}» ${num(d)} روز است به‌روز نشده` : `«${r.asset.name}» به‌روز نشده`, assetId: r.asset.id, rank: 3 });
+  } else if (stale.length > 1) items.push({ tone: 'warn', text: `${num(stale.length)} دارایی دستی مدتی است به‌روز نشده`, href: '#/assets?f=attention', rank: 3, n: stale.length });
+  const delayed = by('delayed');
+  if (delayed.length === 1) items.push({ tone: 'info', text: `قیمت آنلاین «${delayed[0].asset.name}» قدیمی است`, assetId: delayed[0].asset.id, rank: 6 });
+  else if (delayed.length > 1) items.push({ tone: 'info', text: `قیمت آنلاین ${num(delayed.length)} دارایی قدیمی است`, href: '#/assets?f=attention', rank: 6, n: delayed.length });
+
+  const byId = Object.fromEntries(st.assets.map((a) => [a.id, a]));
+  const valueOf = Object.fromEntries(pf.rows.map((r) => [r.asset.id, r.value]));
+  const up = E.upcoming(st.assets, st.flows || [], 14, today);
+  // each account's balance through the coming week, day by day (on a day with money both in and out, out first:
+  // a warning that turns out unneeded beats a missed one)
+  const bal = {};
+  const live = (id) => !!id && !!byId[id] && !byId[id].archived && !E.isLiability(byId[id]);
+  const week = up.filter((e) => daysBetween(today, e.date) <= 7 && e.kind !== 'maturity'
+    // a bank's own payday interest: its value already includes what has accrued, so it isn't new money
+    && !(e.kind === 'interest' && e.toId === e.assetId && byId[e.assetId]?.mode === 'balance'));
+  const shortOn = new Set();
+  const start = (id) => bal[id] ?? valueOf[id] ?? 0;
+  for (const day of [...new Set(week.map((e) => e.date))]) {
+    const evs = week.filter((e) => e.date === day);
+    for (const e of evs) if (live(e.fromId)) { bal[e.fromId] = start(e.fromId) - e.amount; if (bal[e.fromId] < -0.5) shortOn.add(e); }
+    for (const e of evs) if (live(e.toId)) bal[e.toId] = start(e.toId) + e.amount;
+  }
+  for (const e of up) {
+    const a = byId[e.assetId]; if (!a) continue;
+    const days = daysBetween(today, e.date);
+    if (e.kind === 'loan' && E.isLiability(a) && days <= 7) {
+      const short = shortOn.has(e);
+      items.push({ tone: short ? 'neg' : 'info', text: `قسط «${a.name}» ${whenFa(days)}${short ? '؛ موجودی حساب کافی نیست' : ''}`, assetId: a.id, rank: short ? 0 : 4, date: e.date });
+    } else if (e.kind === 'maturity') {
+      items.push({ tone: 'info', text: `${E.isLiability(a) ? 'بدهی ' : ''}«${a.name}» ${whenFa(days)} سررسید می‌شود`, assetId: a.id, rank: 5, date: e.date });
+    }
+  }
+  return items.sort((x, y) => x.rank - y.rank || String(x.date || '').localeCompare(String(y.date || '')));
+}

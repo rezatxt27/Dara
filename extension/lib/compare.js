@@ -99,7 +99,6 @@ export function compareOptions(st, pf, { amount, sourceId = 'new', a, b, months 
     const o = { id: choice.id, kind: choice.kind, name: choice.name, unit: choice.unit || null, notes: [] };
     if (choice.kind === 'keep') {
       o.rate = srcRate; o.name = src ? `بماند در ${src.name}` : 'نقد بماند';
-      if (!src || !srcRate) o.notes.push(src ? 'این پول همان‌جا سودی نمی‌گیرد' : 'پول نقد بدون سود');
       if (source.renewed) o.notes.push('سپرده پیش از پایان مدت سررسید می‌شود؛ فرض شد با همین نرخ تمدید شود');
     } else if (choice.kind === 'deposit') {
       o.rate = spec.ratePct > 0 ? Math.min(200, +spec.ratePct) : depositPct; o.name = 'سپرده بانکی';

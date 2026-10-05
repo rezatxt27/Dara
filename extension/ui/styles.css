@@ -458,17 +458,21 @@ input[dir="ltr"], .latin, .msg .by { font-family: 'Vazir', ui-monospace, Tahoma,
 .brow .wt b { position: absolute; top: 0; bottom: 0; border-radius: 6px; }
 .brow .bv { white-space: nowrap; font-weight: 700; font-size: 12px; }
 /* «مقایسه دو گزینه» */
-.cmp-q { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 14px; align-items: end; }
-.cmp-picks { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: start; margin-top: 16px; }
+.cmp-q { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+.cmp-picks { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: stretch; margin-top: 16px; }
 .cmp-pick { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--line); }
 .cmp-pick select { font-weight: 700; }
 .cmp-tag { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 8px; background: var(--accent-soft); color: var(--violet-ink); font-size: 12px; font-weight: 800; flex: none; }
-.cmp-as { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.cmp-as { display: flex; align-items: center; gap: 6px; min-height: 30px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.cmp-as b { color: var(--ink-2); }
 .cmp-as .num-in { width: 64px; height: 30px; text-align: center; }
-.cmp-swap { margin-top: 10px; }
+.cmp-swap { align-self: center; }
 .cmp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
 .cmp-col { display: flex; flex-direction: column; gap: 8px; padding: 16px 18px; border-radius: 16px; border: 1px solid var(--line); background: var(--surface); }
 .cmp-h { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.cmp-now { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; min-height: 34px; padding: 7px 10px; border-radius: 10px; background: var(--surface-2); font-size: 12.5px; color: var(--ink-2); }
+.cmp-now b { font-size: 14px; color: var(--ink); }
+.cmp-now .xs { margin-inline-start: auto; }
 .cmp-v { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .cmp-v .v { font-size: 26px; font-weight: 900; }
 .cmp-dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; margin: 6px 0 0; font-size: 12.5px; }

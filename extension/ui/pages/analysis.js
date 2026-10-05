@@ -84,7 +84,7 @@ function Performance({ st, pf, s }) {
 /* ---------------- «مقایسه دو گزینه» ---------------- */
 const MONTHS = [[3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']];
 const monthsName = (m) => (m === 12 ? 'یک سال' : m === 24 ? 'دو سال' : `${num(m)} ماه`);
-function CmpPick({ label, spec, onChange, other, s, depositPct }) {
+function CmpPick({ label, spec, onChange, other, s, depositPct, keepRate, fresh }) {
   const c = CMP.choiceById(spec.id);
   return html`<div class="cmp-pick">
     <div class="row" style="gap:8px"><span class="cmp-tag">${label}</span>
@@ -92,6 +92,7 @@ function CmpPick({ label, spec, onChange, other, s, depositPct }) {
       <optgroup label="نگه‌داشتن">${CMP.CHOICES.filter((x) => x.kind !== 'market').map((x) => html`<option value=${x.id} disabled=${x.id === other}>${x.name}</option>`)}</optgroup>
       <optgroup label="خرید">${CMP.CHOICES.filter((x) => x.kind === 'market').map((x) => html`<option value=${x.id} disabled=${x.id === other}>${x.name}</option>`)}</optgroup>
     </select></div>
+    ${c?.kind === 'keep' && html`<div class="cmp-as">${fresh ? 'نقد می‌ماند، بدون سود' : keepRate > 0 ? html`همان‌جا سود سالانه <b class="num">${num(keepRate, 1)}٪</b> می‌گیرد` : 'همان‌جا سودی نمی‌گیرد'}</div>`}
     ${c?.kind === 'deposit' && html`<label class="cmp-as">سود سالانه <input class="input num-in" inputmode="decimal" value=${num(spec.ratePct ?? depositPct, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) onChange({ ...spec, ratePct: v }); }} />٪</label>`}
     ${c?.kind === 'market' && html`<label class="cmp-as">هزینه خرید و فروش <input class="input num-in" inputmode="decimal" value=${num(spec.costPct ?? c.cost, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v >= 0 && v <= 50) onChange({ ...spec, costPct: v }); }} />٪${T('fee')}</label>`}
   </div>`;
@@ -103,13 +104,16 @@ function CmpCol({ o, other, g, r, s, label }) {
   const shift = (a, b) => html`<span class="cmp-shift"><span class="num">${pct(a, { sign: false, digits: 0 })}</span><span class="muted">←</span><b class="num">${pct(b, { sign: false, digits: 0 })}</b></span>`;
   return html`<div class="cmp-col">
     <div class="cmp-h"><span class="cmp-tag">${label}</span><b>${o.name}</b></div>
-    <div class="cmp-v"><span class="v"><${Money} v=${v} s=${s} compact /></span><span class=${'small ' + (gain >= 0 ? 'pos' : 'neg')}><${Money} v=${gain} s=${s} compact sign /></span></div>
+    <div class="cmp-now">${o.kind === 'market'
+      ? (o.units > 0 ? html`<span>امروز با این مبلغ</span><b class="num">≈ ${num(o.units, o.id === 'btc' ? 6 : o.units < 10 ? 2 : 0)} ${o.unit}</b>${o.unit === 'سکه' && o.units < 1 ? html`<span class="xs warn">(یک سکه کامل نمی‌شود)</span>` : ''}<span class="xs muted">هر ${o.unit} <${Money} v=${o.price} s=${s} compact /></span>` : html`<span class="muted">قیمت امروز در دسترس نیست</span>`)
+      : o.rate > 0 ? html`<span>هر ماه حدود</span><b><${Money} v=${(r.amount * o.rate) / 1200} s=${s} compact /></b><span>سود</span>`
+      : html`<span class="muted">بدون سود؛ همین مبلغ می‌ماند</span>`}</div>
+    <div class="cmp-v"><span class="v"><${Money} v=${v} s=${s} compact /></span>${Math.abs(gain) >= 0.5 ? html`<span class=${'small ' + (gain >= 0 ? 'pos' : 'neg')}><${Money} v=${gain} s=${s} compact sign /></span>` : html`<span class="small muted">بدون تغییر</span>`}</div>
     <div class="xs muted">ارزش در پایان ${monthsName(r.months)}${o.kind === 'market' ? (g ? html`، اگر قیمت <span class="ltr">${pct(g, { digits: 0 })}</span> تغییر کند` : '، اگر قیمت ثابت بماند') : o.rate ? `، با سود سالانه ${num(o.rate, 1)}٪` : ''}</div>
     <dl class="cmp-dl">
       ${o.kind !== 'market' && o.rate > 0 && html`<dt>سود این مدت</dt><dd class="pos">${unit(o.final - r.amount)}</dd>`}
       ${o.kind === 'market' && html`<dt>هزینه خرید و فروش</dt><dd class="neg">${unit(-o.costAmount)}</dd>`}
       ${o.lost > 0 && html`<dt>سود «${r.source.name}» که دیگر نمی‌گیری</dt><dd class="neg">${unit(-o.lost)}</dd>`}
-      ${o.units > 0 && html`<dt>تقریباً می‌خری</dt><dd>${num(o.units, o.units < 10 ? 2 : 0)} ${o.unit}</dd>`}
       ${o.bubble !== undefined && html`<dt>حباب امروز</dt><dd>${pct(o.bubble, { digits: 1 })}<span class="xs muted"> · ${pct(o.bubble / (1 + o.bubble), { sign: false, digits: 0 })} از قیمت</span></dd>`}
       ${o.bubbleRevert !== undefined && Math.abs(o.bubbleRevert) >= 0.005 && html`<dt>اگر حباب به میانگین ۳ ماهه برگردد</dt><dd class=${o.bubbleRevert < 0 ? 'neg' : 'pos'}><span class="ltr">${pct(o.bubbleRevert, { digits: 1 })}</span><span class="xs muted"> قیمت، با طلای ثابت</span></dd>`}
       ${o.breakEven !== null && o.breakEven !== undefined && html`<dt>برای رسیدن به «${other.name}»</dt><dd>قیمت باید <b class="ltr">${pct(o.breakEven, { digits: 1 })}</b> تغییر کند${r.months !== 12 ? html`<span class="xs muted"> (سالانه <span class="ltr">${pct(o.breakEvenAnnual, { digits: 0 })}</span>)</span>` : ''}</dd>`}
@@ -161,9 +165,9 @@ function Compare({ st, pf, s }) {
     </div>
     ${r?.source.exceeds && html`<div class="callout warn" style="margin-top:10px"><${Icon} n="alert" cls="sm" /><div>این مبلغ از موجودی «${r.source.name}» (<${Money} v=${r.source.value} s=${s} compact />) بیشتر است.</div></div>`}
     <div class="cmp-picks">
-      <${CmpPick} label="الف" spec=${a} onChange=${setA} other=${b.id} s=${s} depositPct=${dep} />
+      <${CmpPick} label="الف" spec=${a} onChange=${setA} other=${b.id} s=${s} depositPct=${dep} keepRate=${r?.source.rate} fresh=${src === 'new'} />
       <button class="btn icon ghost cmp-swap" onClick=${swap} aria-label="جابه‌جا کردن دو گزینه" title="جابه‌جا کردن"><${Icon} n="swap" /></button>
-      <${CmpPick} label="ب" spec=${b} onChange=${setB} other=${a.id} s=${s} depositPct=${dep} />
+      <${CmpPick} label="ب" spec=${b} onChange=${setB} other=${a.id} s=${s} depositPct=${dep} keepRate=${r?.source.rate} fresh=${src === 'new'} />
     </div>
     ${!r ? html`<div class="empty small" style="padding:18px">مبلغ را وارد کن تا دو گزینه کنار هم حساب شوند.</div>` : html`
       <div class="cmp-grid">

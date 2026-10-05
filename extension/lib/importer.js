@@ -2,7 +2,8 @@
 import { uid, parseNum } from './format.js';
 import { CAT, CATEGORIES, METAL_PRESETS } from './catalog.js';
 
-export function parseCSV(text) {
+/** CSV (or another delimiter: a tab when cells are copied out of Excel, «;» from some European exports). */
+export function parseCSV(text, delim = ',') {
   const rows = []; let row = []; let f = ''; let q = false;
   text = text.replace(/^﻿/, '');
   for (let i = 0; i < text.length; i++) {
@@ -11,7 +12,7 @@ export function parseCSV(text) {
       if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
       else f += c;
     } else if (c === '"') q = true;
-    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === delim) { row.push(f); f = ''; }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && text[i + 1] === '\n') i++;
       row.push(f); rows.push(row); row = []; f = '';
@@ -21,13 +22,28 @@ export function parseCSV(text) {
   return rows;
 }
 
+/** Pick the delimiter that splits the first lines into the same, largest number of cells. */
+export function guessDelimiter(text) {
+  const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim()).slice(0, 12);
+  let best = ',', score = -1;
+  for (const d of ['\t', ',', ';']) {
+    const counts = lines.map((l) => parseCSV(l, d)[0]?.length || 0);
+    const most = counts.length ? Math.max(...counts) : 0;
+    const same = counts.filter((c) => c === most).length;
+    const sc = most > 1 ? most * same : 0;
+    if (sc > score) { score = sc; best = d; }
+  }
+  return best;
+}
+export const parseDelimited = (text) => parseCSV(text, guessDelimiter(text));
+
 const has = (s, ...words) => words.some((w) => String(s || '').toLowerCase().includes(w.toLowerCase()));
 const clean = (s) => String(s || '').replace(/[ \t]+/g, ' ').trim();
 const norm = (s) => String(s || '').replace(/‌/g, ' ').replace(/\s+/g, ' ').trim();
 
 const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گوهر', 'آلتون', 'نفیس', 'لیان', 'تابان', 'زرفام', 'جواهر', 'گنج', 'قیراط', 'درخشان', 'ناب', 'زرین', 'رز', 'آتش', 'نهال'];
 
-function detectCategory(catText, name, holder) {
+export function detectCategory(catText, name, holder) {
   const t = norm(catText);
   // Dara's own export: the category's full or short name, as is
   const exact = CATEGORIES.find((c) => norm(c.name) === t || norm(c.short) === t);

@@ -79,6 +79,19 @@ class H(BaseHTTPRequestHandler):
             leaked = "6037 9918 1234 5678" in text
             print("CARD_LEAKED" if leaked else "CARD_MASKED", flush=True)
             return self._send(200, openai_reply("```json\n" + json.dumps({"site": "talayin", "currency_unit": "toman", "items": items, "leaked_card": leaked}, ensure_ascii=False) + "\n```"))
+        if '"columns"' in text and "money_unit" in text:
+            # column mapping for «هر اکسلی»: the first all-text column is the name, the last numeric one the value
+            m = re.search(r"\n(\[\[.*?\]\])\n", text, re.S)
+            sample = json.loads(m.group(1)) if m else []
+            print("MAP_AMOUNTS_LEAKED" if re.search(r"\d{5,}", m.group(1) if m else "") else "MAP_NO_AMOUNTS", flush=True)
+            ncol = max((len(r) for r in sample), default=0)
+            isnum = lambda v: bool(re.fullmatch(r"[-#\d.,٬ ]+", str(v).strip())) and str(v).strip() != ""
+            cols, name_done = [], False
+            nums = [i for i in range(ncol) if all(isnum(r[i]) for r in sample[1:] if i < len(r) and str(r[i]).strip())]
+            for i in range(ncol):
+                if i not in nums and not name_done: cols.append({"index": i, "role": "name"}); name_done = True
+            if nums: cols.append({"index": nums[-1], "role": "value"})
+            return self._send(200, openai_reply(json.dumps({"columns": cols, "money_unit": "toman", "categories": {}}, ensure_ascii=False)))
         if "گزارش هفتگی" in text:
             return self._send(200, openai_reply("**خلاصه:** ارزش خالص در هفته گذشته کمی کاهش یافت.\n\n**چه چیزی تغییر داد**\n- طلا: رشد قیمت\n- واریز پاداش به حساب بانکی\n\n**هفته پیش رو**\n- واریز حقوق\n\n**یک نکته:** تمرکز روی یک دارایی بالاست."))
         # chat with tools

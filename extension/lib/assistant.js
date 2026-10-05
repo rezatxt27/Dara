@@ -1,6 +1,7 @@
 // Dara assistant: system prompt, portfolio tools, weekly report and page-capture prompts.
 import * as E from './engine.js';
 import * as I from './insights.js';
+import * as CMP from './compare.js';
 import * as AI from './ai.js';
 import * as BB from './bubble.js';
 import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
@@ -240,6 +241,38 @@ export function makeTools(ctx) {
         if (!(price0 > 0)) return { error: 'قیمت فعلی این دارایی در دسترس نیست' };
         const r = I.breakEven({ price0, ratePct: deposit_rate_pct, months, feePct: fee_pct });
         return { asset: name, months: r.months, deposit_gain_pct: pct(r.depositGain), required_rise_pct: pct(r.needed), required_annual_pct: pct(r.annualNeeded), price_now: disp(price0, s.settings), price_needed: disp(r.targetPrice, s.settings), unit: unitName(s.settings) };
+      },
+    },
+    {
+      name: 'compare_options',
+      description: 'مقایسه دو گزینه برای یک مبلغ در یک مدت: مثلاً «بماند در سپرده» در برابر «سکه بخرم». ارزش هر گزینه در پایان مدت (با قیمت ثابت و با تغییر قیمت ±۲۰٪)، هزینه خرید و فروش، سود ازدست‌رفته در منبع پول، حباب سکه و تغییر لازم قیمت برای رسیدن به گزینه دیگر، و اثر روی محافظت در برابر تورم و نقدشوندگی. گزینه‌ها: keep (بماند در منبع)، deposit، geram18، sekee، sekeb، nim، rob، retail_gerami، usd، eur، usdt، btc، silver. فقط حساب است؛ حکم نده.',
+      schema: { type: 'object', properties: {
+        amount: { type: 'number', description: 'به واحد نمایش (تومان/ریال)' }, source: { type: 'string', description: 'asset_id حساب یا سپرده‌ای که پول از آن برداشته می‌شود، یا new برای پول تازه' },
+        option_a: { type: 'string' }, option_b: { type: 'string' }, months: { type: 'number' },
+        deposit_rate_pct: { type: 'number' }, cost_a_pct: { type: 'number' }, cost_b_pct: { type: 'number' } }, required: ['amount', 'option_a', 'option_b'] },
+      run: async ({ amount, source = 'new', option_a, option_b, months = 12, deposit_rate_pct, cost_a_pct, cost_b_pct } = {}) => {
+        const s = st(); const pf = pfOf(); const k = s.settings.currency === 'rial' ? 1 : 10;
+        if (!CMP.choiceById(option_a) || !CMP.choiceById(option_b)) return { error: 'گزینه نامعتبر؛ یکی از keep, deposit, geram18, sekee, sekeb, nim, rob, retail_gerami, usd, eur, usdt, btc, silver' };
+        if (source !== 'new' && !CMP.sources(s.assets, pf).some((x) => x.id === source)) return { error: 'منبع پول باید یک حساب یا سپرده باشد (نه بدهی یا دارایی قیمت‌دار)؛ از list_assets شناسه را بگیر، یا new بگذار' };
+        const keys = [option_a, option_b].map((id) => CMP.choiceById(id).ref).filter((ref) => BB.isCoinRef(ref)).map((ref) => ref.key);
+        let avg = {};
+        if (keys.length && ctx.bubbleStats) { try { const h = (await ctx.bubbleStats(keys)) || {}; avg = Object.fromEntries(Object.entries(h).filter(([, v]) => v).map(([kk, v]) => [kk, v.avg])); } catch { avg = {}; } }
+        const dep = deposit_rate_pct > 0 ? deposit_rate_pct : I.defaultDepositPct(s);
+        const r = CMP.compareOptions(s, pf, { amount: (+amount || 0) * k, sourceId: source, months, depositPct: dep, bubbleAvg: avg,
+          a: { id: option_a, ratePct: dep, costPct: cost_a_pct }, b: { id: option_b, ratePct: dep, costPct: cost_b_pct } });
+        if (!r) return { error: 'مبلغ یا ورودی‌ها نامعتبر است' };
+        const m = (v) => (P() ? { pct_of_amount: pct(v / r.amount) } : { amount: disp(v, s.settings) });
+        const one = (o) => ({ name: o.name, kind: o.kind, ...(o.rate !== undefined ? { yearly_rate_pct: o.rate } : {}),
+          value_at_end_if_price_unchanged: m(o.valueAt(0)), value_if_price_down_20: o.kind === 'market' ? m(o.valueAt(-0.2)) : undefined, value_if_price_up_20: o.kind === 'market' ? m(o.valueAt(0.2)) : undefined,
+          round_trip_cost: o.kind === 'market' ? { pct: pct(o.cost), ...m(o.costAmount) } : undefined, interest_given_up: o.lost > 0 ? m(o.lost) : undefined,
+          coin_bubble_now_pct: o.bubble !== undefined ? pct(o.bubble) : undefined, price_change_if_bubble_back_to_3m_avg_pct: o.bubbleRevert !== undefined ? pct(o.bubbleRevert) : undefined,
+          price_change_needed_to_match_other_pct: o.breakEven !== null && o.breakEven !== undefined ? pct(o.breakEven) : undefined, stale_price: o.stale || undefined,
+          after: o.after ? { inflation_protected_pct: pct(o.after.protected), cash_in_days_pct: pct(o.after.liquidDays), largest_exposure: EXPOSURES[o.after.top.exposure]?.name, largest_exposure_pct: pct(o.after.top.share) } : undefined, notes: o.notes.length ? o.notes : undefined });
+        return { months: r.months, source: r.source.name, ...(P() ? {} : { amount: disp(r.amount, s.settings), unit: unitName(s.settings) }),
+          source_yearly_rate_pct: r.source.rate || 0, amount_exceeds_source: r.source.exceeds || undefined, early_withdrawal_of_deposit: r.source.early || undefined,
+          before: r.before ? { inflation_protected_pct: pct(r.before.protected), cash_in_days_pct: pct(r.before.liquidDays) } : undefined,
+          option_a: one(r.a), option_b: one(r.b),
+          note: 'هزینه خرید و فروش و نرخ سپرده فرض‌اند. حکم نده؛ فرض‌ها و اینکه هر گزینه در چه شرایطی جلو می‌افتد را توضیح بده.' };
       },
     },
     {

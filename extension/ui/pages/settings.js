@@ -1,8 +1,11 @@
-import { html, useState, useEffect, Icon, Seg, Toggle, Money, toast, send, num, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
+import { html, useState, useEffect, useMemo, Icon, Seg, Toggle, Money, toast, send, num, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
 import * as store from '../../lib/store.js';
 import * as E from '../../lib/engine.js';
-import { importCSVText, toCSV } from '../../lib/importer.js';
-import { PROVIDERS, CAT } from '../../lib/catalog.js';
+import { parseDelimited, toCSV } from '../../lib/importer.js';
+import * as SM from '../../lib/sheetmap.js';
+import { readXlsx } from '../../lib/xlsx.js';
+import * as AI from '../../lib/ai.js';
+import { PROVIDERS, CAT, CATEGORIES } from '../../lib/catalog.js';
 import { uid } from '../../lib/format.js';
 import { todayIso, addDaysIso } from '../../lib/jalali.js';
 import { act } from '../actions.js';
@@ -16,30 +19,84 @@ function download(name, text, type = 'application/json') {
   const a = document.createElement('a'); a.href = url; a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
-const readFile = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file, 'utf-8'); });
-
 /* ---------------- import panel (shared by welcome & settings) ---------------- */
-function ImportPanel({ s, onDone, compact }) {
-  const [unit, setUnit] = useState('rial');
-  const [res, setRes] = useState(null);
+// Any spreadsheet: pick (file, pasted cells or a Google Sheet link) → we read the columns → the owner checks the
+// list (and the columns, only when we're unsure) → add. Dara's own export and the JSON backup keep working as before.
+
+/** a text file as UTF-8 (or UTF-16 with its mark), or as Windows Arabic/Persian (cp1256) when that is what Excel saved */
+function decodeText(buf) {
+  const b = new Uint8Array(buf);
+  // Excel's «Unicode Text» is UTF-16 with a byte-order mark
+  if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b.subarray(2));
+  if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b.subarray(2));
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(b).replace(/^﻿/, ''); } catch { /* not UTF-8 */ }
+  try { return new TextDecoder('windows-1256').decode(b); } catch { return new TextDecoder('utf-8').decode(b); }
+}
+/** the sheet most likely to hold the assets: the one with the most rows that carry a number */
+const bestSheet = (sheets) => sheets.map((sh, i) => [i, sh.rows.filter((r) => r.some((v) => SM.isNumCell(v))).length]).sort((a, b) => b[1] - a[1])[0][0];
+const WHY = { title: 'از عنوان ستون‌ها', prices: 'با قیمت‌های امروز سنجیده شد', ai: 'به تشخیص هوش مصنوعی', you: '', guess: 'مطمئن نیستیم؛ نگاهی بینداز' };
+
+function MapGrid({ rows, map, onRole }) {
+  const cols = Array.from({ length: map.ncol }, (_, i) => i).filter((i) => rows.some((r, k) => k > map.headerRow && String(r[i] ?? '').trim()));
+  const sample = rows.slice(map.headerRow + 1).filter((r) => r.some((v) => String(v).trim())).slice(0, 4);
+  return html`<div class="imp-grid-wrap"><table class="imp-grid">
+    <thead><tr>${cols.map((i) => html`<th class=${map.roles[i] === 'ignore' ? 'off' : ''}>
+      <select class=${'imp-role' + (map.roles[i] === 'ignore' ? '' : ' on')} value=${map.roles[i]} aria-label=${'ستون ' + num(i + 1)} onChange=${(e) => onRole(i, e.target.value)}>
+        ${SM.ROLES.map(([r, n]) => html`<option value=${r}>${r === 'ignore' ? '— ' + n : n}</option>`)}</select>
+      <div class="imp-h">${map.headers[i] || html`<span class="faint">ستون ${num(i + 1)}</span>`}</div></th>`)}</tr></thead>
+    <tbody>${sample.map((r) => html`<tr>${cols.map((i) => html`<td class=${map.roles[i] === 'ignore' ? 'off' : ''}>${r[i] || ''}</td>`)}</tr>`)}</tbody>
+  </table></div>`;
+}
+
+function ImportPanel({ st, s, onDone, compact }) {
+  const [src, setSrc] = useState(null);       // { label, sheets: [{ name, rows }], si } | { backup, assets, notes, label }
+  const [cfg, setCfg] = useState(null);       // SM.readSheet() of the current sheet, plus the owner's edits
+  const [cats, setCats] = useState({});       // row index → category, chosen in the list
+  const [edit, setEdit] = useState(false);    // the column editor is open
+  const [how, setHow] = useState(null);       // 'paste' | 'link'
+  const [paste, setPaste] = useState('');
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(false);
-  const parse = (text) => {
-    try {
-      if (/^\s*[\[{]/.test(text)) {
-        let obj;
-        try { obj = JSON.parse(text); } catch { return toast('این فایل JSON خراب است و خوانده نشد'); }
-        const chk = store.checkBackup(obj);
-        if (!chk.ok) return toast(chk.error);
-        setRes({ backup: obj, assets: store.cleanList('assets', obj.data.assets), notes: chk.dropped ? [`${num(chk.dropped)} ردیف ناقص یا خراب کنار گذاشته شد.`] : [] });
-      } else {
-        const r = importCSVText(text, { unit });
-        if (!r.assets.length) return toast('در این فایل ردیفی که دارایی باشد پیدا نشد؛ ستون‌های «نام» و «مقدار» یا «ارزش» را بررسی کن');
-        setRes(r);
-      }
-    } catch (e) { toast(e.message || 'خواندن فایل ممکن نشد'); }
+  const [drag, setDrag] = useState(false);
+  const [aiState, setAiState] = useState('');  // '' | 'running' | error text
+  const [showOut, setShowOut] = useState(false);
+  const quotes = st?.quotes || {};
+  const conns = st?.ai ? AI.orderedConnections(st.ai) : [];
+  const hasAssets = !!st?.assets?.some((a) => !a.archived);
+
+  const reset = () => { setSrc(null); setCfg(null); setCats({}); setEdit(false); setAiState(''); setShowOut(false); };
+  const openSheet = (sheets, si, label) => {
+    const r = SM.readSheet(sheets[si].rows, { quotes });
+    setSrc({ label, sheets, si }); setCfg(r); setCats({}); setAiState(''); setShowOut(false);
+    const m = r.map; const t = (role) => m.how[m.roles.indexOf(role)] === 'title';
+    const sure = r.kind === 'dara' || (!m.missing.length && m.headerRow >= 0 && t('name') && (t('value') || (t('quantity') && t('price'))));
+    setEdit(!sure);
   };
-  const onFile = async (e) => { const f = e.target.files?.[0]; if (!f) return; parse(await readFile(f)); e.target.value = ''; };
+  const fromText = (text, label) => {
+    if (/^\s*[\[{]/.test(text)) {
+      let obj;
+      try { obj = JSON.parse(text); } catch { return toast('این فایل JSON خراب است و خوانده نشد'); }
+      const chk = store.checkBackup(obj);
+      if (!chk.ok) return toast(chk.error);
+      setSrc({ label, backup: obj, assets: store.cleanList('assets', obj.data.assets), notes: chk.dropped ? [`${num(chk.dropped)} ردیف ناقص یا خراب کنار گذاشته شد.`] : [] });
+      return;
+    }
+    const rows = parseDelimited(text);
+    if (!rows.some((r) => r.some((v) => String(v).trim()))) return toast('چیزی برای خواندن پیدا نشد');
+    openSheet([{ name: label, rows }], 0, label);
+  };
+  const fromFile = async (f) => {
+    if (!f) return;
+    setBusy(true);
+    try {
+      const buf = await f.arrayBuffer(); const b = new Uint8Array(buf.slice(0, 4));
+      if (/\.xlsx?$/i.test(f.name) || (b[0] === 0x50 && b[1] === 0x4b) || (b[0] === 0xd0 && b[1] === 0xcf)) {
+        const wb = await readXlsx(buf);
+        openSheet(wb.sheets, bestSheet(wb.sheets), f.name);
+      } else fromText(decodeText(buf), f.name);
+    } catch (e) { toast(e.message || 'خواندن فایل ممکن نشد'); }
+    setBusy(false);
+  };
   const fromLink = async () => {
     const m = link.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/); if (!m) return toast('لینک گوگل‌شیت معتبر نیست');
     const gid = (link.match(/[#&?]gid=(\d+)/) || [])[1] || '0';
@@ -52,54 +109,149 @@ function ImportPanel({ s, onDone, compact }) {
       const r = await fetch(`https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${gid}`, { credentials: 'include' });
       if (!r.ok) throw new Error('دریافت شیت ممکن نشد (HTTP ' + r.status + ')');
       const text = await r.text();
-      if (text.trim().startsWith('<')) throw new Error('شیت خصوصی است؛ در همین مرورگر وارد حساب گوگل شو یا فایل CSV را دانلود و اینجا بارگذاری کن');
-      parse(text);
+      if (text.trim().startsWith('<')) throw new Error('شیت خصوصی است؛ در همین مرورگر وارد حساب گوگل شو یا فایل را دانلود و اینجا رها کن');
+      fromText(text, 'گوگل‌شیت');
     } catch (e) { toast(e.message); }
     setBusy(false);
   };
+
+  const rows = src?.sheets ? src.sheets[src.si].rows : null;
+  const map = cfg?.map;
+  const ready = cfg && (cfg.kind === 'dara' || !map.missing.length);
+  const items = useMemo(() => {
+    if (!rows || !ready) return [];
+    return cfg.kind === 'dara' ? SM.applyDara(rows, cfg.headerRow, { unit: cfg.unit, catOverride: cats }) : SM.applyMapping(rows, map, { unit: cfg.unit, catOverride: cats });
+  }, [rows, cfg, cats]);
+  const assets = useMemo(() => (src?.backup ? src.assets : items.filter((x) => x.asset).map((x) => x.asset)), [src, items]);
+  const left = items.filter((x) => !x.asset);
+  const pf = useMemo(() => (assets.length ? E.portfolio(assets, {}, s) : null), [assets]);
+  const rowOf = pf ? Object.fromEntries(pf.rows.map((r) => [r.asset.id, r])) : {};
+
+  const setRole = (i, role) => setCfg({ ...cfg, kind: 'map', map: SM.setRole(map, i, role) });
+  const setTitles = (on) => {
+    const first = rows.findIndex((r) => r.some((v) => String(v).trim()));
+    const m = SM.guessMapping(rows, { quotes, headerRow: on ? first : -1 });
+    setCfg({ ...cfg, kind: 'map', headerRow: m.headerRow, map: m, unit: m.unit, unitWhy: m.unitWhy }); setCats({});
+  };
+  const askAI = async () => {
+    setAiState('running');
+    try {
+      const res = await AI.extract({ ai: st.ai, system: SM.aiMappingSystem(), prompt: SM.aiMappingPrompt(rows, map, { privacy: st.ai.privacy, mask: AI.maskSensitive }), maxTokens: 900 });
+      const m = SM.parseAiMapping(res.json, map);
+      setCfg({ ...cfg, kind: 'map', map: m, unit: m.unit, unitWhy: m.unitWhy });
+      setCats((c) => ({ ...SM.aiCatOverrides(rows, m), ...c }));
+      setAiState('');
+      toast(m.missing.length ? 'هوش مصنوعی هم همه ستون‌ها را پیدا نکرد؛ بقیه را خودت مشخص کن' : 'ستون‌ها تشخیص داده شد؛ فهرست را نگاه کن');
+    } catch (e) { setAiState(e.message || 'ارتباط با هوش مصنوعی ممکن نشد'); }
+  };
+
   const commit = async (mode) => {
     try {
-      let count = res.assets.length;
-      if (res.backup) { const r = await store.importBackup(res.backup, { merge: mode === 'merge' }); if (mode === 'merge') count = r.added ?? count; }
+      let count = assets.length;
+      if (src.backup) { const r = await store.importBackup(src.backup, { merge: mode === 'merge' }); if (mode === 'merge') count = r.added ?? count; }
       else {
         await store.snapshotBeforeImport();
-        await store.mutate(['assets', 'meta'], (st) => {
+        await store.mutate(['assets', 'meta'], (st2) => {
           // codes stay unique: imported rows that clash with an existing code get the next free one
-          let n = Math.max(+st.meta.lastCode || 0, ...st.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
-          const keep = mode === 'replace' ? [] : st.assets;
+          let n = Math.max(+st2.meta.lastCode || 0, ...st2.assets.map((x) => +(/^A-(\d+)$/.exec(x.code || '') || [])[1] || 0));
+          const keep = mode === 'replace' ? [] : st2.assets;
           const used = new Set(keep.map((x) => x.code));
-          const later = new Set(res.assets.map((a) => a.code).filter(Boolean));
+          const later = new Set(assets.map((a) => a.code).filter(Boolean));
           const next = () => { let c; do c = 'A-' + String(++n).padStart(3, '0'); while (used.has(c) || later.has(c)); return c; };
-          const add = res.assets.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: next() }; used.add(a.code); return a; });
-          st.assets = keep.concat(add); st.meta = { ...st.meta, lastCode: n };
+          const add = assets.map((a) => { if (!a.code || used.has(a.code)) a = { ...a, code: next() }; used.add(a.code); return a; });
+          st2.assets = keep.concat(add); st2.meta = { ...st2.meta, lastCode: n };
         });
       }
       await act.setSettings({ onboarded: true });
       send('refresh');
       toast(count ? `${num(count)} دارایی وارد شد؛ قیمت‌های آنلاین در حال دریافت است…` : 'همه این دارایی‌ها از قبل بودند؛ چیزی اضافه نشد',
         { label: 'برگشت', fn: async () => { try { await store.undoImport(); toast('داده‌های قبل از ورود برگشت'); } catch (e) { toast(e.message); } } });
-      setRes(null); onDone && onDone();
+      reset(); onDone && onDone();
     } catch (e) { toast(e.message || 'ورود اطلاعات انجام نشد'); }
   };
-  const pf = res ? E.portfolio(res.assets, {}, s) : null;
-  return html`<div class="col" style="gap:12px">
-    ${!res && html`
-      <div class="row wrap">
-        <label class="btn primary"><${Icon} n="upload" />انتخاب فایل CSV یا پشتیبان JSON<input type="file" accept=".csv,.json,text/csv,application/json" hidden onChange=${onFile} /></label>
-        <span class="small muted">واحد مبالغ فایل CSV:</span><${Seg} value=${unit} onChange=${setUnit} options=${[['rial', 'ریال'], ['toman', 'تومان']]} />
-      </div>
-      ${!compact && html`<div class="row"><input class="input" placeholder="یا لینک گوگل‌شیت را اینجا بگذار…" value=${link} onInput=${(e) => setLink(e.target.value)} />
-        <button class="btn" disabled=${busy || !link} onClick=${fromLink}><${Icon} n=${busy ? 'refresh' : 'link'} cls=${busy ? 'sm spin' : 'sm'} />دریافت</button></div>`}
-      <div class="xs muted">ستون‌هایی مثل «دسته دارایی»، «نام دارایی»، «محل نگهداری»، «مقدار»، «قیمت هر واحد» و «ارزش روز» خودکار شناسایی می‌شوند؛ طلا، سکه، دلار، یورو، رمزارز و صندوق‌های طلا به منبع قیمت آنلاین وصل می‌شوند.</div>`}
-    ${res && html`<div class="col" style="gap:10px">
-      <div class="callout"><${Icon} n="check" cls="sm" /><div><b>${num(res.assets.length)} دارایی</b> شناسایی شد، ارزش کل <b><${Money} v=${pf.net} s=${s} /></b>${res.backup ? ' (فایل پشتیبان دارا)' : ''}</div></div>
-      ${res.notes.map((n) => html`<div class="xs muted">• ${n}</div>`)}
-      <div class="picker"><div class="scroll" style="max-height:300px">${pf.rows.map((r) => html`<div class="opt"><${Ava} cat=${r.asset.category} size=${26} />
-        <span class="grow"><span class="sb">${r.asset.name}</span> <span class="xs muted">${r.asset.custodian !== r.asset.name ? r.asset.custodian || '' : ''}</span>
-          <div class="xs muted">${r.cat.short}، ${r.asset.mode === 'units' ? (r.asset.price?.source === 'market' ? 'قیمت آنلاین: ' + refLabel(r.asset.price.ref) : 'قیمت دستی') : r.asset.mode === 'rate' ? 'نرخ ثابت' : 'مانده'}${r.asset.review ? '، ⚠ ' + r.asset.review : ''}</div></span>
-        <span class="small num"><${Money} v=${r.signedValue} s=${s} compact /></span></div>`)}</div></div>
-      <div class="row"><button class="btn primary" onClick=${() => commit('replace')} title="دارایی‌های فعلی کنار می‌روند؛ تا چند ثانیه با «برگشت» قابل بازگشت است">${res.backup ? 'جایگزینی همه داده‌ها با این پشتیبان' : 'جایگزینی دارایی‌های فعلی'}</button><button class="btn" onClick=${() => commit('merge')}>افزودن به دارایی‌های فعلی</button><span class="grow"></span><button class="btn ghost" onClick=${() => setRes(null)}>انصراف</button></div>
+
+  /* step 1: pick */
+  if (!src) return html`<div class="col imp" style="gap:12px">
+    <label class=${'imp-drop' + (drag ? ' on' : '') + (busy ? ' busy' : '')}
+      onDragOver=${(e) => { e.preventDefault(); setDrag(true); }} onDragLeave=${() => setDrag(false)}
+      onDrop=${(e) => { e.preventDefault(); setDrag(false); fromFile(e.dataTransfer.files?.[0]); }}>
+      <span class="imp-drop-ic"><${Icon} n=${busy ? 'refresh' : 'upload'} cls=${busy ? 'spin' : ''} /></span>
+      <span class="imp-drop-t">${busy ? 'در حال خواندن…' : html`فایل را اینجا رها کن یا <span class="imp-link">انتخاب کن</span>`}</span>
+      <span class="imp-drop-d">اکسل، CSV یا پشتیبان دارا — با هر چیدمان و هر عنوانی برای ستون‌ها</span>
+      <input type="file" hidden accept=".xlsx,.csv,.tsv,.txt,.json,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        onChange=${(e) => { fromFile(e.target.files?.[0]); e.target.value = ''; }} />
+    </label>
+    <div class="imp-or">
+      <button class=${'chip' + (how === 'paste' ? ' on' : '')} onClick=${() => setHow(how === 'paste' ? null : 'paste')}><${Icon} n="copy" cls="sm" />چسباندن از اکسل</button>
+      ${!compact && html`<button class=${'chip' + (how === 'link' ? ' on' : '')} onClick=${() => setHow(how === 'link' ? null : 'link')}><${Icon} n="link" cls="sm" />لینک گوگل‌شیت</button>`}
+    </div>
+    ${how === 'paste' && html`<div class="col" style="gap:8px">
+      <textarea class="input imp-paste" autoFocus placeholder="سلول‌ها را در اکسل یا گوگل‌شیت انتخاب و کپی کن، بعد اینجا بچسبان"
+        value=${paste} onInput=${(e) => setPaste(e.target.value)}
+        onPaste=${(e) => { const t = e.clipboardData?.getData('text'); if (t) { e.preventDefault(); setPaste(t); fromText(t, 'سلول‌های چسبانده‌شده'); } }}></textarea>
+      <div class="row"><button class="btn primary" disabled=${!paste.trim()} onClick=${() => fromText(paste, 'سلول‌های چسبانده‌شده')}>ادامه</button></div></div>`}
+    ${how === 'link' && html`<div class="row"><input class="input" autoFocus placeholder="لینک گوگل‌شیت را اینجا بگذار…" value=${link} onInput=${(e) => setLink(e.target.value)} />
+      <button class="btn" disabled=${busy || !link} onClick=${fromLink}><${Icon} n=${busy ? 'refresh' : 'download'} cls=${busy ? 'sm spin' : 'sm'} />دریافت</button></div>`}
+  </div>`;
+
+  /* step 2: check and add */
+  const roleCols = map ? map.roles.map((r, i) => [r, i]).filter(([r]) => r !== 'ignore') : [];
+  return html`<div class="col imp" style="gap:14px">
+    <div class="imp-src">
+      <span class="imp-file"><${Icon} n="file" cls="sm" /><span class="ellipsis">${src.label}</span></span>
+      ${src.sheets?.length > 1 && html`<select class="input imp-sheet" value=${src.si} aria-label="برگه" onChange=${(e) => openSheet(src.sheets, +e.target.value, src.label)}>
+        ${src.sheets.map((sh, i) => html`<option value=${i}>${sh.name}</option>`)}</select>`}
+      <span class="grow"></span>
+      <button class="btn ghost sm" onClick=${reset}>فایل دیگر</button>
+    </div>
+
+    ${cfg && html`<div class="imp-sec">
+      ${cfg.kind === 'dara'
+        ? html`<div class="imp-line"><${Icon} n="circleCheck" cls="sm pos" /><span>قالب خود دارا شناخته شد</span></div>`
+        : !edit
+          ? html`<div class="imp-line"><${Icon} n="circleCheck" cls="sm pos" /><span class="grow">${roleCols.map(([r, i], k) => html`${k ? '، ' : ''}${SM.ROLE_NAME[r]} <span class="muted">از «${map.headers[i] || 'ستون ' + num(i + 1)}»</span>`)}</span>
+              <button class="imp-link" onClick=${() => setEdit(true)}>تغییر ستون‌ها</button></div>`
+          : html`<div class="col" style="gap:10px">
+              <div class="row wrap" style="gap:12px"><b class="small grow">هر ستون چه چیزی است؟</b>
+                <label class="row xs muted" style="gap:6px"><${Toggle} on=${map.headerRow >= 0} onChange=${setTitles} title="جدول سطر عنوان دارد" />سطر عنوان دارد</label>
+                ${!map.missing.length && html`<button class="imp-link small" onClick=${() => setEdit(false)}>تمام</button>`}</div>
+              <${MapGrid} rows=${rows} map=${map} onRole=${setRole} />
+              ${map.missing.length > 0 && html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>برای ادامه، ستون ${map.missing.includes('name') ? '«نام دارایی»' : ''}${map.missing.length > 1 ? ' و ' : ''}${map.missing.includes('value') ? '«ارزش» (یا «مقدار» و «قیمت هر واحد»)' : ''} را از فهرست بالای ستون‌ها انتخاب کن.</div></div>`}
+              ${conns.length > 0 && html`<div class="row wrap" style="gap:8px">
+                <button class="btn sm" disabled=${aiState === 'running'} onClick=${askAI}><${Icon} n=${aiState === 'running' ? 'refresh' : 'sparkles'} cls=${aiState === 'running' ? 'sm spin' : 'sm'} />${aiState === 'running' ? 'در حال تشخیص…' : 'تشخیص با هوش مصنوعی'}</button>
+                <span class="xs muted">${st.ai.privacy === 'percent' ? 'فقط عنوان‌ها و چند سطر نمونه، بدون هیچ عددی فرستاده می‌شود' : 'عنوان‌ها و چند سطر نمونه فرستاده می‌شود'}</span></div>
+                ${aiState && aiState !== 'running' && html`<div class="xs neg">${aiState}</div>`}`}
+            </div>`}
+      <div class="imp-line"><span class="small">مبالغ به</span>
+        <${Seg} value=${cfg.unit} onChange=${(v) => setCfg({ ...cfg, unit: v, unitWhy: 'you' })} options=${[['toman', 'تومان'], ['rial', 'ریال']]} />
+        <span class=${'xs ' + (cfg.unitWhy === 'guess' ? 'warn' : 'muted')}>${WHY[cfg.unitWhy] || ''}</span></div>
     </div>`}
+
+    ${(src.backup || ready) && (assets.length
+      ? html`<div class="col" style="gap:10px">
+        <div class="imp-total"><span><b>${num(assets.length)} دارایی</b>${src.backup ? ' از پشتیبان دارا' : ''}</span><span class="muted">ارزش خالص</span><b class="num"><${Money} v=${pf.net} s=${s} /></b></div>
+        ${src.notes?.map((n) => html`<div class="xs muted">• ${n}</div>`)}
+        <div class="imp-list">${(src.backup ? assets.map((a) => ({ asset: a, cat: a.category, i: a.id, fixed: true })) : items.filter((x) => x.asset)).map((x) => {
+          const r = rowOf[x.asset.id]; if (!r) return null;
+          const a = x.asset;
+          return html`<div class="imp-it" key=${x.i}><${Ava} cat=${a.category} size=${30} />
+            <span class="grow" style="min-width:0"><span class="sb ellipsis">${a.name}</span>
+              <span class="xs muted">${a.custodian && a.custodian !== a.name ? a.custodian + ' · ' : ''}${a.mode === 'units' ? `${num(a.quantity, 4)} ${a.unit || ''} · ${a.price?.source === 'market' ? 'قیمت آنلاین: ' + refLabel(a.price.ref) : 'قیمت دستی'}` : a.mode === 'rate' ? 'نرخ ثابت' : 'مانده'}${a.review ? ' · ⚠ ' + a.review : ''}${x.note ? ' · ' + x.note : ''}</span></span>
+            ${x.fixed ? html`<span class="xs muted">${r.cat.short}</span>` : html`<select class="imp-cat" value=${x.cat} aria-label=${'دسته ' + a.name} onChange=${(e) => setCats({ ...cats, [x.i]: e.target.value })}>
+              ${CATEGORIES.map((c) => html`<option value=${c.id}>${c.short}</option>`)}</select>`}
+            <span class="small num imp-v"><${Money} v=${r.signedValue} s=${s} compact /></span></div>`;
+        })}</div>
+        ${left.length > 0 && html`<div class="xs muted"><button class="imp-link" onClick=${() => setShowOut(!showOut)}>${num(left.length)} ردیف وارد نمی‌شود</button>
+          ${showOut && html`<div class="col" style="gap:2px;margin-top:6px">${left.map((x) => html`<div>• «${x.name}»: ${x.skipped === 'total' ? 'سطر جمع است' : x.note || 'مبلغی ندارد'}</div>`)}</div>`}</div>`}
+        <div class="row wrap">
+          ${src.backup
+            ? html`<button class="btn primary" onClick=${() => commit('replace')}>جایگزینی همه داده‌ها با این پشتیبان</button><button class="btn" onClick=${() => commit('merge')}>افزودن به داده‌های فعلی</button>`
+            : hasAssets
+              ? html`<button class="btn primary" onClick=${() => commit('merge')}>افزودن ${num(assets.length)} دارایی</button><button class="btn" title="دارایی‌های فعلی کنار می‌روند؛ تا چند ثانیه با «برگشت» قابل بازگشت است" onClick=${() => commit('replace')}>جایگزینی دارایی‌های فعلی</button>`
+              : html`<button class="btn primary" onClick=${() => commit('replace')}>وارد کردن ${num(assets.length)} دارایی</button>`}
+          <span class="grow"></span><button class="btn ghost" onClick=${reset}>انصراف</button></div>
+      </div>`
+      : html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>در این ${src.sheets?.length > 1 ? 'برگه' : 'فایل'} ردیفی که دارایی باشد پیدا نشد${left.length ? `؛ ${num(left.length)} ردیف مبلغ نداشت` : ''}. ${cfg?.kind === 'map' && !edit ? html`<button class="imp-link" onClick=${() => setEdit(true)}>ستون‌ها را بررسی کن</button>` : ''}</div></div>`)}
   </div>`;
 }
 
@@ -130,10 +282,10 @@ export function WelcomePage({ st, s, open, inline }) {
     </section>
     <div class="grid3">
       <button class="card mode" style="padding:18px" onClick=${() => { act.setSettings({ onboarded: true }); open(null); }}><span class="ava" style="background:var(--pos-bg);color:var(--pos)"><${Icon} n="plus" /></span><span class="mt" style="font-size:15px;margin-top:8px">شروع از صفر</span><span class="md">اولین دارایی را دستی اضافه کن</span></button>
-      <button class="card mode" style="padding:18px" onClick=${() => setStep('import')}><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="file" /></span><span class="mt" style="font-size:15px;margin-top:8px">ورود از گوگل‌شیت یا اکسل</span><span class="md">فایل CSV، لینک گوگل‌شیت یا پشتیبان دارا</span></button>
+      <button class="card mode" style="padding:18px" onClick=${() => setStep('import')}><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="file" /></span><span class="mt" style="font-size:15px;margin-top:8px">ورود از گوگل‌شیت یا اکسل</span><span class="md">اکسل با هر چیدمانی، CSV، گوگل‌شیت یا پشتیبان دارا</span></button>
       ${!st.assets.length && html`<button class="card mode" style="padding:18px" onClick=${async () => { await store.locked(async () => { const { assets } = await store.load('assets'); if (!assets?.length) await store.save({ assets: sampleData() }); }); await act.setSettings({ onboarded: true }); send('refresh'); toast('داده نمونه بارگذاری شد'); location.hash = '#/overview'; }}><span class="ava" style="background:var(--warn-bg);color:var(--warn)"><${Icon} n="sparkles" /></span><span class="mt" style="font-size:15px;margin-top:8px">دیدن با داده نمونه</span><span class="md">برای آشنایی؛ بعداً از تنظیمات پاک کن</span></button>`}
     </div>
-    ${step === 'import' && html`<div class="card"><div class="card-h"><h3>ورود اطلاعات</h3></div><${ImportPanel} s=${s} onDone=${() => (location.hash = '#/overview')} /></div>`}
+    ${step === 'import' && html`<div class="card"><div class="card-h"><h3>ورود اطلاعات</h3></div><${ImportPanel} st=${st} s=${s} onDone=${() => (location.hash = '#/overview')} /></div>`}
   </div>`;
 }
 
@@ -248,7 +400,7 @@ export function SettingsPage({ st, pf, s }) {
         <div class="xs muted">${st.meta.backfill?.state === 'done' ? `آخرین بار ${num(st.meta.backfill.added)} روز ساخته شد. ` : ''}${st.meta.backfill?.state === 'error' ? html`<span class="neg">${st.meta.backfill.error}. </span>` : ''}از قیمت‌های گذشته tgju و TSETMC و تراکنش‌های ثبت‌شده؛ مانده‌ها و قیمت‌های دستی ثابت فرض می‌شوند (خط‌چین در نمودار).</div></div>
         <${BackfillButton} st=${st} label="بازسازی" /></div>
       <div class="sb small" style="margin-bottom:8px">ورود اطلاعات</div>
-      <${ImportPanel} s=${s} />
+      <${ImportPanel} st=${st} s=${s} />
       <hr class="sep" />
       <div class="row between"><div><div class="sb neg">پاک‌کردن همه داده‌ها</div><div class="xs muted">غیرقابل برگشت</div></div><button class="btn danger" onClick=${wipe}><${Icon} n="trash" cls="sm" />پاک‌کردن</button></div>
     </div>

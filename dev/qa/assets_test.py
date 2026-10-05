@@ -219,8 +219,9 @@ async def main():
             check('«bought part of it» is logged as money, not market', ev['changes'][0]['field'] == 'balance' and not ev['changes'][0].get('reval') and ev['changes'][0]['delta'] == 2_000_000_000, ev['changes'])
             await pg.click('tr.r:has-text("آپارتمان")'); await pg.wait_for_timeout(200)
             # private shares: switch from «count × price» to «total value» — carried over, logged as a correction, undoable
-            await pg.click('tr.r:has-text("سهام شرکت خصوصی")'); await pg.wait_for_timeout(300)
-            await pg.click('tr.xrow button:has-text("ویرایش")'); await pg.wait_for_timeout(500)
+            # (the row's middle is the inline price editor: open the row from its name)
+            await pg.click('tr.r:has-text("سهام شرکت خصوصی") td:first-child'); await pg.wait_for_timeout(300)
+            await pg.click('tr.r:has-text("سهام شرکت خصوصی") + tr.xrow button:has-text("ویرایش")'); await pg.wait_for_timeout(500)
             v0 = (await pf(pg))['rows']['priv']['v']
             await pg.click('.drawer .mode:has-text("مانده / ارزش کل")'); await pg.wait_for_timeout(300)
             pv = await pg.input_value('.drawer .field:has-text("ارزش امروز") input')

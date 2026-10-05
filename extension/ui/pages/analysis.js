@@ -9,6 +9,7 @@ import { ago, parseNum } from '../../lib/format.js';
 import { act } from '../actions.js';
 import { T as TT } from '../tips.js';
 import * as BB from '../../lib/bubble.js';
+import * as CMP from '../../lib/compare.js';
 
 /* Plain-language help for each section (for people new to these ideas). */
 const TIPS = {
@@ -26,6 +27,7 @@ const TIPS = {
   breakeven: ['از کِی سود می‌دهد؟ (نقطه سربه‌سر)', 'سرمایه‌گذاری در یک دارایی را با گذاشتن همان پول در سپرده مقایسه می‌کند. نشان می‌دهد قیمت آن دارایی تا پایان مدت باید به چه عددی برسد تا سودش از سپرده بیشتر شود. اگر فکر می‌کنی به آن قیمت نمی‌رسد، سپرده انتخاب امن‌تری است.', 'سپرده ۲۵٪ در ۶ ماه حدود ۱۳٪ سود می‌دهد؛ پس طلا باید بیش از ۱۳٪ (به‌علاوه کارمزد) گران شود.'],
   fee: ['کارمزد خرید و فروش', 'هزینه‌ای که در خرید و فروش از دست می‌دهی: اختلاف قیمت خرید و فروش، کارمزد پلتفرم یا اجرت طلا. برای طلای آب‌شده معمولاً کم و برای طلای زینتی بیشتر است.'],
   pnl: ['سود و زیان دارایی‌ها', 'فقط برای آنچه الان داری (سود فروش‌های گذشته اینجا حساب نمی‌شود)، و برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
+  compare: ['مقایسه دو گزینه', 'یک مبلغ را دو جور کنار هم می‌گذارد، برای همان مدت: مثلاً «بماند در سپرده» در برابر «سکه بخرم». هزینه خرید و فروش، سودی که از دست می‌رود، حباب سکه و اثرش روی ترکیب دارایی‌ات را نشان می‌دهد. با لغزنده ببین اگر قیمت بالا یا پایین برود چه می‌شود. فقط حساب است، نه توصیه؛ هزینه‌ها و نرخ‌ها فرض‌اند و می‌توانی عوضشان کنی.', 'سپرده ۲۵٪ در یک سال حدود ۲۸٪ رشد می‌کند؛ پس سکه با ۲٪ هزینه خرید و فروش باید حدود ۳۱٪ گران شود تا به آن برسد.'],
   critique: ['نگاه دستیار', 'هوش مصنوعی با نگاه به درصدهای ترکیب دارایی‌ات، سه نقطه ضعف مهم را پیدا می‌کند و برای هرکدام یک بررسی ساده پیشنهاد می‌دهد. توصیه خرید یا فروش نمی‌کند.'],
 };
 const T = (k) => html`<${Tip} title=${TIPS[k][0]} text=${TIPS[k][1]} example=${TIPS[k][2]} />`;
@@ -75,6 +77,107 @@ function Performance({ st, pf, s }) {
           <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>
       </div>
     </div>
+  </div>`;
+}
+
+
+/* ---------------- «مقایسه دو گزینه» ---------------- */
+const MONTHS = [[3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']];
+const monthsName = (m) => (m === 12 ? 'یک سال' : m === 24 ? 'دو سال' : `${num(m)} ماه`);
+function CmpPick({ label, spec, onChange, other, s, depositPct }) {
+  const c = CMP.choiceById(spec.id);
+  return html`<div class="cmp-pick">
+    <div class="row" style="gap:8px"><span class="cmp-tag">${label}</span>
+    <select class="input" value=${spec.id} aria-label=${'گزینه ' + label} onChange=${(e) => onChange({ id: e.target.value })}>
+      <optgroup label="نگه‌داشتن">${CMP.CHOICES.filter((x) => x.kind !== 'market').map((x) => html`<option value=${x.id} disabled=${x.id === other}>${x.name}</option>`)}</optgroup>
+      <optgroup label="خرید">${CMP.CHOICES.filter((x) => x.kind === 'market').map((x) => html`<option value=${x.id} disabled=${x.id === other}>${x.name}</option>`)}</optgroup>
+    </select></div>
+    ${c?.kind === 'deposit' && html`<label class="cmp-as">سود سالانه <input class="input num-in" inputmode="decimal" value=${num(spec.ratePct ?? depositPct, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) onChange({ ...spec, ratePct: v }); }} />٪</label>`}
+    ${c?.kind === 'market' && html`<label class="cmp-as">هزینه خرید و فروش <input class="input num-in" inputmode="decimal" value=${num(spec.costPct ?? c.cost, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v >= 0 && v <= 50) onChange({ ...spec, costPct: v }); }} />٪${T('fee')}</label>`}
+  </div>`;
+}
+function CmpCol({ o, other, g, r, s, label }) {
+  const v = o.valueAt(g);
+  const gain = v - r.amount;
+  const unit = (x) => html`<${Money} v=${x} s=${s} compact />`;
+  const shift = (a, b) => html`<span class="cmp-shift"><span class="num">${pct(a, { sign: false, digits: 0 })}</span><span class="muted">←</span><b class="num">${pct(b, { sign: false, digits: 0 })}</b></span>`;
+  return html`<div class="cmp-col">
+    <div class="cmp-h"><span class="cmp-tag">${label}</span><b>${o.name}</b></div>
+    <div class="cmp-v"><span class="v"><${Money} v=${v} s=${s} compact /></span><span class=${'small ' + (gain >= 0 ? 'pos' : 'neg')}><${Money} v=${gain} s=${s} compact sign /></span></div>
+    <div class="xs muted">ارزش در پایان ${monthsName(r.months)}${o.kind === 'market' ? (g ? html`، اگر قیمت <span class="ltr">${pct(g, { digits: 0 })}</span> تغییر کند` : '، اگر قیمت ثابت بماند') : o.rate ? `، با سود سالانه ${num(o.rate, 1)}٪` : ''}</div>
+    <dl class="cmp-dl">
+      ${o.kind !== 'market' && o.rate > 0 && html`<dt>سود این مدت</dt><dd class="pos">${unit(o.final - r.amount)}</dd>`}
+      ${o.kind === 'market' && html`<dt>هزینه خرید و فروش</dt><dd class="neg">${unit(-o.costAmount)}</dd>`}
+      ${o.lost > 0 && html`<dt>سود «${r.source.name}» که دیگر نمی‌گیری</dt><dd class="neg">${unit(-o.lost)}</dd>`}
+      ${o.units > 0 && html`<dt>تقریباً می‌خری</dt><dd>${num(o.units, o.units < 10 ? 2 : 0)} ${o.unit}</dd>`}
+      ${o.bubble !== undefined && html`<dt>حباب امروز</dt><dd>${pct(o.bubble, { digits: 1 })}<span class="xs muted"> · ${pct(o.bubble / (1 + o.bubble), { sign: false, digits: 0 })} از قیمت</span></dd>`}
+      ${o.bubbleRevert !== undefined && Math.abs(o.bubbleRevert) >= 0.005 && html`<dt>اگر حباب به میانگین ۳ ماهه برگردد</dt><dd class=${o.bubbleRevert < 0 ? 'neg' : 'pos'}><span class="ltr">${pct(o.bubbleRevert, { digits: 1 })}</span><span class="xs muted"> قیمت، با طلای ثابت</span></dd>`}
+      ${o.breakEven !== null && o.breakEven !== undefined && html`<dt>برای رسیدن به «${other.name}»</dt><dd>قیمت باید <b class="ltr">${pct(o.breakEven, { digits: 1 })}</b> تغییر کند${r.months !== 12 ? html`<span class="xs muted"> (سالانه <span class="ltr">${pct(o.breakEvenAnnual, { digits: 0 })}</span>)</span>` : ''}</dd>`}
+    </dl>
+    ${o.kind !== 'keep' && o.after && r.before && html`<div class="cmp-after">
+      <span class="xs muted">بعد از این کار</span>
+      <div><span>محافظت در برابر تورم</span>${shift(r.before.protected, o.after.protected)}</div>
+      <div><span>نقد در چند روز</span>${shift(r.before.liquidDays, o.after.liquidDays)}</div>
+      <div><span>بیشترین سهم: ${EXPOSURES[o.after.top.exposure]?.name || ''}</span>${shift(r.before.by[o.after.top.exposure] || 0, o.after.top.share)}</div>
+    </div>`}
+    ${o.notes.map((n) => html`<div class="xs muted">• ${n}</div>`)}
+  </div>`;
+}
+function Compare({ st, pf, s }) {
+  const srcs = useMemo(() => CMP.sources(st.assets, pf), [st.assets, pf]);
+  const dep = I.defaultDepositPct(st);
+  const [src, setSrc] = useState(() => srcs[0]?.id || 'new');
+  const first = srcs.find((x) => x.id === src);
+  const [amount, setAmount] = useState(() => { const v = first ? Math.min(first.value, 1e9) : 1e9; return v >= 1e7 ? Math.floor(v / 1e7) * 1e7 : Math.round(v); });
+  const [months, setMonths] = useState(12);
+  const [a, setA] = useState(() => ({ id: first ? 'keep' : 'deposit' }));
+  const [b, setB] = useState({ id: 'geram18' });
+  const [ga, setGa] = useState(0), [gb, setGb] = useState(0);
+  const [avg, setAvg] = useState({});
+  const coinKeys = [a, b].map((x) => CMP.choiceById(x.id)?.ref).filter((ref) => BB.isCoinRef(ref)).map((ref) => ref.key);
+  useEffect(() => {
+    if (!coinKeys.length) return;
+    let alive = true;
+    send('bubbleStats', { keys: coinKeys, days: 90 }).then((res) => { if (alive && res?.ok) setAvg(Object.fromEntries(Object.entries(res.stats || {}).filter(([, v]) => v).map(([k, v]) => [k, v.avg]))); }).catch(() => {});
+    return () => { alive = false; };
+  }, [coinKeys.join()]);
+  const r = useMemo(() => CMP.compareOptions(st, pf, { amount, sourceId: src, a, b, months, depositPct: dep, bubbleAvg: avg }), [st.assets, st.quotes, pf, amount, src, JSON.stringify(a), JSON.stringify(b), months, dep, JSON.stringify(avg)]);
+  const both = r && r.a.kind === 'market' && r.b.kind === 'market';
+  const out = r ? CMP.outcome(r, r.a.kind === 'market' ? ga : 0, r.b.kind === 'market' ? (both ? gb : ga) : 0) : null;
+  const gB = r && r.b.kind === 'market' ? (both ? gb : ga) : 0;
+  // with one market choice its slider follows it; with two, each slider goes with its choice
+  const swap = () => { setA(b); setB(a); if (both) { setGa(gb); setGb(ga); } };
+  const verdict = out && (Math.abs(out.diff) < Math.max(1, r.amount * 0.002) ? 'در این فرض، دو گزینه تقریباً برابرند.'
+    : html`در این فرض، «${out.diff > 0 ? r.a.name : r.b.name}» حدود <b><${Money} v=${Math.abs(out.diff)} s=${s} compact /></b> بیشتر می‌شود.`);
+  const market = r && [r.a, r.b].filter((o) => o.kind === 'market');
+  return html`<div class="card" id="compare">
+    <div class="card-h"><h3><${Icon} n="swap" cls="sm" />مقایسه دو گزینه${T('compare')}</h3>
+      ${r && html`<${AskBtn} q=${`${Math.round(r.amount / (s.currency === 'rial' ? 1 : 10)).toLocaleString('fa-IR')} ${unitOf(s)} از «${r.source.name}» را برای ${monthsName(r.months)} «${r.a.name}» کنم یا «${r.b.name}»؟ با compare_options مقایسه کن و فرض‌ها را توضیح بده.`} label="بپرس" />`}</div>
+    <div class="cmp-q">
+      <${MoneyField} label="مبلغ" rial=${amount} onRial=${(v) => setAmount(v || 0)} s=${s} />
+      <div class="field"><label>از کجا</label><select class="input" value=${src} onChange=${(e) => setSrc(e.target.value)}>
+        ${srcs.map((x) => html`<option value=${x.id}>${x.name}</option>`)}<option value="new">پول تازه (هنوز در دارا نیست)</option></select></div>
+      <div class="field"><label>برای چه مدت</label><${Seg} value=${months} onChange=${setMonths} options=${MONTHS} /></div>
+    </div>
+    ${r?.source.exceeds && html`<div class="callout warn" style="margin-top:10px"><${Icon} n="alert" cls="sm" /><div>این مبلغ از موجودی «${r.source.name}» (<${Money} v=${r.source.value} s=${s} compact />) بیشتر است.</div></div>`}
+    <div class="cmp-picks">
+      <${CmpPick} label="الف" spec=${a} onChange=${setA} other=${b.id} s=${s} depositPct=${dep} />
+      <button class="btn icon ghost cmp-swap" onClick=${swap} aria-label="جابه‌جا کردن دو گزینه" title="جابه‌جا کردن"><${Icon} n="swap" /></button>
+      <${CmpPick} label="ب" spec=${b} onChange=${setB} other=${a.id} s=${s} depositPct=${dep} />
+    </div>
+    ${!r ? html`<div class="empty small" style="padding:18px">مبلغ را وارد کن تا دو گزینه کنار هم حساب شوند.</div>` : html`
+      <div class="cmp-grid">
+        <${CmpCol} o=${r.a} other=${r.b} g=${r.a.kind === 'market' ? ga : 0} r=${r} s=${s} label="الف" />
+        <${CmpCol} o=${r.b} other=${r.a} g=${gB} r=${r} s=${s} label="ب" />
+      </div>
+      ${market.length > 0 && html`<div class="cmp-what">
+        ${both ? html`
+          <${Slider} label=${`اگر قیمت «${r.a.name}» تا پایان مدت`} value=${Math.round(ga * 100)} onChange=${(v) => setGa(v / 100)} min=${-40} max=${80} />
+          <${Slider} label=${`اگر قیمت «${r.b.name}» تا پایان مدت`} value=${Math.round(gb * 100)} onChange=${(v) => setGb(v / 100)} min=${-40} max=${80} />`
+        : html`<${Slider} label=${`اگر قیمت «${market[0].name}» تا پایان مدت`} value=${Math.round(ga * 100)} onChange=${(v) => setGa(v / 100)} min=${-40} max=${80} note="دوبار کلیک: برگشت به صفر" />`}
+      </div>`}
+      <div class="cmp-verdict">${verdict}</div>
+      <div class="xs muted">فقط حساب است، نه توصیه. هزینه خرید و فروش و نرخ سپرده فرض‌اند و می‌توانی عوضشان کنی؛ سود سپرده‌ها ماهانه دوباره سپرده فرض شده است.</div>`}
   </div>`;
 }
 
@@ -349,6 +452,7 @@ export function AnalysisPage({ st, pf, s, open }) {
       </div>
     </div>
 
+    <${Compare} st=${st} pf=${pf} s=${s} />
     <${Targets} pf=${pf} s=${s} assets=${st.assets} />
     <${BreakEven} st=${st} s=${s} />
 

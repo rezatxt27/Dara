@@ -32,11 +32,12 @@ export const hasWords = (s) => /[آ-غف-يپچژکگی]/.test(String(s || ''));
 export function parseNum(input, { lenient = false, unit = null } = {}) {
   if (input === null || input === undefined) return NaN;
   if (typeof input === 'number') return input;
-  let s = toEnDigits(input).replace(/[−–]/g, '-').replace(/‌/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
+  let s = toEnDigits(input).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/[−–\u2212]/g, '-').replace(/‌/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').trim();
   const neg = /^-/.test(s);
   if (/^-?\d{1,3}(\.\d{3}){2,}$/.test(s)) s = s.replace(/\./g, ''); // «2.500.000»: dots as thousands separators
   // thousands separators inside a number go; Persian decimal mark (and «/» between digits) becomes a dot; "12 500 000" joins up
   s = s.replace(/(\d)[٬,](?=\d)/g, '$1').replace(/٫/g, '.').replace(/(\d)\/(\d)/g, '$1.$2').replace(/(\d)\s+(?=\d{3}(?!\d))/g, '$1');
+  if (/^[-+]?(\d+\.?\d*|\.\d+)e[+-]?\d+$/i.test(s)) return Number(s); // «1.5E+07»: how a spreadsheet shows a long number
   if (lenient) s = s.replace(/[a-z]+/gi, ' '); // spreadsheet cells: «12 گرم», «120 USD»
   else if (/[a-z]/i.test(s)) return NaN;
   const tokens = s.match(/\d+(?:\.\d+)?|\.\d+|[آ-ی]+/g);

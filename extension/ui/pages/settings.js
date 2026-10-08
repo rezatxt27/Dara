@@ -1,10 +1,11 @@
-import { html, useState, useEffect, useMemo, Icon, Seg, Toggle, Money, toast, send, num, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Toggle, Money, toast, send, num, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
 import * as store from '../../lib/store.js';
 import * as E from '../../lib/engine.js';
 import { parseDelimited, toCSV } from '../../lib/importer.js';
 import * as SM from '../../lib/sheetmap.js';
 import { readXlsx } from '../../lib/xlsx.js';
 import * as AI from '../../lib/ai.js';
+import * as BK from '../../lib/backup.js';
 import { PROVIDERS, CAT, CATEGORIES } from '../../lib/catalog.js';
 import { uid } from '../../lib/format.js';
 import { todayIso, addDaysIso } from '../../lib/jalali.js';
@@ -60,6 +61,15 @@ function ImportPanel({ st, s, onDone, compact }) {
   const [drag, setDrag] = useState(false);
   const [aiState, setAiState] = useState('');  // '' | 'running' | error text
   const [showOut, setShowOut] = useState(false);
+  const [locked, setLocked] = useState(null); // { env, label, pw, err }: a backup with a password, waiting for it
+  const lockRef = useRef(null); lockRef.current = locked?.env || null;
+  const unlock = async () => {
+    const env = locked.env, label = locked.label;
+    setBusy(true);
+    try { const obj = await BK.decrypt(env, locked.pw); if (lockRef.current === env) { setLocked(null); fromText(JSON.stringify(obj), label); } }
+    catch (e) { if (lockRef.current === env) setLocked((l) => (l && l.env === env ? { ...l, err: e.message || 'باز کردن فایل ممکن نشد' } : l)); }
+    setBusy(false);
+  };
   const quotes = st?.quotes || {};
   const conns = st?.ai ? AI.orderedConnections(st.ai) : [];
   const hasAssets = !!st?.assets?.some((a) => !a.archived);
@@ -76,6 +86,7 @@ function ImportPanel({ st, s, onDone, compact }) {
     if (/^\s*[\[{]/.test(text)) {
       let obj;
       try { obj = JSON.parse(text); } catch { return toast('این فایل JSON خراب است و خوانده نشد'); }
+      if (BK.isLocked(obj)) { setLocked({ env: obj, label, pw: '', err: '' }); return; } // a backup with a password: ask for it
       const chk = store.checkBackup(obj);
       if (!chk.ok) return toast(chk.error);
       setSrc({ label, backup: obj, assets: store.cleanList('assets', obj.data.assets), notes: chk.dropped ? [`${num(chk.dropped)} ردیف ناقص یا خراب کنار گذاشته شد.`] : [] });
@@ -93,7 +104,8 @@ function ImportPanel({ st, s, onDone, compact }) {
       if (/\.xlsx?$/i.test(f.name) || (b[0] === 0x50 && b[1] === 0x4b) || (b[0] === 0xd0 && b[1] === 0xcf)) {
         const wb = await readXlsx(buf);
         openSheet(wb.sheets, bestSheet(wb.sheets), f.name);
-      } else fromText(decodeText(buf), f.name);
+      } else if (BK.isGzip(new Uint8Array(buf.slice(0, 2)))) fromText(await BK.gunzip(new Uint8Array(buf)), f.name); // a large automatic backup
+      else fromText(decodeText(buf), f.name);
     } catch (e) { toast(e.message || 'خواندن فایل ممکن نشد'); }
     setBusy(false);
   };
@@ -170,6 +182,16 @@ function ImportPanel({ st, s, onDone, compact }) {
     } catch (e) { toast(e.message || 'ورود اطلاعات انجام نشد'); }
   };
 
+  if (locked) return html`<div class="col imp" style="gap:12px">
+    <div class="imp-src"><span class="imp-file"><${Icon} n="lock" cls="sm" /><span class="ellipsis">${locked.label}</span></span><span class="grow"></span>
+      <button class="btn ghost sm" onClick=${() => setLocked(null)}>فایل دیگر</button></div>
+    <div class="field"><label>این پشتیبان رمز دارد</label>
+      <div class="row" style="gap:8px"><input class="input" type="password" autoFocus placeholder="رمز پشتیبان" value=${locked.pw}
+        onInput=${(e) => setLocked({ ...locked, pw: e.target.value, err: '' })} onKeyDown=${(e) => e.key === 'Enter' && locked.pw && unlock()} />
+        <button class="btn primary" disabled=${!locked.pw || busy} onClick=${unlock}>${busy ? 'در حال باز کردن…' : 'باز کردن'}</button></div>
+      ${locked.err && html`<span class="err-msg">${locked.err}</span>`}</div>
+  </div>`;
+
   /* step 1: pick */
   if (!src) return html`<div class="col imp" style="gap:12px">
     <label class=${'imp-drop' + (drag ? ' on' : '') + (busy ? ' busy' : '')}
@@ -178,7 +200,7 @@ function ImportPanel({ st, s, onDone, compact }) {
       <span class="imp-drop-ic"><${Icon} n=${busy ? 'refresh' : 'upload'} cls=${busy ? 'spin' : ''} /></span>
       <span class="imp-drop-t">${busy ? 'در حال خواندن…' : html`فایل را اینجا رها کن یا <span class="imp-link">انتخاب کن</span>`}</span>
       <span class="imp-drop-d">اکسل، CSV یا پشتیبان دارا — با هر چیدمان و هر عنوانی برای ستون‌ها</span>
-      <input type="file" hidden accept=".xlsx,.csv,.tsv,.txt,.json,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      <input type="file" hidden accept=".xlsx,.csv,.tsv,.txt,.json,.gz,text/csv,text/plain,application/json,application/gzip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         onChange=${(e) => { fromFile(e.target.files?.[0]); e.target.value = ''; }} />
     </label>
     <div class="imp-or">
@@ -289,6 +311,61 @@ export function WelcomePage({ st, s, open, inline }) {
   </div>`;
 }
 
+/* ---------------- automatic backups ---------------- */
+const KEEP_NOTE = { all: 'هیچ فایلی پاک نمی‌شود.', smart: 'همه فایل‌های چهار هفته اخیر، یکی از هر ماه برای یک سال گذشته، و یکی از هر سال برای همیشه.', last: 'فقط ۸ فایل آخر می‌ماند.' };
+function BackupCard({ st, s }) {
+  const cfg = BK.backupSettings(s);
+  const meta = st.meta.backup || {};
+  const files = meta.files || [];
+  const [vault, setVault] = useState(undefined);
+  useEffect(() => { if (hasChrome) chrome.storage.local.get('vault').then((r) => setVault(r.vault || null)); else setVault(null); }, []);
+  const [pw, setPw] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const setCfg = async (p) => { await act.setSettings({ backup: { ...cfg, ...p } }); send('backupCheck'); };
+  const said = (r) => (!r?.ok ? r?.error || 'پشتیبان ساخته نشد' : r.pending ? 'کروم پرسید فایل کجا ذخیره شود؛ پنجره دانلود را ببین' : r.saved ? `پشتیبان ذخیره شد: ${r.saved}` : 'پشتیبان به‌روز است');
+  const now = async () => { setBusy(true); const r = await send('backupNow'); setBusy(false); toast(said(r)); };
+  const plain = (meta.files || []).filter((f) => !f.locked && !f.pending);
+  const purge = async () => {
+    setBusy(true); const r = await send('backupPurgePlain'); setBusy(false);
+    toast(r?.ok ? (r.left ? `${num(r.removed)} فایل پاک شد؛ ${num(r.left)} فایل جابه‌جا شده بود و دست نخورد` : `${num(r.removed)} پشتیبان بدون رمز پاک شد`) : r?.error || 'پاک کردن ممکن نشد');
+  };
+  const savePw = async () => {
+    if (pw.a.length < BK.PASSWORD_MIN) return toast(`رمز دست‌کم ${num(BK.PASSWORD_MIN)} حرف باشد`);
+    if (pw.a !== pw.b) return toast('دو رمز یکی نیستند');
+    setBusy(true);
+    try {
+      const v = await BK.makeKey(pw.a); await chrome.storage.local.set({ vault: { ...v, setAt: Date.now() } }); setVault(v); setPw(null);
+      const r = await send('backupNow'); // a locked copy right away
+      toast(r?.ok && r.saved ? 'رمز گذاشته شد و یک پشتیبان رمزدار ساخته شد' : 'رمز گذاشته شد؛ پشتیبان‌های بعدی رمز دارند');
+    }
+    catch (e) { toast(e.message || 'گذاشتن رمز ممکن نشد'); }
+    setBusy(false);
+  };
+  const dropPw = async () => { await chrome.storage.local.remove('vault'); setVault(null); toast('پشتیبان‌های بعدی بدون رمز ساخته می‌شوند'); };
+  return html`<div class="card" id="backup"><div class="card-h"><h3><${Icon} n="history" cls="sm" />پشتیبان خودکار</h3>
+      <span class="sub">${meta.lastAt ? `آخرین پشتیبان ${ago(meta.lastAt)}` : cfg.freq === 'off' ? 'خاموش' : 'هنوز پشتیبانی ساخته نشده'}</span></div>
+    <div class="xs muted" style="margin-bottom:4px">یک فایل در پوشه دانلود، داخل <b>Dara-Backups</b>؛ حتی اگر داده‌های مرورگر پاک شود یا دارا حذف شود، این فایل می‌ماند.</div>
+    ${meta.error && cfg.freq !== 'off' && html`<div class="callout warn" style="margin:8px 0"><${Icon} n="alert" cls="sm" /><div>آخرین تلاش ناموفق بود${meta.errorAt ? ` (${ago(meta.errorAt)})` : ''}: ${meta.error}</div></div>`}
+    <${Row} t="هر چند وقت"><${Seg} value=${cfg.freq} onChange=${(v) => setCfg({ freq: v })} options=${[['daily', 'روزانه'], ['weekly', 'هفتگی'], ['off', 'خاموش']]} /></${Row}>
+    ${cfg.freq !== 'off' && html`
+      <${Row} t="فایل‌های قدیمی" d=${KEEP_NOTE[cfg.keep] || ''}><${Seg} value=${cfg.keep} onChange=${(v) => setCfg({ keep: v })} options=${[['all', 'همه بمانند'], ['smart', 'هوشمند'], ['last', '۸ تای آخر']]} /></${Row}>
+      <${Row} t="رمز" d=${vault ? 'پشتیبان‌های تازه رمز دارند و بدون رمز باز نمی‌شوند. هر فایل با همان رمزی باز می‌شود که موقع ساختنش داشت.' : 'اگر پوشه دانلود با فضای ابری (گوگل‌درایو، آی‌کلاد، دراپ‌باکس) همگام است، برایش رمز بگذار.'}>
+        ${vault ? html`<span class="small pos row" style="gap:4px"><${Icon} n="lock" cls="sm" />با رمز</span><button class="btn sm" onClick=${() => setPw({ a: '', b: '' })}>تغییر</button><button class="btn sm ghost" onClick=${dropPw}>برداشتن</button>`
+          : html`<button class="btn sm" disabled=${vault === undefined} onClick=${() => setPw({ a: '', b: '' })}><${Icon} n="lock" cls="sm" />گذاشتن رمز</button>`}</${Row}>
+      ${vault && plain.length > 0 && !pw && html`<div class="callout warn" style="margin:10px 0"><${Icon} n="alert" cls="sm" /><div class="grow">${num(plain.length)} پشتیبان قبلی بدون رمز ساخته شده و هنوز در پوشه است.
+        <div style="margin-top:6px"><button class="btn sm" disabled=${busy} onClick=${purge}>پاک کردن پشتیبان‌های بدون رمز</button></div></div></div>`}
+      ${pw && html`<div class="col" style="gap:10px;padding:12px 0;border-bottom:1px solid var(--line)">
+        <div class="calc-in two" style="max-width:none">
+          <div class="field"><label>رمز</label><input class="input" type="password" autoFocus value=${pw.a} onInput=${(e) => setPw({ ...pw, a: e.target.value })} /></div>
+          <div class="field"><label>تکرار رمز</label><input class="input" type="password" value=${pw.b} onInput=${(e) => setPw({ ...pw, b: e.target.value })} onKeyDown=${(e) => e.key === 'Enter' && savePw()} /></div></div>
+        <div class="callout warn"><${Icon} n="alert" cls="sm" /><div>اگر رمز را فراموش کنی، فایل‌های رمزدار به هیچ روشی باز نمی‌شوند؛ جایی امن یادداشتش کن. رمز روی همین کامپیوتر نگه داشته می‌شود تا پشتیبان خودکار ساخته شود؛ پس از این به بعد، فایلی که از این کامپیوتر بیرون برود (فضای ابری، فلش، ایمیل) بدون رمز خواندنی نیست. رمز دست‌کم ${num(BK.PASSWORD_MIN)} حرف؛ هرچه بلندتر، امن‌تر.</div></div>
+        <div class="row"><button class="btn primary" disabled=${busy} onClick=${savePw}>ذخیره رمز</button><button class="btn ghost" onClick=${() => setPw(null)}>انصراف</button></div>
+      </div>`}`}
+    <div class="row wrap" style="margin-top:12px;gap:10px"><button class="btn" disabled=${busy} onClick=${now}><${Icon} n=${busy ? 'refresh' : 'download'} cls=${busy ? 'sm spin' : 'sm'} />همین الان پشتیبان بگیر</button>
+      <span class="xs muted grow">فقط وقتی کروم باز است ساخته می‌شود و اگر از آخرین پشتیبان چیزی عوض نشده باشد، فایل تکراری نمی‌سازد. برای برگرداندن، فایل را در «ورود اطلاعات» پایین همین صفحه رها کن.</span></div>
+  </div>`;
+}
+
 /* ---------------- settings ---------------- */
 function Row({ t, d, children }) {
   return html`<div class="row between" style="padding:12px 0;border-bottom:1px solid var(--line);gap:16px"><div><div class="sb">${t}</div>${d && html`<div class="xs muted">${d}</div>`}</div><div class="row">${children}</div></div>`;
@@ -367,7 +444,7 @@ export function SettingsPage({ st, pf, s }) {
   const backup = async () => { const b = await store.exportBackup(); download(`dara-backup-${todayIso()}.json`, JSON.stringify(b, null, 1)); };
   const csv = () => download(`dara-assets-${todayIso()}.csv`, toCSV(pf.rows), 'text/csv;charset=utf-8');
   const wipe = async () => {
-    if (!confirm('همه دارایی‌ها، تاریخچه و تنظیمات پاک شود؟ قبلش از «پشتیبان‌گیری» استفاده کن.')) return;
+    if (!confirm('همه دارایی‌ها، تاریخچه و تنظیمات پاک شود؟ قبلش از «پشتیبان‌گیری» استفاده کن. (فایل‌های پشتیبانی که در پوشه دانلود هستند دست نمی‌خورند.)')) return;
     await store.clearAll(); toast('همه داده‌ها پاک شد'); location.hash = '#/welcome'; location.reload();
   };
   const ver = hasChrome ? chrome.runtime.getManifest().version : 'dev';
@@ -393,6 +470,8 @@ export function SettingsPage({ st, pf, s }) {
     <div class="card"><div class="card-h"><h3><${Icon} n="bell" cls="sm" />اعلان‌ها</h3></div>
       ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
     </div>
+
+    <${BackupCard} st=${st} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="download" cls="sm" />داده‌ها</h3><span class="sub">${num(st.assets.length)} دارایی، ${num(Object.keys(st.snapshots).length)} روز تاریخچه</span></div>
       <div class="row wrap" style="margin-bottom:14px"><button class="btn" onClick=${backup}><${Icon} n="download" cls="sm" />پشتیبان‌گیری کامل (JSON)</button><button class="btn" onClick=${csv}><${Icon} n="file" cls="sm" />خروجی اکسل (CSV)</button></div>

@@ -210,7 +210,12 @@ export async function importBackup(obj, { merge = false } = {}) {
   }
   const toSave = {};
   for (const k of KEYS) if (k in d && !['meta', 'ai', 'chat', 'history'].includes(k)) toSave[k] = d[k];
-  if (toSave.settings) toSave.settings = withDefaults('settings', toSave.settings);
+  if (toSave.settings) {
+    toSave.settings = withDefaults('settings', toSave.settings);
+    // how this computer backs up is this computer's choice: a restored file doesn't switch it on or off
+    const { settings: cur } = await load('settings');
+    if (cur.backup) toSave.settings.backup = cur.backup; else delete toSave.settings.backup;
+  }
   await locked(() => save(toSave));
   return chk;
 }

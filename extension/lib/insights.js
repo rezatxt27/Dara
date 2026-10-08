@@ -407,6 +407,8 @@ export function attentionItems(st, pf, today = todayIso(), now = Date.now()) {
   const by = (s) => pf.attention.filter((r) => r.status === s);
   for (const r of by('matured')) items.push({ tone: 'warn', text: `«${r.asset.name}» سررسید شده`, assetId: r.asset.id, rank: 1 });
   for (const r of pf.rows) if (!r.cat.liability && r.value < -0.5) items.push({ tone: 'neg', text: `موجودی «${r.asset.name}» منفی است`, assetId: r.asset.id, rank: 0 });
+  const bk = st.meta?.backup;
+  if (bk?.error && (st.settings?.backup?.freq ?? 'weekly') !== 'off') items.push({ tone: 'warn', text: 'پشتیبان خودکار ساخته نشد؛ در تنظیمات ببین', href: '#/settings', rank: 2 });
   for (const r of by('error')) items.push({ tone: 'warn', text: r.asset.mode === 'units' ? `قیمت «${r.asset.name}» دریافت نشد` : `«${r.asset.name}»: ${r.error || 'نیاز به بررسی'}`, assetId: r.asset.id, rank: 2 });
   const stale = by('stale');
   if (stale.length === 1) {

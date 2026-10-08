@@ -11,6 +11,7 @@ import { todayIso, addDaysIso, isoFromDate } from './lib/jalali.js';
 import { money, pct, uid } from './lib/format.js';
 import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
+import * as BK from './lib/backup.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir'];
 const REFERERS = {
@@ -43,6 +44,7 @@ async function schedule() {
   if (!cur || cur.periodInMinutes !== period) await chrome.alarms.create('refresh', { periodInMinutes: period, delayInMinutes: 0.1 });
   if (!(await chrome.alarms.get('daily'))) await chrome.alarms.create('daily', { periodInMinutes: 60 * 6, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('weekly'))) await chrome.alarms.create('weekly', { periodInMinutes: 60 * 2, delayInMinutes: 3 });
+  if (!(await chrome.alarms.get('backup'))) await chrome.alarms.create('backup', { periodInMinutes: 60 * 3, delayInMinutes: 2 });
   // only a folder install («Load unpacked») updates by copying files; a packed install never needs the 1-minute check
   let dev = true; try { dev = (await chrome.management.getSelf()).installType === 'development'; } catch (e) { /* unknown: keep checking */ }
   if (dev && !(await chrome.alarms.get('selfupdate'))) await chrome.alarms.create('selfupdate', { periodInMinutes: 1, delayInMinutes: 1 });
@@ -82,6 +84,87 @@ async function afterUpdate(prev) {
 function keepAlive() {
   const t = setInterval(() => { try { chrome.runtime.getPlatformInfo(() => {}); } catch (e) { /* ignore */ } }, 20000);
   return () => clearInterval(t);
+}
+
+/* ------------------------------ automatic backups ------------------------------ */
+// A file in Downloads/Dara-Backups when one is due and something the owner entered has changed. The file outlives the
+// browser's own storage (cleared site data, a removed extension, a new computer). Old files are removed only when the
+// owner chose «smart» or «last few», and only files Dara made that are still where it put them.
+const setBackupMeta = (patch) => store.update('meta', (m) => ({ ...m, backup: { ...(m.backup || {}), ...patch } }));
+function waitDownload(id, ms = 60000) {
+  return new Promise((resolve) => {
+    const done = (state, error) => { clearTimeout(t); chrome.downloads.onChanged.removeListener(on); resolve({ state, error }); };
+    const on = (d) => { if (d.id !== id || !d.state) return; if (d.state.current === 'complete') done('complete'); else if (d.state.current === 'interrupted') done('interrupted', d.error?.current); };
+    const t = setTimeout(() => done('timeout'), ms);
+    chrome.downloads.onChanged.addListener(on);
+    chrome.downloads.search({ id }).then(([d]) => { if (d?.state === 'complete') done('complete'); else if (d?.state === 'interrupted') done('interrupted', d.error); }).catch(() => {});
+  });
+}
+let backingUp = null;
+/** A file Dara itself downloaded, still at the path it was saved to (never someone else's download that reused an id). */
+async function ownBackup(f) {
+  try { const [d] = await chrome.downloads.search({ id: f.id }); return d && d.byExtensionId === chrome.runtime.id && (!f.path || d.filename === f.path) && d.exists !== false ? d : null; } catch { return null; }
+}
+async function removeBackupFiles(list) {
+  for (const f of list) {
+    if (!(await ownBackup(f))) continue; // moved, renamed or deleted by the owner, or the history was cleared: leave it
+    try { await chrome.downloads.removeFile(f.id); } catch (e) { /* ignore */ }
+    try { await chrome.downloads.erase({ id: f.id }); } catch (e) { /* ignore */ }
+  }
+}
+const CANCELLED = 'ذخیره پشتیبان لغو شد. اگر کروم برای هر دانلود می‌پرسد «کجا ذخیره شود»، پشتیبان خودکار هر بار همین پنجره را باز می‌کند؛ آن گزینه را در تنظیمات دانلود کروم خاموش کن، یا پشتیبان خودکار را خاموش کن.';
+async function runBackup({ force = false } = {}) {
+  if (backingUp) { if (!force) return backingUp; await backingUp.catch(() => null); } // «همین الان» waits for a check in progress, then runs
+  if (backingUp) return backingUp;
+  const alive = keepAlive();
+  backingUp = (async () => {
+    const st = await store.loadAll();
+    const cfg = BK.backupSettings(st.settings);
+    const meta = st.meta.backup || {};
+    // a file still waiting in a «Save as» dialog from an earlier run: settle it first
+    let files = [...(meta.files || [])];
+    const waiting = files.filter((x) => x.pending);
+    for (const f of waiting) {
+      const [d] = await chrome.downloads.search({ id: f.id }).catch(() => []);
+      if (d?.state === 'complete') Object.assign(f, { pending: false, path: d.filename, name: d.filename.split(/[\\/]/).pop() });
+      else if (!d || d.state === 'interrupted') { files = files.filter((x) => x !== f); await setBackupMeta({ files, error: d?.error === 'USER_CANCELED' ? CANCELLED : 'ذخیره فایل پشتیبان ممکن نشد', errorAt: Date.now() }); }
+    }
+    if (waiting.length) await setBackupMeta({ files });
+    if (!force && (!BK.isDue(cfg, meta) || !st.assets.length)) return { skipped: true };
+    if (!chrome.downloads?.download) throw new Error('این مرورگر اجازه ذخیره فایل به افزونه نمی‌دهد');
+    const hash = BK.coreHash(st);
+    if (!force && meta.lastAt && meta.lastHash === hash) { await setBackupMeta({ checkedAt: Date.now(), error: null }); return { unchanged: true }; }
+    const now = Date.now();
+    const { vault } = await chrome.storage.local.get('vault');
+    const pay = await BK.filePayload(await store.exportBackup(), vault?.key ? vault : null);
+    const id = await chrome.downloads.download({ url: pay.url, filename: BK.fileName(now, { locked: pay.locked }) + pay.ext, conflictAction: 'uniquify', saveAs: false });
+    const r = await waitDownload(id);
+    const entry = { id, at: now, bytes: pay.bytes, locked: pay.locked };
+    if (r.state === 'interrupted') throw new Error(r.error === 'USER_CANCELED' ? CANCELLED : `ذخیره فایل پشتیبان ممکن نشد${r.error ? ` (${r.error})` : ''}`);
+    if (r.state === 'timeout') entry.pending = true; // most likely Chrome's «Save as» dialog, waiting for the owner
+    else { const [d] = await chrome.downloads.search({ id }); entry.path = d?.filename || ''; entry.name = (d?.filename || '').split(/[\\/]/).pop() || BK.fileName(now); }
+    files.push(entry);
+    const gone = new Set(BK.toRemove(files, cfg.keep, { now, last: cfg.last }));
+    await removeBackupFiles(files.filter((f) => gone.has(f.id)));
+    // only the newest few hundred are tracked (enough for any thinning; older files simply stay where they are)
+    files = files.filter((f) => !gone.has(f.id)).slice(-400);
+    await setBackupMeta({ lastAt: now, checkedAt: now, lastHash: hash, files, error: null, errorAt: null });
+    if (!meta.lastAt && !force) notify('dara-backup-first', 'اولین پشتیبان خودکار دارا ذخیره شد', 'در پوشه دانلود، داخل Dara-Backups. اگر این پوشه با فضای ابری همگام است، از تنظیمات برایش رمز بگذار.');
+    return entry.pending ? { pending: true } : { saved: entry.name, locked: entry.locked };
+  })().catch(async (e) => { await setBackupMeta({ error: String(e?.message || e), errorAt: Date.now() }); throw e; })
+    .finally(() => { backingUp = null; alive(); });
+  return backingUp;
+}
+/** After a password is set: remove the earlier, unlocked backups Dara made (only on the owner's request). */
+async function purgePlainBackups() {
+  const { meta } = await store.load('meta');
+  const files = meta.backup?.files || [];
+  const plain = files.filter((f) => !f.locked && !f.pending);
+  await removeBackupFiles(plain);
+  const left = [];
+  for (const f of plain) if (await ownBackup(f)) left.push(f); // could not be removed: still there
+  await setBackupMeta({ files: files.filter((f) => f.locked || f.pending || left.includes(f)) });
+  return { removed: plain.length - left.length, left: left.length };
 }
 
 let running = null;
@@ -404,6 +487,9 @@ const handlers = {
     return { stats };
   },
   async backfill({ days = 365 }) { return backfill(days); },
+  async backupNow() { return runBackup({ force: true }); },
+  async backupCheck() { return runBackup({ force: false }); },
+  async backupPurgePlain() { return purgePlainBackups(); },
   async weekly({ force = true, days = 7 }) { return generateWeekly({ force, days }); },
   async capture({ tabId }) { return captureTab(tabId); },
   async checkUpdate() { return checkSelfUpdate(); },
@@ -425,6 +511,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'refresh' || a.name === 'daily') runCycle({ reason: a.name });
   if (a.name === 'selfupdate') checkSelfUpdate().catch(() => {});
+  if (a.name === 'backup') runBackup().catch(() => {});
   if (a.name === 'weekly') { const { ai } = await store.load('ai'); if (ai.weekly !== false) generateWeekly({ force: false }).catch(() => {}); }
 });
 
@@ -437,7 +524,7 @@ function installMenus() {
 
 chrome.notifications?.onClicked.addListener((id) => {
   if (id === 'dara-update') { chrome.notifications.clear(id); return; }
-  const hash = id.startsWith('dara-alert') ? '#/market' : id.startsWith('dara-stale') ? '#/assets?f=attention' : id.startsWith('dara-weekly') ? '#/assistant' : '#/automation';
+  const hash = id.startsWith('dara-alert') ? '#/market' : id.startsWith('dara-stale') ? '#/assets?f=attention' : id.startsWith('dara-weekly') ? '#/assistant' : id.startsWith('dara-backup') ? '#/settings' : '#/automation';
   chrome.tabs.create({ url: chrome.runtime.getURL('ui/app.html' + hash) });
   chrome.notifications.clear(id);
 });

@@ -25,3 +25,7 @@ body.popup { width: 392px; min-height: 540px; background: var(--bg); }
 .pp-quick { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 10px; }
 .pp-quick .input { flex: 1; height: 34px; font-size: 12.5px; }
 .pp-quick .prop { margin-top: 0; }
+
+.pp-conv { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
+.pp-conv .field { margin-bottom: 4px; }
+.pp-conv > a { margin-top: 6px; color: var(--accent); text-decoration: none; }

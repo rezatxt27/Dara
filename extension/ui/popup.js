@@ -1,4 +1,5 @@
-import { html, render, useState, useMemo, useEffect, useStore, useTick, Icon, Money, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
+import { html, render, useState, useMemo, useEffect, useStore, useTick, Icon, Money, MoneyField, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
+import * as K from '../lib/calc.js';
 import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, hasWords } from '../lib/format.js';
@@ -15,6 +16,19 @@ async function captureCurrent() {
   if (!tab?.id) return toast('صفحه‌ای پیدا نشد');
   const r = await send('capture', { tabId: tab.id });
   if (!r?.ok) toast(r?.error || 'خواندن صفحه ممکن نشد'); else window.close();
+}
+
+/** The converter, small: an amount → grams of gold, a coin, dollars and tether. The full one lives in «ماشین‌حساب‌ها». */
+const MINI = ['geram18', 'sekee', 'rob', 'usd', 'usdt'];
+function MiniConvert({ st, s }) {
+  const [amount, setAmount] = useState(1_000_000_000);
+  const rows = useMemo(() => K.convertFrom(amount, st.quotes).filter((r) => MINI.includes(r.id) && r.price), [amount, st.quotes]);
+  return html`<div class="pp-conv">
+    <${MoneyField} rial=${amount} onRial=${(v) => setAmount(v || 0)} s=${s} />
+    ${!rows.length && html`<div class="empty small">${amount > 0 ? 'قیمت‌ها هنوز نرسیده؛ چند لحظه بعد دوباره نگاه کن.' : 'مبلغ را بنویس.'}</div>`}
+    ${rows.map((r) => html`<div class="pp-row"><span class="grow sb">${r.name}</span><b class="num">≈ ${num(r.qty, r.qty < 10 ? 2 : r.qty < 100 ? 1 : 0)} ${r.unit}</b></div>`)}
+    <a href="#" class="small" onClick=${(e) => { e.preventDefault(); openApp('#/calc?t=convert'); }}>همه دارایی‌ها و فاکتور طلا در «ماشین‌حساب‌ها» ←</a>
+  </div>`;
 }
 
 function QuickRow({ r, s }) {
@@ -138,7 +152,7 @@ function Popup() {
     <button class="btn" style="justify-content:flex-start" onClick=${captureCurrent} title="موجودی‌های همین صفحه (بانک، کارگزاری، طلای آنلاین، صرافی) را بخوان"><${Icon} n="scan" cls="sm" />ثبت موجودی از این صفحه<span class="grow"></span>${st.ai.connections?.length ? html`<span class="xs muted">با هوش مصنوعی</span>` : ''}</button>
     ${att > 0 && html`<button class="callout warn" style="border:0;cursor:pointer;text-align:right" onClick=${onAtt}><${Icon} n="alert" cls="sm" /><div><b class="num">${num(att)}</b> دارایی نیاز به توجه دارد — ${attQuick === att ? 'به‌روزرسانی سریع' : 'دیدن فهرست'}</div></button>`}
 
-    <div class="pp-tabs"><${Seg} value=${tab} onChange=${setTab} options=${[['prices', 'قیمت‌های لحظه‌ای'], ['quick', `به‌روزرسانی سریع (${num(manual.length)})`]]} /></div>
+    <div class="pp-tabs"><${Seg} value=${tab} onChange=${setTab} options=${[['prices', 'قیمت‌ها'], ['convert', 'مبدل'], ['quick', `به‌روزرسانی (${num(manual.length)})`]]} /></div>
 
     <div class="pp-card" style="padding:4px 12px">
       ${tab === 'prices' && PRICES.map(([p, k]) => {
@@ -147,6 +161,7 @@ function Popup() {
           <span class="num"><${Money} v=${q?.price || null} s=${s} /></span>
           <span style="width:62px;text-align:left" class="small"><${Delta} p=${q?.changePct} showAbs=${false} /></span></div>`;
       })}
+      ${tab === 'convert' && html`<${MiniConvert} st=${st} s=${s} />`}
       ${tab === 'quick' && (manual.length ? manual.slice(0, 8).map((r) => html`<${QuickRow} key=${r.asset.id} r=${r} s=${s} />`) : html`<div class="empty small">همه دارایی‌ها خودکار به‌روز می‌شوند 🎉</div>`)}
     </div>
 

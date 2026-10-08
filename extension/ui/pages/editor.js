@@ -105,7 +105,8 @@ function SourcePicker({ st, s, price, setPrice, cat, adv }) {
 export function AssetEditor({ st, s, asset, preset, onClose }) {
   const isNew = !asset;
   const [a, setA] = useState(() => {
-    const base = asset ? structuredClone(asset) : blank(preset?.category || 'bank');
+    // a draft from a calculator (e.g. «ثبت به‌عنوان دارایی» on a gold invoice) fills the new asset; the owner still reviews it
+    const base = asset ? structuredClone(asset) : { ...blank(preset?.category || 'bank'), ...(preset?.draft || {}) };
     if (!base.price) base.price = { source: 'manual', value: null, ref: null, adjustPct: 0, factor: 1 };
     if (!base.rate) base.rate = { principal: null, annualPct: null, start: todayIso(), mode: 'payout', payoutTo: 'self', maturity: null };
     if (!base.loan) base.loan = blankLoan();
@@ -124,7 +125,8 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const [adv, setAdv] = useState(!!(a.price?.adjustPct || (a.price?.factor && a.price.factor !== 1)));
   const [rAdv, setRAdv] = useState(!!(a.rate?.basis && a.rate.basis !== 365));
   // closing with unsaved input asks first (a click outside or Escape shouldn't throw typing away)
-  const initial = useRef(null); if (initial.current === null) initial.current = JSON.stringify(a);
+  // a calculator's draft is input the owner hasn't saved yet: closing it asks too
+  const initial = useRef(null); if (initial.current === null) initial.current = preset?.draft ? '' : JSON.stringify(a);
   const [askClose, setAskClose] = useState(false);
   const [preview, setPreview] = useState({ loading: false, q: null, err: null });
   const set = (patch) => setA((x) => ({ ...x, ...patch }));
@@ -189,7 +191,8 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const fundAcc = fund.on ? balanceTargets.find((x) => x.id === fund.accountId) : null;
   // a loan already being repaid (or a deposit already running) got its money long ago — only new ones are funded now
   const fundOk = a.mode === 'loan' ? !plan || plan.paid === 0 : true;
-  const fundDefault = a.mode === 'loan' ? +L.amount || 0 : a.mode === 'rate' ? +a.rate.principal || 0 : Math.abs(val.value) || 0;
+  // a purchase is paid at what it cost when that's known (a gold invoice's total), otherwise at today's value
+  const fundDefault = a.mode === 'loan' ? +L.amount || 0 : a.mode === 'rate' ? +a.rate.principal || 0 : a.mode === 'units' && +a.costBasis > 0 ? +a.costBasis : Math.abs(val.value) || 0;
   const fundAmt = fund.amount ?? fundDefault;
   const fundShort = fundAcc && !liabCat && fundAmt > (E.valueOf(fundAcc, st.quotes, s).value || 0) + 0.5;
   const [dbad, setDbad] = useState({});
@@ -252,6 +255,8 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     if (out.mode === 'rate') { out.rate.principal = +out.rate.principal; out.rate.annualPct = +out.rate.annualPct; if (asset?.rate?.start !== out.rate.start) delete out.rate.lastPayout; }
     if (out.mode === 'loan') out.loan = { ...out.loan, amount: +out.loan.amount, annualPct: +out.loan.annualPct, months: Math.round(+out.loan.months), installment: +out.loan.installment > 0 ? +out.loan.installment : null, account: out.loan.account || null };
     delete out.review;
+    // paid from an account: the cost is what was paid («همان مبلغ پرداختی ثبت می‌شود»)
+    if (isNew && fundOk && fund.on && fundAcc && fundAmt > 0 && out.mode === 'units' && !E.isLiability(out)) out.costBasis = Math.round(fundAmt);
     if (out.mode === 'loan') { out.loan.start = out.loan.start || null; if (!out.loan.start) delete out.loan.start; }
     const ev = await act.saveAsset(out, {
       orig: asset || null,

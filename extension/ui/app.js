@@ -12,6 +12,7 @@ import { AssetEditor } from './pages/editor.js';
 import { MarketPage } from './pages/market.js';
 import { AutomationPage } from './pages/automation.js';
 import { AnalysisPage } from './pages/analysis.js';
+import { CalcPage } from './pages/calc.js';
 import { SettingsPage, WelcomePage } from './pages/settings.js';
 import { AssistantPage } from './pages/assistant.js';
 import { CapturePage } from './pages/capture.js';
@@ -24,6 +25,7 @@ const ROUTES = [
   { id: 'market', t: 'بازار و قیمت‌ها', icon: 'market' },
   { id: 'automation', t: 'خودکارسازی', icon: 'automation' },
   { id: 'analysis', t: 'تحلیل و سناریو', icon: 'analysis' },
+  { id: 'calc', t: 'ماشین‌حساب‌ها', icon: 'calculator' },
   { id: 'settings', t: 'تنظیمات', icon: 'settings' },
 ];
 const HIDDEN = { welcome: 'خوش آمدید', capture: 'ثبت از صفحه' };
@@ -362,6 +364,7 @@ function App() {
       ${page === 'market' && html`<${MarketPage} ...${ctx} />`}
       ${page === 'automation' && html`<${AutomationPage} ...${ctx} />`}
       ${page === 'analysis' && html`<${AnalysisPage} ...${ctx} />`}
+      ${page === 'calc' && html`<${CalcPage} ...${ctx} />`}
       ${page === 'settings' && html`<${SettingsPage} ...${ctx} />`}
       ${page === 'welcome' && html`<${WelcomePage} ...${ctx} />`}
       ${page === 'capture' && html`<${CapturePage} ...${ctx} />`}

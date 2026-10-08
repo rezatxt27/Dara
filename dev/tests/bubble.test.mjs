@@ -151,11 +151,13 @@ test('bubble history: aligned series and its normal range', () => {
 });
 
 test('scenario: bubble disappearing hits coins and gold funds only, by their own bubble', () => {
-  const q = base();
+  // simulate() judges freshness against the real clock, so these prices are fresh as of now (not the fixed test date)
+  const t = Date.now();
+  const q = Object.fromEntries(Object.entries(base()).map(([k, v]) => [k, { ...v, at: t - 60000, fetchedAt: t - 60000 }]));
   const coin = { id: 'c', name: 'نیم', category: 'gold', mode: 'units', quantity: 1, price: { source: 'market', ref: { provider: 'tgju', key: 'nim' }, factor: 1 } };
   const raw = { id: 'g', name: 'آب‌شده', category: 'gold_online', mode: 'units', quantity: 10, price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, factor: 1 } };
   const cash = { id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 1e9 };
-  const b = BB.coinBubble('nim', q, now).bubble;
+  const b = BB.coinBubble('nim', q, t).bubble;
   const r = E.simulate([coin, raw, cash], q, {}, { bubble: -1 });
   const row = (id) => r.rows.find((x) => x.asset.id === id);
   close(row('c').factor, 1 / (1 + b), 1e-9, 'coin falls to its gold');

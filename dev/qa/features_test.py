@@ -125,7 +125,7 @@ async def main():
 
         # 4) نقطه سربه‌سر
         async def t_breakeven():
-            pg = await newpage('analysis')
+            pg = await newpage('calc?t=breakeven')
             card = pg.locator('#breakeven')
             await card.locator('.field:has-text("سود سپرده") input').fill('24')
             await card.locator('.field:has-text("کارمزد") input').fill('2')
@@ -287,6 +287,37 @@ async def main():
             await pg.screenshot(path=f'{SH}/analysis-{THEME}.png', full_page=True)
             await pg.close()
         await step('narrow', t_narrow())
+
+        # «ماشین‌حساب‌ها»: converter, gold invoice (buy / sell / check), and «ثبت به‌عنوان دارایی»
+        async def t_calc():
+            pg = await newpage('calc')
+            check('calc: three tools on the home', await pg.locator('.calc-tile').count() == 3)
+            await pg.click('.calc-tile:has-text("با این پول")'); await pg.wait_for_timeout(500)
+            await pg.locator('.calc-in .field input').fill('253,580,000'); await pg.wait_for_timeout(300)
+            row = (await pg.locator('.calc-row:has-text("طلای ۱۸ عیار")').inner_text()).translate(FA)
+            check('converter: 253.58M toman = 10 g of 18k at 25.358M', '≈ 10 گرم' in row, row.replace('\n', ' | '))
+            await pg.goto(pg.url.split('#')[0] + '#/calc?t=gold'); await pg.wait_for_timeout(700)
+            await pg.locator('.calc-card .field:has-text("وزن") input').first.fill('10')
+            await pg.locator('.calc-card input[placeholder="مثلاً ۱۵"]').fill('15'); await pg.wait_for_timeout(300)
+            out = (await pg.locator('.calc-out').inner_text()).translate(FA)
+            # 253,580,000 + 15% + 7% on both + 10% on making+margin = 317,875,209
+            check('gold invoice: total with making 15%, margin 7%, tax 10% on making+margin', '317,875,209' in out, out[:200].replace('\n', ' | '))
+            check('gold invoice: resale ~21% less', '21٪' in out or '21%' in out)
+            await pg.click('.calc-card .seg button:has-text("سنجیدن")'); await pg.wait_for_timeout(200)
+            await pg.locator('.calc-card .field:has-text("قیمت نهایی") input').fill('317,875,209'); await pg.wait_for_timeout(300)
+            out = (await pg.locator('.calc-out').inner_text()).translate(FA)
+            check('shop check: the invoice total reads back as 15% making', '15' in out and 'اجرت' in out, out[:120].replace('\n', ' | '))
+            await pg.click('.calc-card .seg button:has-text("خرید")'); await pg.wait_for_timeout(200)
+            await pg.click('button:has-text("ثبت به‌عنوان دارایی")'); await pg.wait_for_timeout(700)
+            await pg.click('.drawer button:has-text("افزودن")'); await pg.wait_for_timeout(900)
+            assets = await pg.evaluate("async () => (await chrome.storage.local.get('assets')).assets")
+            a = next((x for x in assets if x.get('name') == 'طلای زینتی'), None)
+            ok = bool(a) and a['quantity'] == 10 and a['category'] == 'gold' and a['price']['ref']['key'] == 'geram18' and abs(a['costBasis'] - 3_178_752_090) < 20 and abs(a['price']['adjustPct'] + 1.33) < 0.01
+            check('register: a 10 g gold piece, cost = invoice total, valued at 740/750', ok, a and {k: a.get(k) for k in ('quantity', 'costBasis', 'category')} )
+            overflow = await pg.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1")
+            check('calc: no horizontal scroll', not overflow)
+            await pg.close()
+        await step('calc', t_calc())
 
         check('no console/page errors', not errors, errors[:6])
         await ctx.close()

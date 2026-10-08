@@ -187,7 +187,7 @@ function Compare({ st, pf, s }) {
 
 /* ---------------- نقطه سربه‌سر ---------------- */
 const BE_ASSETS = [['tgju:geram18', 'طلای ۱۸', { provider: 'tgju', key: 'geram18' }, 'هر گرم'], ['tgju:sekee', 'سکه امامی', { provider: 'tgju', key: 'sekee' }, 'هر سکه'], ['tgju:price_dollar_rl', 'دلار', { provider: 'tgju', key: 'price_dollar_rl' }, 'هر دلار'], ['nobitex:usdt', 'تتر', { provider: 'nobitex', key: 'usdt' }, 'هر تتر']];
-function BreakEven({ st, s }) {
+export function BreakEven({ st, s }) {
   const held = st.assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key && !BE_ASSETS.some(([id]) => id === E.quoteId(a.price.ref)));
   const [pick, setPick] = useState('tgju:geram18');
   const [rate, setRate] = useState(() => I.defaultDepositPct(st));
@@ -458,7 +458,6 @@ export function AnalysisPage({ st, pf, s, open }) {
 
     <${Compare} st=${st} pf=${pf} s=${s} />
     <${Targets} pf=${pf} s=${s} assets=${st.assets} />
-    <${BreakEven} st=${st} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها${T('pnl')}</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
       ${perf.length ? html`<table class="tbl"><thead><tr><th>دارایی</th><th class="n">بهای تمام‌شده</th><th class="n">ارزش روز</th><th class="n">سود / زیان</th><th class="n">بازده</th></tr></thead><tbody>

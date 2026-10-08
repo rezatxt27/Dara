@@ -291,7 +291,7 @@ async def main():
         # «ماشین‌حساب‌ها»: converter, gold invoice (buy / sell / check), and «ثبت به‌عنوان دارایی»
         async def t_calc():
             pg = await newpage('calc')
-            check('calc: three tools on the home', await pg.locator('.calc-tile').count() == 3)
+            check('calc: six tools on the home', await pg.locator('.calc-tile').count() == 6)
             await pg.click('.calc-tile:has-text("با این پول")'); await pg.wait_for_timeout(500)
             await pg.locator('.calc-in .field input').fill('253,580,000'); await pg.wait_for_timeout(300)
             row = (await pg.locator('.calc-row:has-text("طلای ۱۸ عیار")').inner_text()).translate(FA)
@@ -314,6 +314,14 @@ async def main():
             a = next((x for x in assets if x.get('name') == 'طلای زینتی'), None)
             ok = bool(a) and a['quantity'] == 10 and a['category'] == 'gold' and a['price']['ref']['key'] == 'geram18' and abs(a['costBasis'] - 3_178_752_090) < 20 and abs(a['price']['adjustPct'] + 1.33) < 0.01
             check('register: a 10 g gold piece, cost = invoice total, valued at 740/750', ok, a and {k: a.get(k) for k in ('quantity', 'costBasis', 'category')} )
+            await pg.goto(pg.url.split('#')[0] + '#/calc?t=loan'); await pg.wait_for_timeout(600)
+            await pg.locator('.calc-card .field:has-text("مبلغ وام") input').fill('300,000,000'); await pg.wait_for_timeout(300)
+            out = (await pg.locator('.calc-out').inner_text()).translate(FA)
+            check('loan: 300M at 23% over 36 months → installment 11,612,916', '11,612,916' in out and '23' in out, out[:160].replace('\n', ' | '))
+            await pg.goto(pg.url.split('#')[0] + '#/calc?t=rent'); await pg.wait_for_timeout(600)
+            await pg.locator('.calc-card .field:has-text("ودیعه (رهن)") input').fill('500,000,000'); await pg.locator('.calc-card .field:has-text("اجاره ماهانه") input').fill('20,000,000'); await pg.wait_for_timeout(300)
+            out = (await pg.locator('.calc-out').inner_text()).translate(FA)
+            check('rent: 500M + 20M at 3% = 35M all-rent', '35,000,000' in out, out[:120].replace('\n', ' | '))
             overflow = await pg.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1")
             check('calc: no horizontal scroll', not overflow)
             await pg.close()

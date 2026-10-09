@@ -91,7 +91,7 @@ async def main():
             await pg.click('.modal .seg >> text=تسویه کامل'); await pg.select_option('.modal select', 'bankA')
             await pg.click('.modal button:has-text("ثبت")'); await pg.wait_for_timeout(700)
             P = await pf(pg)
-            check('settled loan is zero and marked «تسویه شده»', P['rows'][id_]['v'] == 0 and P['rows'][id_]['st'] == 'settled' and await pg.locator('tr.r:has-text("وام آزمایشی") .pill:has-text("تسویه شده")').count() == 1, P['rows'][id_])
+            check('settled loan is zero and marked «تسویه شده»', P['rows'][id_]['v'] == 0 and P['rows'][id_]['st'] == 'settled' and await pg.locator('tr.r:has-text("وام آزمایشی") .c-status:has-text("تسویه شده")').count() == 1, P['rows'][id_])
             await pg.click('tr.r:has-text("وام آزمایشی")'); await pg.wait_for_timeout(200)
         await step('schedule & pay', t_schedule_and_pay())
 

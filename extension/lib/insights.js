@@ -10,22 +10,49 @@ import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
 import { num } from './format.js';
 
 /**
- * How much the market moved your net worth over `days` (money you added, moved or recorded is left out), plus the raw
- * total. One definition used by the dashboard, the sidebar and the popup. Falls back to today's live estimate.
+ * Money moved during an attribution's period, dated (per asset; internal transfers cancel out), and the modified-Dietz
+ * base: the starting net worth plus each amount weighted by the part of the period it was there. A return over this
+ * base is not inflated (or deflated) by money added or taken out during the period.
  */
-export function marketMove(st, pf, days = 1) {
-  const att = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, days, todayIso(), pf);
-  // «today» after the browser was closed for a while: the last snapshot is days old, so it would show many days' change
-  // as today's. Use today's price moves instead.
-  // (a longer view whose start is far older than its label says nothing honest either)
-  if (att && days > 1 && daysBetween(att.from, todayIso()) > days + 3) return null;
-  if (att && days === 1 && daysBetween(att.from, todayIso()) > 3) return { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true };
-  if (!att) return days === 1 ? { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true } : null;
-  const base = Math.abs(att.base) || 0;
-  return { abs: att.market, pct: base ? att.market / base : 0, total: att.total, moved: att.total - att.market };
+export function flowEntries(at, today = todayIso()) {
+  const clamp = (iso) => (iso < at.from ? at.from : iso > today ? today : iso);
+  const entries = [];
+  for (const r of at.rows) for (const m of r.moves || []) entries.push({ date: clamp(m.date || today), amount: m.amount });
+  const moneyIn = at.total - at.market;
+  const listed = entries.reduce((x, e) => x + e.amount, 0);
+  if (Math.abs(moneyIn - listed) >= 1) entries.push({ date: today, amount: moneyIn - listed }); // keeps the books balanced
+  return entries;
+}
+export function dietzBase(at, today = todayIso(), entries = flowEntries(at, today)) {
+  const T = Math.max(1, daysBetween(at.from, today));
+  const weight = (iso) => Math.min(1, Math.max(0, daysBetween(iso, today) / T));
+  return at.base + entries.reduce((x, e) => x + e.amount * weight(e.date), 0);
+}
+/** The market's effect over an attribution as a share of the money that was there (Dietz); |start| when that is ≤ 0. */
+export function movePct(at, today = todayIso()) {
+  const d = dietzBase(at, today);
+  if (d > 0) return at.market / d;
+  const b = Math.abs(at.base) || 0;
+  return b ? at.market / b : 0;
 }
 
-const MODE_NAME = { payout: 'روزشمار، سود ماهانه واریز می‌شود', compound: 'روزشمار مرکب', simple: 'روزشمار ساده' };
+/**
+ * How much the market moved your net worth over `days` (money you added, moved or recorded is left out), plus the raw
+ * total. One definition used by the dashboard («امروز»، «۷ روز»، «۳۰ روز» and «چرا تغییر کرد؟»), the popup and the badge.
+ * `from`: the saved day it is measured from; `stale`: that day is older than the period says (the browser was closed),
+ * so the label should name the date. Falls back to today's live price moves when nothing is saved yet.
+ */
+export function marketMove(st, pf, days = 1, today = todayIso()) {
+  const att = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, days, today, pf);
+  const live = { abs: pf.dayChange, pct: pf.dayChangePct, total: null, moved: 0, live: true, from: null, stale: false };
+  if (!att) return days === 1 ? live : null;
+  // a longer view whose start is far older than its label says nothing honest
+  if (days > 1 && daysBetween(att.from, today) > days + 3) return null;
+  return { abs: att.market, pct: movePct(att, today), total: att.total, moved: att.total - att.market, from: att.from,
+    stale: att.from < E.addDaysIso(today, -days), at: att };
+}
+
+const MODE_NAME = { payout: 'روزشمار، سود ماهانه واریز می‌شود', compound: 'روزشمار مرکب (نرخ = بازده مؤثر سالانه)', simple: 'روزشمار ساده' };
 const basisName = (b) => (b === 'actual' ? 'طول واقعی سال شمسی' : `${b || 365} روز`);
 
 export function refText(ref) {
@@ -190,15 +217,9 @@ export function performance(st, days, { depositPct = 25, today = todayIso(), pf 
   const at = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, span, today, pf);
   if (!at) return null;
   const T = Math.max(1, daysBetween(at.from, today));
-  const clamp = (iso) => (iso < at.from ? at.from : iso > today ? today : iso);
-  // dated money moved (per asset; internal transfers cancel out)
-  const entries = [];
-  for (const r of at.rows) for (const m of r.moves || []) entries.push({ date: clamp(m.date || today), amount: m.amount });
+  const entries = flowEntries(at, today);
   const moneyIn = at.total - at.market;
-  const listed = entries.reduce((x, e) => x + e.amount, 0);
-  if (Math.abs(moneyIn - listed) >= 1) entries.push({ date: today, amount: moneyIn - listed }); // keeps the books balanced
-  const weight = (iso) => Math.min(1, Math.max(0, daysBetween(iso, today) / T));
-  const denom = at.base + entries.reduce((x, e) => x + e.amount * weight(e.date), 0);
+  const denom = dietzBase(at, today, entries);
   const ret = denom > 0 ? at.market / denom : null;
   const rates = E.denomRates(st.quotes);
   const growth = {
@@ -320,11 +341,15 @@ export function protectedShareAt(snap, assets = []) {
     if (!a) { unknown += +val; continue; }
     if (E.isLiability(a)) continue;
     gross += +val;
-    if (E.exposureOf(a) !== 'rial') prot += +val;
+    if (PROTECTED(E.exposureOf(a))) prot += +val;
   }
   if (!gross || unknown > 0.05 * (gross + unknown)) return null;
   return prot / gross;
 }
+
+/** Is an exposure protected from inflation? Not the Rial, and not «other» — what it is isn't known, so it isn't counted
+ *  as protected (cash at home, a loan to a friend). One rule for the dashboard card and the analysis page. */
+export const PROTECTED = (exposure) => exposure !== 'rial' && exposure !== 'other';
 
 /** The protected share the owner's own target mix implies (category targets, percent). Only a mix that adds up to
  *  100% (±1) says anything; otherwise there is no target. */
@@ -332,7 +357,7 @@ export function protectedTarget(targets = {}) {
   const ent = Object.entries(targets || {}).filter(([k, v]) => CAT[k] && !CAT[k].liability && +v > 0);
   const sum = ent.reduce((s, [, v]) => s + +v, 0);
   if (!ent.length || Math.abs(sum - 100) > 1) return null;
-  return ent.reduce((s, [k, v]) => s + (CAT[k].exposure !== 'rial' ? +v : 0), 0) / 100;
+  return ent.reduce((s, [k, v]) => s + (PROTECTED(CAT[k].exposure) ? +v : 0), 0) / 100;
 }
 
 /** «محافظت در برابر تورم»: share not tied to the Rial, its move over ~30 days, the owner's target, and what isn't protected. */
@@ -344,13 +369,14 @@ export function inflationCard(st, pf, today = todayIso()) {
   if (!(g > 0)) return null;
   const ex = {};
   for (const r of pos) ex[r.exposure] = (ex[r.exposure] || 0) + r.value;
-  const share = (g - (ex.rial || 0)) / g;
-  const parts = Object.entries(ex).filter(([k, v]) => k !== 'rial' && v > 0)
+  const unp = (ex.rial || 0) + (ex.other || 0);
+  const share = (g - unp) / g;
+  const parts = Object.entries(ex).filter(([k, v]) => PROTECTED(k) && v > 0)
     .map(([k, v]) => ({ key: k, name: EXPOSURES[k]?.name || k, color: EXPOSURES[k]?.color || '#B9BED0', value: v, share: v / g }))
     .sort((a, b) => b.value - a.value);
   // what isn't protected, by category (a deposit, an account, money owed to you…)
   const rialBy = {};
-  for (const r of pos) if (r.exposure === 'rial') rialBy[r.cat.id] = (rialBy[r.cat.id] || 0) + r.value;
+  for (const r of pos) if (!PROTECTED(r.exposure)) rialBy[r.cat.id] = (rialBy[r.cat.id] || 0) + r.value;
   const unprotected = Object.entries(rialBy).map(([id, v]) => ({ id, name: CAT[id]?.short || id, value: v, share: v / g })).sort((a, b) => b.value - a.value);
   // the move: against a snapshot about a month old (not one from long ago standing in for «last month»)
   let delta = null;
@@ -362,7 +388,7 @@ export function inflationCard(st, pf, today = todayIso()) {
   const target = protectedTarget(st.settings?.targets);
   let status = null;
   if (target !== null) status = share >= target - 0.0005 ? 'ok' : target - share <= 0.05 + 1e-9 ? 'near' : 'below';
-  return { share, delta, target, status, parts, unprotected, unprotectedShare: (ex.rial || 0) / g };
+  return { share, delta, target, status, parts, unprotected, unprotectedShare: unp / g };
 }
 
 /** «نقدشوندگی»: how much turns into cash in days / weeks / months, with the largest assets of each tier. */
@@ -377,7 +403,11 @@ export function liquidityCard(pf) {
     if (t.names.length < 3) t.names.push(r.asset.name);
   }
   for (const t of Object.values(tiers)) t.share = t.value / g;
-  return { tiers, high: tiers.high.value, share: tiers.high.share };
+  // a term deposit counted as «days» can be cashed only by breaking it (and losing part of its interest)
+  const today = todayIso();
+  const term = rows.filter((r) => (r.asset.liquidity || r.cat.liquidity) === 'high' && r.asset.mode === 'rate' && r.asset.rate?.maturity > today)
+    .reduce((t, r) => t + r.value, 0);
+  return { tiers, high: tiers.high.value, share: tiers.high.share, term };
 }
 
 /** Money that comes in by itself (interest earned + recurring income) and the next time some actually arrives. */

@@ -61,7 +61,7 @@ export function makeTools(ctx) {
       schema: { type: 'object', properties: {}, required: [] },
       run: () => {
         const s = st(); const pf = pfOf(); const g = pf.gross || 1;
-        const mmv = (d) => { const c = I.marketMove(s, pf, d); return c ? { pct: pct(c.pct), ...(P() ? {} : { amount: disp(c.abs, s.settings) }) } : null; };
+        const mmv = (d) => { const c = I.marketMove(s, pf, d); return c ? { pct: pct(c.pct), ...(c.stale ? { since: fmtJ(c.from) } : {}), ...(P() ? {} : { amount: disp(c.abs, s.settings) }) } : null; };
         return {
           unit: unitName(s.settings), ...(P() ? {} : { net: disp(pf.net, s.settings), gross: disp(pf.gross, s.settings), debt: disp(pf.debt, s.settings) }),
           // market effect only (money added or moved is left out), the same figures the dashboard shows
@@ -100,7 +100,7 @@ export function makeTools(ctx) {
           if (id.endsWith(':nav') && !known.has(id)) continue; // fetched only for a fund's bubble
           const [prov, key] = id.split(':');
           const usd = prov === 'tgju' && TGJU_BY_KEY[key]?.usd;
-          out[refName(known.get(id) || { provider: prov, key })] = { price: usd ? q.price : disp(q.price, s.settings), unit: usd ? 'دلار' : unitName(s.settings), day_change_pct: pct(q.changePct || 0), as_of: q.asOf || fmtJ(isoFromDate(new Date(q.at || Date.now()))) };
+          out[refName(known.get(id) || { provider: prov, key })] = { price: usd ? q.price : disp(q.price, s.settings), unit: usd ? 'دلار' : unitName(s.settings), day_change_pct: pct(q.changePct || 0), as_of: q.asOf || fmtJ(isoFromDate(new Date(q.at || q.fetchedAt || Date.now()))) };
         }
         return out;
       },

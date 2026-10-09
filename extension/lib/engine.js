@@ -75,6 +75,8 @@ export function rateValue(r, nowIso = todayIso(), nowMs = null) {
   const live = end === nowIso && nowMs ? fracOfDay(nowMs) : 0;
   const basis = r.basis || 365;
   if (r.mode === 'compound') {
+    // the rate here is the effective yearly yield (the editor asks for it that way: 24% compounded monthly → ~26.8%),
+    // so growth is (1 + a)^(days/365); a nominal rate would be (1 + a/12)^months
     const years = (daysBetween(r.start, end) + live) / 365;
     return P * Math.pow(1 + a, Math.max(0, years));
   }
@@ -278,13 +280,14 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
       const raw = quotes[quoteId(asset.price.ref || {})];
       if (q && q.price > 0 && !u.fallback) {
         at = q.at || q.fetchedAt;
-        const age = now - (q.at || now);
+        // how old: the source's own time, else when it was fetched (a quote with neither counts as old, never as live)
+        const age = now - (q.at || q.fetchedAt || 0);
         status = q.error ? 'delayed' : age > 3 * DAY ? 'delayed' : 'live';
         error = q.error || null;
         note = q.note || (q.approx ? 'قیمت تقریبی' : null);
         // today's move: the quote's own change (and, for dollar-priced metals, the dollar's), only if it is today's
         let cp = age > 2 * DAY ? 0 : q.changePct || 0;
-        if (u.usd && cp > -1) { const uq = quotes['tgju:price_dollar_rl'] || quotes['nobitex:usdt']; const cu = uq && now - (uq.at || now) <= 2 * DAY ? +uq.changePct || 0 : 0; cp = (1 + cp) * (1 + cu) - 1; }
+        if (u.usd && cp > -1) { const uq = quotes['tgju:price_dollar_rl'] || quotes['nobitex:usdt']; const cu = uq && now - (uq.at || uq.fetchedAt || 0) <= 2 * DAY ? +uq.changePct || 0 : 0; cp = (1 + cp) * (1 + cu) - 1; }
         dayChange = cp && !asOf ? value * cp / (1 + cp) : 0;
       } else if (u.fallback && (asset.price?.last?.price)) {
         status = 'delayed'; at = asset.price.last.at || null;
@@ -432,9 +435,13 @@ export function applyDelta(asset, delta, quotes = {}, iso = todayIso(), opts = {
     }
   } else if (asset.mode === 'units') {
     const { price } = unitPriceOf(asset, quotes);
-    if (price > 0) {
+    // a buy pays the market price; the owner's adjustment (−3% = what a seller really gets) applies to selling only,
+    // so money moved into gold buys the grams the market sells, and the spread shows as it really is
+    const adj = asset.price?.source === 'market' ? 1 + (+asset.price.adjustPct || 0) / 100 : 1;
+    const unitAt = delta > 0 && adj > 0 ? price / adj : price;
+    if (unitAt > 0) {
       const q0 = +asset.quantity || 0;
-      const dq = delta / price;
+      const dq = delta / unitAt;
       asset.quantity = q0 + dq; rec('quantity', dq);
       const cb = +asset.costBasis || 0;
       // a buy adds to the purchase cost only if the cost of what's already held is known (else profit would be invented)
@@ -568,7 +575,9 @@ export function applyAutomations(assets, flows, quotes = {}, today = todayIso())
   for (const f of flows) {
     if (!f.active || !(+f.amount)) continue;
     if ((f.fromId && !ok(f.fromId)) || (f.toId && !ok(f.toId))) { f.active = false; f.paused = 'missing'; continue; }
-    for (const d of flowOccurrences(f, f.lastRun || addDaysIso(f.start, -1), today, 60)) { push(d, { kind: 'flow', f }); if (d < first) first = d; }
+    // every missed occurrence in one run (as far back as the day loop goes), so after a long gap balances and the
+    // interest on them come out exactly as if it had run every day
+    for (const d of flowOccurrences(f, f.lastRun || addDaysIso(f.start, -1), today, 1600)) { push(d, { kind: 'flow', f }); if (d < first) first = d; }
   }
   // bank accounts with day-count interest
   const banks = assets.filter((a) => !a.archived && a.mode === 'balance' && a.interest?.on && +a.interest.annualPct && !isLiability(a));
@@ -765,15 +774,33 @@ export function makeSnapshot(pf, quotes, extra = {}) {
     ? Math.round(quotes['tgju:ons'].price * quotes['tgju:price_dollar_rl'].price) : undefined;
   return { t: Math.round(pf.net), g: Math.round(pf.gross), l: Math.round(pf.debt), usd: d.usd, gold: d.gold, coin: d.coin, ...(gx ? { gx } : {}), cats, v, at: Date.now(), ...extra };
 }
-export function pruneSnapshots(snaps, keepDays = 1500) {
-  const keys = Object.keys(snaps).sort();
-  if (keys.length <= keepDays) return snaps;
-  const out = {}; keys.slice(-keepDays).forEach((k) => (out[k] = snaps[k]));
+/**
+ * Keep the last `keepDays` daily snapshots. The per-asset values (`v`, most of their size) are kept only for the last
+ * `detailDays`, plus the first snapshot and the first of each month — what «why it changed», performance and a
+ * since-the-start view measure from; older days keep just the totals the charts draw.
+ */
+export function pruneSnapshots(snaps, keepDays = 1500, detailDays = 400, today = todayIso()) {
+  let keys = Object.keys(snaps).sort();
+  if (keys.length > keepDays) {
+    keys = keys.slice(-keepDays);
+    // start the kept range on a day that still has its detail (the first of a month), so the oldest day — what a
+    // since-the-start view measures from — always has it
+    const i = keys.findIndex((k) => snaps[k]?.v);
+    if (i > 0) keys = keys.slice(i);
+  }
+  const cut = addDaysIso(today, -detailDays);
+  const out = {}; const months = new Set();
+  keys.forEach((k, i) => {
+    const s = snaps[k]; const j = isoToJ(k); const m = j.jy + '-' + j.jm; // Jalali months
+    const keep = i === 0 || k >= cut || !months.has(m);
+    months.add(m);
+    if (keep || !s?.v) out[k] = s; else { const { v, ...rest } = s; out[k] = rest; }
+  });
   return out;
 }
 export function seriesFrom(snaps, denom = 'money', days = 90, today = todayIso()) {
   const from = days ? addDaysIso(today, -days) : '0000';
-  return Object.keys(snaps).sort().filter((k) => k >= from).map((k) => {
+  return Object.keys(snaps || {}).sort().filter((k) => k >= from && snaps[k] && typeof snaps[k] === 'object').map((k) => {
     const s = snaps[k];
     let v = s.t;
     if (denom === 'usd') v = s.usd ? s.t / s.usd : null;
@@ -785,7 +812,7 @@ export function seriesFrom(snaps, denom = 'money', days = 90, today = todayIso()
 /** Snapshot on/before `days` ago (strictly before today for days ≥ 1) */
 export function snapshotBefore(snaps, days, today = todayIso()) {
   const target = addDaysIso(today, -days);
-  const keys = Object.keys(snaps).sort().filter((k) => k <= target);
+  const keys = Object.keys(snaps || {}).sort().filter((k) => k <= target && snaps[k] && typeof snaps[k] === 'object');
   const k = keys[keys.length - 1];
   return k ? { date: k, snap: snaps[k] } : null;
 }
@@ -1171,7 +1198,7 @@ export function rememberLastPrices(assets, quotes) {
   for (const a of assets) {
     if (a.mode !== 'units' || a.price?.source !== 'market' || !a.price.ref) continue;
     const u = unitPriceOf(a, quotes);
-    if (u.q && u.q.price > 0 && !u.q.error && !u.fallback) a.price.last = { price: u.price, at: u.q.at || Date.now() };
+    if (u.q && u.q.price > 0 && !u.q.error && !u.fallback) a.price.last = { price: u.price, at: u.q.at || u.q.fetchedAt || Date.now() };
   }
   return assets;
 }

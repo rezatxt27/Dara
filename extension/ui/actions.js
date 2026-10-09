@@ -274,6 +274,26 @@ export const act = {
   async setAI(patch) { return store.update('ai', (ai) => ({ ...ai, ...patch })); },
   async saveChat(messages) { return store.locked(() => store.save({ chat: { messages: messages.slice(-60) } })); },
 
+  /** Remove the sample rows the way a delete does (links paused or unlinked, removal logged); the owner's rows stay.
+   *  With nothing of the owner's left, the sample's history goes too. */
+  async clearSample() {
+    await store.mutate(['assets', 'flows', 'events', 'quotes', 'snapshots'], (st) => {
+      const gone = st.assets.filter((a) => a.sample);
+      if (!gone.length) return;
+      const ids = new Set(gone.map((a) => a.id));
+      st.assets = st.assets.filter((a) => !ids.has(a.id));
+      if (!st.assets.length) { st.flows = []; st.events = []; st.snapshots = {}; return; }
+      st.flows = st.flows.map((f) => ((ids.has(f.fromId) || ids.has(f.toId)) && f.active ? { ...f, active: false, paused: 'missing' } : f));
+      for (const x of st.assets) {
+        if (x.mode === 'loan' && ids.has(x.loan?.account)) x.loan = { ...x.loan, account: null, paused: 'account' };
+        if (x.mode === 'rate' && ids.has(x.rate?.payoutTo)) x.rate = { ...x.rate, payoutTo: 'self' };
+      }
+      const changes = gone.map((a) => ({ assetId: a.id, field: 'remove', delta: 0, value: -(E.valueOf(a, st.quotes, {}).signedValue || 0) }));
+      logEv(st, { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: 'پاک‌کردن داده نمونه', amount: 0, noUndo: true, changes });
+    });
+    send('refresh');
+  },
+
   async deleteAsset(id) {
     let ev = null;
     await store.mutate(['assets', 'flows', 'events', 'quotes'], (st) => {

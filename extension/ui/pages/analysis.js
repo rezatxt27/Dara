@@ -26,7 +26,7 @@ const TIPS = {
   newmoney: ['پول جدید را کجا بگذارم؟', 'اگر پول تازه‌ای داری (مثلاً پاداش یا پس‌انداز)، این بخش آن را طوری بین دسته‌ها پخش می‌کند که به درصدهای هدفت نزدیک‌تر شوی، بدون اینکه چیزی را بفروشی.'],
   breakeven: ['از کِی سود می‌دهد؟ (نقطه سربه‌سر)', 'سرمایه‌گذاری در یک دارایی را با گذاشتن همان پول در سپرده مقایسه می‌کند. نشان می‌دهد قیمت آن دارایی تا پایان مدت باید به چه عددی برسد تا سودش از سپرده بیشتر شود. اگر فکر می‌کنی به آن قیمت نمی‌رسد، سپرده انتخاب امن‌تری است.', 'سپرده ۲۵٪ در ۶ ماه حدود ۱۳٪ سود می‌دهد؛ پس طلا باید بیش از ۱۳٪ (به‌علاوه کارمزد) گران شود.'],
   fee: ['کارمزد خرید و فروش', 'هزینه‌ای که در خرید و فروش از دست می‌دهی: اختلاف قیمت خرید و فروش، کارمزد پلتفرم یا اجرت طلا. برای طلای آب‌شده معمولاً کم و برای طلای زینتی بیشتر است.'],
-  pnl: ['سود و زیان دارایی‌ها', 'فقط برای آنچه الان داری (سود فروش‌های گذشته اینجا حساب نمی‌شود)، و برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
+  pnl: ['سود و زیان دارایی‌ها', 'فقط برای آنچه الان داری (سود فروش‌های گذشته اینجا حساب نمی‌شود)، و برای دارایی‌هایی که «بهای تمام‌شده» (مبلغی که بابتش پرداخته‌ای) را وارد کرده‌ای، سود یا زیان تا امروز را نشان می‌دهد. بازده اسمی و ریالی است: مدت نگهداری و تورم در آن نیست (برای مقایسه با تورم و دلار، «عملکرد» را ببین). بهای تمام‌شده را در ویرایش هر دارایی وارد کن.'],
   compare: ['مقایسه دو گزینه', 'یک مبلغ را دو جور کنار هم می‌گذارد، برای همان مدت: مثلاً «بماند در سپرده» در برابر «سکه بخرم». هزینه خرید و فروش، سودی که از دست می‌رود، حباب سکه و اثرش روی ترکیب دارایی‌ات را نشان می‌دهد. با لغزنده ببین اگر قیمت بالا یا پایین برود چه می‌شود. فقط حساب است، نه توصیه؛ هزینه‌ها و نرخ‌ها فرض‌اند و می‌توانی عوضشان کنی.', 'سپرده ۲۵٪ در یک سال حدود ۲۸٪ رشد می‌کند؛ پس سکه با ۲٪ هزینه خرید و فروش باید حدود ۳۱٪ گران شود تا به آن برسد.'],
   critique: ['نگاه دستیار', 'هوش مصنوعی با نگاه به درصدهای ترکیب دارایی‌ات، سه نقطه ضعف مهم را پیدا می‌کند و برای هرکدام یک بررسی ساده پیشنهاد می‌دهد. توصیه خرید یا فروش نمی‌کند.'],
 };
@@ -42,7 +42,7 @@ function Performance({ st, pf, s }) {
   const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
-    <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="توضیح بده" />`}
+    <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="از دستیار بپرس" />`}
     <${Seg} value=${days} onChange=${setDays} options=${[[30, 'ماه'], [90, '۳ ماه'], [365, 'سال'], [0, 'از ابتدا']]} /></div></div>`;
   if (!r) return html`<div class="card" id="perf">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این مقایسه تاریخچه ارزش دارایی لازم است. نمودار از امروز خودکار پر می‌شود، یا همین حالا یک سال گذشته را بازسازی کن.</div><${BackfillButton} st=${st} /></div></div>`;
   const ahead = r.bench.filter((b) => b.diff >= 0).map((b) => b.short);
@@ -127,7 +127,7 @@ function CmpCol({ o, other, g, r, s, label }) {
     ${o.notes.map((n) => html`<div class="xs muted">• ${n}</div>`)}
   </div>`;
 }
-function Compare({ st, pf, s }) {
+function Compare({ st, pf, s, initial = null }) {
   const srcs = useMemo(() => CMP.sources(st.assets, pf), [st.assets, pf]);
   const dep = I.defaultDepositPct(st);
   const [src, setSrc] = useState(() => srcs[0]?.id || 'new');
@@ -135,7 +135,9 @@ function Compare({ st, pf, s }) {
   const [amount, setAmount] = useState(() => { const v = first ? Math.min(first.value, 1e9) : 1e9; return v >= 1e7 ? Math.floor(v / 1e7) * 1e7 : Math.round(v); });
   const [months, setMonths] = useState(12);
   const [a, setA] = useState(() => ({ id: first ? 'keep' : 'deposit' }));
-  const [b, setB] = useState({ id: 'geram18' });
+  // opened from a price's page: that asset is option «ب», and the card comes into view
+  const [b, setB] = useState(() => ({ id: CMP.choiceById(initial)?.kind === 'market' ? initial : 'geram18' }));
+  useEffect(() => { if (initial) setTimeout(() => document.getElementById('compare')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150); }, [initial]);
   const [ga, setGa] = useState(0), [gb, setGb] = useState(0);
   const [avg, setAvg] = useState({});
   const coinKeys = [a, b].map((x) => CMP.choiceById(x.id)?.ref).filter((ref) => BB.isCoinRef(ref)).map((ref) => ref.key);
@@ -156,7 +158,7 @@ function Compare({ st, pf, s }) {
   const market = r && [r.a, r.b].filter((o) => o.kind === 'market');
   return html`<div class="card" id="compare">
     <div class="card-h"><h3><${Icon} n="swap" cls="sm" />مقایسه دو گزینه${T('compare')}</h3>
-      ${r && html`<${AskBtn} q=${`${Math.round(r.amount / (s.currency === 'rial' ? 1 : 10)).toLocaleString('fa-IR')} ${unitOf(s)} از «${r.source.name}» را برای ${monthsName(r.months)} «${r.a.name}» کنم یا «${r.b.name}»؟ با compare_options مقایسه کن و فرض‌ها را توضیح بده.`} label="بپرس" />`}</div>
+      ${r && html`<${AskBtn} q=${`${Math.round(r.amount / (s.currency === 'rial' ? 1 : 10)).toLocaleString('fa-IR')} ${unitOf(s)} از «${r.source.name}» را برای ${monthsName(r.months)} «${r.a.name}» کنم یا «${r.b.name}»؟ با compare_options مقایسه کن و فرض‌ها را توضیح بده.`} label="از دستیار بپرس" />`}</div>
     <div class="cmp-q">
       <${MoneyField} label="مبلغ" rial=${amount} onRial=${(v) => setAmount(v || 0)} s=${s} />
       <div class="field"><label>از کجا</label><select class="input" value=${src} onChange=${(e) => setSrc(e.target.value)}>
@@ -187,9 +189,9 @@ function Compare({ st, pf, s }) {
 
 /* ---------------- نقطه سربه‌سر ---------------- */
 const BE_ASSETS = [['tgju:geram18', 'طلای ۱۸', { provider: 'tgju', key: 'geram18' }, 'هر گرم'], ['tgju:sekee', 'سکه امامی', { provider: 'tgju', key: 'sekee' }, 'هر سکه'], ['tgju:price_dollar_rl', 'دلار', { provider: 'tgju', key: 'price_dollar_rl' }, 'هر دلار'], ['nobitex:usdt', 'تتر', { provider: 'nobitex', key: 'usdt' }, 'هر تتر']];
-export function BreakEven({ st, s }) {
+export function BreakEven({ st, s, initial = null }) {
   const held = st.assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key && !BE_ASSETS.some(([id]) => id === E.quoteId(a.price.ref)));
-  const [pick, setPick] = useState('tgju:geram18');
+  const [pick, setPick] = useState(() => (initial && (BE_ASSETS.some(([id]) => id === initial) || held.some((a) => a.id === initial)) ? initial : 'tgju:geram18'));
   const [rate, setRate] = useState(() => I.defaultDepositPct(st));
   const [months, setMonths] = useState(6);
   const [fee, setFee] = useState(0);
@@ -216,7 +218,7 @@ export function BreakEven({ st, s }) {
   }, [pick, months]);
   return html`<div class="card" id="breakeven">
     <div class="card-h"><h3><${Icon} n="target" cls="sm" />نقطه سربه‌سر: سپرده یا …؟${T('breakeven')}</h3>
-      <${AskBtn} q=${`اگر به‌جای سپرده ${num(rate, 1)}٪، روی «${name}» برای ${num(months)} ماه سرمایه‌گذاری کنم (کارمزد ${num(fee, 1)}٪)، نقطه سربه‌سر چقدر است و در گذشته چطور بوده؟`} label="بپرس" /></div>
+      <${AskBtn} q=${`اگر به‌جای سپرده ${num(rate, 1)}٪، روی «${name}» برای ${num(months)} ماه سرمایه‌گذاری کنم (کارمزد ${num(fee, 1)}٪)، نقطه سربه‌سر چقدر است و در گذشته چطور بوده؟`} label="از دستیار بپرس" /></div>
     <div class="be">
       <div class="col" style="gap:12px">
         <div class="field"><label>دارایی</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
@@ -292,7 +294,7 @@ function NewMoney({ pf, s, targets, assets, dirty }) {
   const hasTargets = Object.values(tf).some((v) => v > 0);
   return html`<div class="newmoney" id="newmoney">
     <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="plus" cls="sm" />پول جدید را کجا بگذارم؟${T('newmoney')}</span>
-      ${plan && !dirty && html`<${AskBtn} q=${`اگر ${num(amount / (s.currency === 'rial' ? 1 : 10))} ${unitOf(s)} پول جدید داشته باشم، طبق تخصیص هدفم کجا بگذارم؟ با plan_new_money حساب کن و دلیلش را بگو.`} label="توضیح بده" />`}</div>
+      ${plan && !dirty && html`<${AskBtn} q=${`اگر ${num(amount / (s.currency === 'rial' ? 1 : 10))} ${unitOf(s)} پول جدید داشته باشم، طبق تخصیص هدفم کجا بگذارم؟ با plan_new_money حساب کن و دلیلش را بگو.`} label="از دستیار بپرس" />`}</div>
     ${!hasTargets ? html`<div class="xs muted">اول درصد هدف دسته‌ها را در جدول بالا وارد کن (یا «پر کردن با وضعیت فعلی» را بزن و تغییر بده)؛ بعد مبلغ را بنویس.</div>` : html`
       <div style="max-width:340px"><${MoneyField} label="مبلغی که می‌خواهی سرمایه‌گذاری کنی" rial=${amount} onRial=${setAmount} s=${s} /></div>
       ${plan && html`<table class="tbl" style="margin-top:10px"><thead><tr><th>دسته</th><th class="n">سهم این پول</th><th class="n">سهم فعلی ← بعد</th><th class="n">هدف</th><th>مثلاً در</th></tr></thead><tbody>
@@ -312,7 +314,7 @@ function Targets({ pf, s, assets }) {
   const sum = Object.values(t).reduce((x, v) => x + (+v || 0), 0);
   const dirty = JSON.stringify(t) !== JSON.stringify(s.targets);
   const fill = () => { const n = {}; for (const r of rows) n[r.id] = Math.round(r.currentShare * 1000) / 10; setT(n); };
-  return html`<div class="card">
+  return html`<div class="card" id="targets">
     <div class="card-h"><h3><${Icon} n="target" cls="sm" />تخصیص هدف و پیشنهاد متوازن‌سازی${T('targets')}</h3>
       <div class="row"><button class="btn sm ghost" onClick=${fill}>پر کردن با وضعیت فعلی</button>
         <button class="btn sm primary" disabled=${!dirty} onClick=${() => { act.setSettings({ targets: t }); toast('اهداف ذخیره شد'); }}>ذخیره اهداف</button></div></div>
@@ -325,7 +327,7 @@ function Targets({ pf, s, assets }) {
       <td class="n small num">${pct(r.currentShare, { sign: false })}</td>
       <td><input class="input num-in" style="height:32px" value=${t[r.id] ?? ''} placeholder="—" onInput=${(e) => setT({ ...t, [r.id]: e.target.value === '' ? undefined : (parseNum(e.target.value) || 0) })} /></td>
       <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
-      <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span class=${r.diff > 0 ? 'pos' : 'neg'}>${r.diff > 0 ? 'خرید' : 'فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
+      <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
     </tr>`)}</tbody></table>
     <hr class="sep" />
     <${NewMoney} pf=${pf} s=${s} targets=${t} assets=${assets} dirty=${dirty} />
@@ -369,7 +371,7 @@ function Scenario({ st, pf, s }) {
   const goldTerms = r.goldBefore ? r.goldAfter / r.goldBefore - 1 : null;
   const touched = Object.values(sh).some((v) => v !== 0);
   const maxAbs = Math.max(1, ...r.exposures.map((e) => Math.abs(e.after - e.before)));
-  return html`<div class="card">
+  return html`<div class="card" id="scenario">
     <div class="card-h"><h3><${Icon} n="sliders" cls="sm" />شبیه‌ساز سناریو${T('scenario')}</h3>
       <div class="row" style="gap:8px">${touched && html`<${AskBtn} q=${`اگر ${Object.entries(sh).filter(([, v]) => v).map(([k, v]) => `${A.SCENARIO_LABELS[k]} ${v > 0 ? '+' : ''}${v}٪`).join('، ')} شود، روی دارایی‌هایم چه اثری دارد؟ با simulate_scenario حساب کن و بگو کدام بخش بیشترین اثر را می‌گیرد.`} label="توضیح بده" />`}
       ${touched && html`<button class="btn sm ghost" onClick=${() => { setSh(ZERO); setPreset(null); setAi(null); }}><${Icon} n="reset" cls="sm" />بازنشانی</button>`}</div></div>
@@ -418,7 +420,7 @@ function Scenario({ st, pf, s }) {
   </div>`;
 }
 
-export function AnalysisPage({ st, pf, s, open }) {
+export function AnalysisPage({ st, pf, s, open, route }) {
   const g = pf.gross || 1;
   const exItems = Object.entries(EXPOSURES).map(([k, v]) => ({ name: v.name, color: v.color, value: pf.byExposure[k] || 0 })).filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
   const liqItems = [['high', '#14BCDB'], ['mid', '#8E70FF'], ['low', '#D946A8']].map(([k, c]) => ({ name: 'نقدشوندگی ' + LIQUIDITY[k], color: c, value: pf.byLiquidity[k] || 0 }));
@@ -433,11 +435,15 @@ export function AnalysisPage({ st, pf, s, open }) {
   if (has && pf.debt > 0 && pf.debt / g > 0.3) risks.push({ t: `نسبت بدهی به دارایی ${pct(pf.debt / g, { sign: false })}`, d: 'بدهی بالا ریسک نقدینگی را زیاد می‌کند.' });
   const perf = pf.rows.filter((r) => r.pnl !== null).sort((a, b) => b.pnl - a.pnl);
 
+  // one long page: a row of jumps keeps every part one tap away
+  const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const parts = [['perf', 'عملکرد'], ['scenario', 'سناریو'], ['risk', 'ترکیب و ریسک'], ['compare', 'مقایسه'], ['targets', 'ترکیب هدف'], ['pnl', 'سود و زیان']];
   return html`<div class="page">
+    <nav class="jumps" aria-label="بخش‌های تحلیل">${parts.map(([id, t]) => html`<button class="chip" onClick=${() => jump(id)}>${t}</button>`)}</nav>
     <${Performance} st=${st} pf=${pf} s=${s} />
     <${Scenario} st=${st} pf=${pf} s=${s} />
-    <div class="grid-ov">
-      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز${T('exposure')}</h3><span class="sub">محافظت‌شده در برابر تورم: ${pf.gross > 0 ? pct(1 - (pf.byExposure.rial || 0) / g, { sign: false }) : '—'}</span></div>
+    <div class="grid-ov" id="risk">
+      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز${T('exposure')}</h3><span class="sub">محافظت‌شده در برابر تورم: ${I.inflationCard(st, pf) ? pct(I.inflationCard(st, pf).share, { sign: false }) : '—'}</span></div>
         <${StackBar} items=${exItems} height=${14} /><div style="height:14px"></div><${Bars} items=${exItems} s=${s} total=${g} /></div>
       <div class="card"><div class="card-h"><h3><${Icon} n="droplet" cls="sm" />چقدر زود نقد می‌شود؟${T('liquidity')}</h3></div>
         <${StackBar} items=${liqItems} height=${14} /><div style="height:14px"></div><${Bars} items=${liqItems} s=${s} total=${g} />
@@ -456,10 +462,10 @@ export function AnalysisPage({ st, pf, s, open }) {
       </div>
     </div>
 
-    <${Compare} st=${st} pf=${pf} s=${s} />
+    <${Compare} st=${st} pf=${pf} s=${s} initial=${route?.q?.cmp || null} />
     <${Targets} pf=${pf} s=${s} assets=${st.assets} />
 
-    <div class="card"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها${T('pnl')}</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
+    <div class="card" id="pnl"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها${T('pnl')}</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
       ${perf.length ? html`<table class="tbl"><thead><tr><th>دارایی</th><th class="n">بهای تمام‌شده</th><th class="n">ارزش روز</th><th class="n">سود / زیان</th><th class="n">بازده</th></tr></thead><tbody>
         ${perf.map((r) => html`<tr class="r" style="cursor:pointer" onClick=${() => open(r.asset)}><td><div class="row"><${Ava} cat=${r.asset.category} size=${28} /><span class="sb">${r.asset.name}</span></div></td>
           <td class="n small"><${Money} v=${r.asset.costBasis} s=${s} compact /></td><td class="n small"><${Money} v=${r.value} s=${s} compact /></td>

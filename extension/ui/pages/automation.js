@@ -100,7 +100,7 @@ export function AutomationPage({ st, pf, s, open }) {
       <div class="kpi"><span class="t">سود ماهانه (تقریبی)</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">سپرده‌ها، حساب‌های سوددار و طلب‌ها</span></div>
       <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow + auto.loanGet} s=${s} compact /></span><span class="s">حقوق، اجاره، قسط‌های دریافتی و…</span></div>
       <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow + auto.loanPay} s=${s} compact /></span><span class="s">${auto.loanPay ? html`هزینه‌های ثابت و اقساط (<${Money} v=${auto.loanPay} s=${s} compact />)` : 'هزینه‌های ثابت و اقساط'}</span></div>
-      <div class="kpi"><span class="t">هر ماه چقدر پولدارتر می‌شوی</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span>
+      <div class="kpi"><span class="t">مانده ماهانه</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span>
         <span class="s" title="پولی که هر ماه به حساب‌هایت می‌رسد یا از آنها کم می‌شود؛ پرداخت اصل وام و جابه‌جایی بین حساب‌هایت پول نقد را کم و زیاد می‌کند ولی دارایی خالص را نه.">پول نقد حساب‌ها: <${Money} v=${auto.cash} s=${s} compact sign /></span></div>
     </div>
 
@@ -121,7 +121,7 @@ export function AutomationPage({ st, pf, s, open }) {
             <div class="grow"><div class="sb">${r.asset.name}</div>
               <div class="xs muted">حساب روزشمار، ${num(it.annualPct, 2)}٪ سالانه، سود هر روز <${Money} v=${(+r.asset.balance || 0) * it.annualPct / 100 / 365} s=${s} compact /></div>
               <div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(nd, 'dm')}</div></div>
-            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${r.accrued} s=${s} unit=${false} /> سود جمع‌شده</div></div></div>`;
+            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num"><${Money} v=${r.accrued} s=${s} unit=${false} sign /> سود جمع‌شده</div></div></div>`;
         })}</div>`}
         ${rates.length ? html`<div class="list">${rates.map((r) => {
           const a = r.asset, rt = a.rate;
@@ -134,7 +134,7 @@ export function AutomationPage({ st, pf, s, open }) {
               <div class="xs muted">روزشمار ${num(rt.annualPct, 2)}٪، ${rt.mode === 'payout' ? 'واریز ماهانه' : rt.mode === 'compound' ? 'مرکب' : 'ساده'}، سود هر روز <${Money} v=${E.rateDaily(rt, r.value)} s=${s} compact />، اصل <${Money} v=${rt.principal} s=${s} compact />${rt.maturity ? '، سررسید ' + fmtJ(rt.maturity) : ''}</div>
               ${matured && html`<div class="xs" style="margin-top:3px"><${StatusPill} status="matured" /> از ${fmtJ(rt.maturity)} سودی نمی‌گیرد؛ در صفحه دارایی‌ها منتقل یا تمدیدش کن.</div>`}
               ${rt.mode === 'payout' && next && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> واریز بعدی ${fmtJ(next, 'dm')} — <${Money} v=${np.amount} s=${s} compact /> به ${rt.payoutTo && rt.payoutTo !== 'self' ? (nm(rt.payoutTo) || 'حساب حذف‌شده') : 'خود دارایی'}</div>`}</div>
-            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num">+<${Money} v=${accrued} s=${s} unit=${false} /> سود ${rt.mode === 'payout' ? 'این دوره' : 'تاکنون'}</div></div></div>`;
+            <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} /></div><div class="xs pos num"><${Money} v=${accrued} s=${s} unit=${false} sign /> سود ${rt.mode === 'payout' ? 'این دوره' : 'تاکنون'}</div></div></div>`;
         })}</div>` : !banks.length ? html`<div class="empty small">سپرده، صندوق درآمد ثابت یا شراکتی که سود سالانه مشخص دارد را اضافه کن؛ سودش هر روز حساب و به ارزش اضافه می‌شود. برای حساب کوتاه‌مدت بانکی، «سود روزشمار» را در خود حساب روشن کن.</div>` : ''}
       </div>
 
@@ -162,7 +162,7 @@ export function AutomationPage({ st, pf, s, open }) {
           <div class="grow"><div class="sb">${a.name}</div>
             <div class="xs muted">${ls.done ? 'تسویه شده' : html`قسط <${Money} v=${ls.next.payment} s=${s} compact />، ${num(ls.paid + ls.before)} از ${num(ls.n + ls.before)} پرداخت شده، سود ${num(+a.loan.annualPct || 0, 2)}٪`}</div>
             ${!ls.done && html`<div class="xs" style="margin-top:3px"><${Icon} n="calendar" cls="sm" /> قسط بعدی ${fmtJ(ls.next.date, 'dm')} — ${liab ? 'از' : 'به'} ${a.loan.account ? nm(a.loan.account) || 'حساب حذف‌شده' : 'حسابی ثبت نشده'}</div>`}
-            ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round((ls.paid + ls.before) / (ls.n + ls.before) * 100)}%;background:${r.cat.color}`}></i></div>`}</div>
+            ${!ls.done && html`<div class="progress" style="margin-top:6px"><i style=${`width:${Math.round((ls.paid + ls.before) / (ls.n + ls.before) * 100)}%;background:var(--accent)`}></i></div>`}</div>
           <div style="text-align:left"><div class="sb"><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></div><div class="xs muted">${liab ? 'مانده بدهی' : 'مانده طلب'}</div></div></div>`;
       })}</div>
     </div>`}

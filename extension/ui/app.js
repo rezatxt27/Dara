@@ -13,7 +13,8 @@ import { MarketPage } from './pages/market.js';
 import { AutomationPage } from './pages/automation.js';
 import { AnalysisPage } from './pages/analysis.js';
 import { CalcPage } from './pages/calc.js';
-import { SettingsPage, WelcomePage } from './pages/settings.js';
+import { PriceDetail } from './pages/price.js';
+import { SettingsPage, WelcomePage, clearSample } from './pages/settings.js';
 import { AssistantPage } from './pages/assistant.js';
 import { CapturePage } from './pages/capture.js';
 import * as U from '../lib/update.js';
@@ -61,7 +62,8 @@ function Hero({ st, pf, s }) {
   const series = E.seriesFrom(st.snapshots, denom, range);
   // the chips show what the market did (new money, transfers and records are left out — same as «چرا تغییر کرد»)
   const moves = useMemo(() => [1, 7, 30].map((d) => I.marketMove(st, pf, d)), [st.assets, st.quotes, st.snapshots, st.events, pf]);
-  const periods = [['امروز', moves[0]], ['۷ روز', moves[1]], ['۳۰ روز', moves[2]]];
+  // when the last saved day is older than the label (the browser was closed), the chip names the date instead
+  const periods = [['امروز', moves[0]], ['۷ روز', moves[1]], ['۳۰ روز', moves[2]]].map(([t, d]) => [d?.stale ? `از ${fmtJ(d.from, 'dm')}` : t, d]);
   const fmt = (v) => (denom === 'money' ? money(v, s, { compact: true }) : num(v, denom === 'usd' ? 0 : 1) + (denom === 'usd' ? ' دلار' : denom === 'gold' ? ' گرم' : ' سکه'));
   const hasEst = series.some((p) => p.est);
   return html`<section class="hero">
@@ -94,12 +96,12 @@ function WhyChanged({ st, pf, s, open }) {
   const at = useMemo(() => E.attribution(st.assets, st.quotes, s, st.snapshots, st.events, days, todayIso(), pf), [st.assets, st.quotes, st.snapshots, st.events, pf, days]);
   const label = { 1: 'از دیروز تا حالا', 7: 'در ۷ روز گذشته', 30: 'در ۳۰ روز گذشته' }[days];
   const askQ = { 1: 'چرا ارزش دارایی‌هایم امروز تغییر کرد؟ اثر قیمت بازار را از واریز و برداشت جدا کن.', 7: 'ارزش دارایی‌هایم در ۷ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.', 30: 'ارزش دارایی‌هایم در ۳۰ روز گذشته چرا تغییر کرد؟ اثر بازار و پول جابه‌جاشده را جدا توضیح بده.' }[days];
-  const head = html`<div class="card-h"><h3><${Icon} n="sparkles" cls="sm" />چرا تغییر کرد؟</h3><div class="row" style="gap:8px"><${AskBtn} q=${askQ} label="توضیح بده" /><${Seg} value=${days} onChange=${setDays} options=${[[1, 'امروز'], [7, '۷ روز'], [30, '۳۰ روز']]} /></div></div>`;
+  const head = html`<div class="card-h"><h3><${Icon} n="sparkles" cls="sm" />چرا تغییر کرد؟</h3><div class="row" style="gap:8px"><${AskBtn} q=${askQ} label="از دستیار بپرس" /><${Seg} value=${days} onChange=${setDays} options=${[[1, 'امروز'], [7, '۷ روز'], [30, '۳۰ روز']]} /></div></div>`;
   if (!at) return html`<div class="card">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این دوره هنوز عکس‌فوری ذخیره نشده.</div><${BackfillButton} st=${st} /></div></div>`;
   // lead with the same number as the «امروز» chip: what prices and interest did (money moved or recorded is told apart)
   // (when the last saved day is older than the period — the browser was closed — say from when, honestly)
   const lead = at.from < E.addDaysIso(todayIso(), -days) ? `از ${fmtJ(at.from, 'dm')} تا حالا` : label;
-  const ret = at.market; const up = ret >= 0; const base = Math.abs(at.base) || 0;
+  const ret = at.market; const up = ret >= 0;
   const moved = at.total - at.market;
   const drivers = at.cats.filter((c) => Math.abs(c.price) >= 1).sort((a, b) => Math.abs(b.price) - Math.abs(a.price));
   const top = drivers[0];
@@ -114,7 +116,7 @@ function WhyChanged({ st, pf, s, open }) {
   return html`<div class="card">${head}
     <div class="why">
       <div>
-        <div class="lead">${lead} قیمت‌ها و سودها دارایی‌ات را <b class=${up ? 'pos' : 'neg'}><span class="ltr">${pct(base ? ret / base : 0)}</span></b> (<${Money} v=${ret} s=${s} compact sign />) ${up ? 'بیشتر' : 'کمتر'} کردند.
+        <div class="lead">${lead} قیمت‌ها و سودها دارایی‌ات را <b class=${up ? 'pos' : 'neg'}><span class="ltr">${pct(I.movePct(at))}</span></b> (<${Money} v=${ret} s=${s} compact sign />) ${up ? 'بیشتر' : 'کمتر'} کردند.
           ${top ? html` بیشترین اثر قیمت را <b>${top.name}</b> داشت (<${Money} v=${top.price} s=${s} compact sign />).` : ''}
           ${Math.abs(moved) >= 10 ? html`<div class="small muted" style="margin-top:4px">جدا از آن، <${Money} v=${moved} s=${s} compact sign /> پول جابه‌جا یا ثبت شد؛ پس کل ارزش خالص <${Money} v=${at.total} s=${s} compact sign /> عوض شد.</div>` : ''}
           ${showSplit ? html`<div class="small muted" style="margin-top:4px" title="تقریبی: قیمت سکه، انس و دلار در لحظه‌های کمی متفاوت ثبت می‌شوند">از این، سکه‌هایت <${Money} v=${split.total} s=${s} compact sign />: <${Money} v=${split.gold} s=${s} compact sign /> از قیمت طلا و <b class=${split.bubble >= 0 ? 'pos' : 'neg'}><${Money} v=${split.bubble} s=${s} compact sign /></b> از ${split.bubble >= 0 ? 'بزرگ‌تر شدن' : 'کوچک‌تر شدن'} حباب.</div>` : ''}
@@ -142,7 +144,7 @@ function Kpis({ st, pf, s, open }) {
   const attN = att.reduce((t, it) => t + (it.n || 1), 0);
   const [allAtt, setAllAtt] = useState(false);
   const p0 = (x) => pct(x, { sign: false, digits: 0 });
-  const pts = (d) => { const v = Math.abs(d * 100); return v < 0.5 ? null : `${num(v, v < 10 ? 1 : 0).replace(/[.٫]0$/, '')} واحد ${d > 0 ? 'بیشتر' : 'کمتر'} از ماه پیش`; };
+  const pts = (d) => { const v = Math.abs(d * 100); return v < 0.5 ? null : `${num(v, v < 10 ? 1 : 0).replace(/[.٫]0$/, '')} واحد درصد ${d > 0 ? 'بیشتر' : 'کمتر'} از ماه پیش`; };
   let autoVal = 0;
   for (const r of pf.rows) if (!r.cat.liability && (r.status === 'live' || r.status === 'auto' || r.status === 'matured' || r.status === 'delayed' || (r.source !== 'manual' && r.status === 'error'))) autoVal += r.value;
   const g = pf.gross || 1;
@@ -152,7 +154,7 @@ function Kpis({ st, pf, s, open }) {
   return html`<div class="kpis ov">
     <div class="kpi">
       <div class="kh"><span class="t"><${Icon} n="shield" cls="sm" />محافظت در برابر تورم</span>
-        ${inf?.status === 'ok' ? badge('pos', 'در حد هدف') : inf?.status === 'near' ? badge('warn', 'نزدیک هدف') : inf?.status === 'below' ? badge('warn', `${num(Math.ceil((inf.target - inf.share) * 100 - 1e-9))} واحد زیر هدف`) : ''}</div>
+        ${inf?.status === 'ok' ? badge('pos', 'در حد هدف') : inf?.status === 'near' ? badge('warn', 'نزدیک هدف') : inf?.status === 'below' ? badge('warn', `${num(Math.ceil((inf.target - inf.share) * 100 - 1e-9))} واحد درصد زیر هدف`) : ''}</div>
       ${inf ? html`
         <div class="kv"><span class="v num">${p0(inf.share)}</span>${inf.delta !== null && html`<span class=${'kd ' + (pts(inf.delta) ? (inf.delta > 0 ? 'pos' : 'neg') : 'muted')}>${pts(inf.delta) || 'تقریباً بدون تغییر از ماه پیش'}</span>`}</div>
         <div class="kbar">
@@ -171,12 +173,12 @@ function Kpis({ st, pf, s, open }) {
         <div class="kv"><span class="v num">${p0(liq.share)}</span><span class="kd muted">در چند روز نقد می‌شود</span></div>
         <div class="kbar"><div class="segs">${['high', 'mid', 'low'].map((k) => liq.tiers[k]).map((t, i) => t.share > 0 && html`<i title=${`${t.name}: ${money(t.value, s, { compact: true })}${t.names.length ? ' — ' + t.names.join('، ') : ''}`} style=${`flex:${t.share};background:${tierColor[['high', 'mid', 'low'][i]]}`}></i>`)}</div></div>
         <div class="klg">${['high', 'mid', 'low'].map((k) => html`<span title=${liq.tiers[k].names.join('، ')}><i style=${`background:${tierColor[k]}`}></i>${liq.tiers[k].name} ${p0(liq.tiers[k].share)}</span>`)}</div>
-        <div class="kf"><b>اگر پول لازم شد:</b> <${Money} v=${liq.high} s=${s} compact /> در چند روز در دسترس است</div>`
+        <div class="kf"><b>اگر پول لازم شد:</b> <${Money} v=${liq.high} s=${s} compact /> در چند روز در دسترس است${liq.term >= 1 ? html`، که <${Money} v=${liq.term} s=${s} compact /> از آن سپرده مدت‌دار است و شکستنش جریمه دارد` : ''}</div>`
       : html`<span class="v">—</span>`}
     </div>
 
     <div class="kpi">
-      <div class="kh"><span class="t"><${Icon} n="zap" cls="sm" />درآمد خودکار ماهانه</span></div>
+      <div class="kh"><span class="t"><${Icon} n="zap" cls="sm" />ورودی ماهانه</span></div>
       ${inc.total > 0 || inc.next ? html`
         <div class="kv">${inc.total > 0 ? html`<span class="v"><${Money} v=${inc.total} s=${s} compact /></span><span class="kd muted">در ماه</span>` : html`<span class="v">—</span><span class="kd muted">سود یا درآمد تکراری ثبت نشده</span>`}</div>
         <div class="klg">${inc.interest > 0 && html`<span><i style="background:var(--accent)"></i>سود <${Money} v=${inc.interest} s=${s} compact unit=${false} /></span>`}${inc.inflow > 0 && html`<span><i style="background:var(--cyan)"></i>درآمد تکراری <${Money} v=${inc.inflow} s=${s} compact unit=${false} /></span>`}</div>
@@ -214,14 +216,14 @@ function Allocation({ pf, s }) {
 }
 
 const BOARD = [['tgju', 'geram18'], ['tgju', 'sekee'], ['tgju', 'price_dollar_rl'], ['tgju', 'price_eur'], ['nobitex', 'usdt'], ['nobitex', 'btc']];
-function PriceBoard({ st, s }) {
+function PriceBoard({ st, s, openPrice }) {
   return html`<div class="card">
     <div class="card-h"><h3>قیمت‌های کلیدی <span class="sub">به ${s.currency === 'rial' ? 'ریال' : 'تومان'}</span></h3><a class="small" href="#/market">همه قیمت‌ها ←</a></div>
     <div class="prices">${BOARD.map(([p, k]) => {
       const q = st.quotes[`${p}:${k}`];
-      return html`<div class="pcell"><span class="n"><span class="ellipsis">${refLabel({ provider: p, key: k })}</span><${Delta} p=${q?.changePct} showAbs=${false} /></span>
+      return html`<div class="pcell clickable" role="button" tabindex="0" title="نمودار و جزئیات" onClick=${() => openPrice({ provider: p, key: k })} onKeyDown=${(e) => e.key === 'Enter' && openPrice({ provider: p, key: k })}><span class="n"><span class="ellipsis">${refLabel({ provider: p, key: k })}</span><${Delta} p=${q?.changePct} showAbs=${false} /></span>
         <span class="v"><${Money} v=${q?.price || null} s=${s} unit=${false} /></span>
-        <span class="xs faint">${q ? (q.price > 0 ? (q.approx ? 'تقریبی، ' : '') + timeHM(q.at) : html`<span class="neg">${q.error}</span>`) : 'در انتظار دریافت'}</span></div>`;
+        <span class="xs faint">${q ? (q.price > 0 ? (q.approx ? 'تقریبی، ' : '') + timeHM(q.at || q.fetchedAt) : html`<span class="neg">${q.error}</span>`) : 'در انتظار دریافت'}</span></div>`;
     })}</div>
   </div>`;
 }
@@ -258,11 +260,14 @@ function Overview(ctx) {
   useTick(10000);
   const { st, pf, s, open } = ctx;
   if (!st.assets.length) return html`<${WelcomePage} ...${ctx} inline />`;
+  const sample = st.assets.some((a) => a.sample);
   return html`<div class="page">
+    ${sample && html`<div class="callout warn row" style="gap:10px;align-items:center"><${Icon} n="sparkles" cls="sm" /><div class="grow">این‌ها داده نمونه‌اند، برای آشنایی.</div>
+      <button class="btn sm" onClick=${async () => { if (!confirm('دارایی‌های نمونه پاک شود؟ چیزی که خودت اضافه یا ویرایش کرده‌ای می‌ماند.')) return; await clearSample(); toast('داده نمونه پاک شد؛ دارایی‌های خودت را اضافه کن'); }}>پاک کن و شروع کن</button></div>`}
     <${Hero} st=${st} pf=${pf} s=${s} />
     <${WhyChanged} st=${st} pf=${pf} s=${s} open=${open} />
     <${Kpis} st=${st} pf=${pf} s=${s} open=${open} />
-    <div class="grid-ov"><${Allocation} pf=${pf} s=${s} /><${PriceBoard} st=${st} s=${s} /></div>
+    <div class="grid-ov"><${Allocation} pf=${pf} s=${s} /><${PriceBoard} st=${st} s=${s} openPrice=${ctx.openPrice} /></div>
     <div class="grid-ov"><${Upcoming} st=${st} pf=${pf} s=${s} open=${open} /><${WeeklyCard} st=${st} /></div>
   </div>`;
 }
@@ -275,7 +280,7 @@ function StatusChip({ st }) {
   return html`<a class="status" title=${title} href="#/market">
     ${running ? html`<${Icon} n="refresh" cls="sm spin" />در حال دریافت قیمت‌ها…` : html`
       <span style=${`width:7px;height:7px;border-radius:50%;background:${!m.lastOk ? 'var(--faint)' : errs ? 'var(--warn)' : 'var(--pos)'}`}></span>
-      ${m.lastRun ? `به‌روزرسانی ${ago(m.lastRun)}` : 'هنوز به‌روز نشده'}${errs ? html`، <span class="warn">${num(errs)} قیمت دریافت نشد</span>` : ''}`}
+      ${m.lastRun ? `به‌روزرسانی ${ago(m.lastRun)}` : 'هنوز به‌روز نشده'}${errs ? html`، <span class="warn">${num(errs)} قیمت دریافت نشد</span>` : ''}${m.fatal || m.autoError ? html`، <span class="neg" title=${m.fatal || m.autoError}>${m.fatal ? 'اجرای خودکار متوقف شد' : 'سودها و جریان‌های خودکار اجرا نشد'}</span>` : ''}`}
   </a>`;
 }
 
@@ -299,7 +304,7 @@ function UpdateBanner() {
     return () => { chrome.runtime.onMessage.removeListener(onMsg); document.removeEventListener('visibilitychange', onVis); };
   }, []);
   if (!v) return null;
-  return html`<div class="update-bar"><${Icon} n="sparkles" cls="sm" /><span class="grow">نسخه تازه دارا (${verFa(v)}) آماده است. اگر چیزی در حال نوشتنش نیستی، «به‌روزرسانی» را بزن؛ صفحه‌های باز دارا دوباره باز می‌شوند و داده‌ها دست نمی‌خورد.</span>
+  return html`<div class="update-bar"><${Icon} n="sparkles" cls="sm" /><span class="grow" title="صفحه‌های باز دارا دوباره باز می‌شوند؛ اگر چیزی در حال نوشتنش هستی، اول تمامش کن">نسخه ${verFa(v)} آماده است — داده‌ها حفظ می‌شوند.</span>
     <button class="btn sm primary" onClick=${() => U.applyUpdate(location.href)}>به‌روزرسانی</button></div>`;
 }
 
@@ -307,6 +312,7 @@ function App() {
   const st = useStore();
   const [route, setRoute] = useState(parseHash());
   const [editing, setEditing] = useState(null);
+  const [priceRef, setPriceRef] = useState(null); // a price's detail drawer, from any page
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   useTick(30000);
@@ -331,7 +337,7 @@ function App() {
   if (!st) return html`<div style="display:grid;place-items:center;height:100vh" class="muted">در حال بارگذاری…</div>`;
   const s = st.settings;
   const open = (asset, preset) => setEditing({ asset, preset });
-  const ctx = { st, pf, s, open, route, q, setQ };
+  const ctx = { st, pf, s, open, route, q, setQ, openPrice: setPriceRef };
   const refresh = async () => { setBusy(true); const r = await send('refresh'); setBusy(false); toast(r?.ok ? (r.errors ? `قیمت‌ها به‌روز شد؛ ${num(r.errors)} قیمت دریافت نشد` : 'همه قیمت‌ها به‌روز شد') : 'به‌روزرسانی انجام نشد'); };
   const page = route.page;
   const cur = ROUTES.find((r) => r.id === page) || { t: HIDDEN[page] || 'دارا' };
@@ -343,7 +349,7 @@ function App() {
       <nav class="nav">${ROUTES.map((r) => html`<a href=${'#/' + r.id} class=${page === r.id ? 'on' : ''} title=${r.t} aria-label=${r.t} aria-current=${page === r.id ? 'page' : undefined}><${Icon} n=${r.icon} />${r.t}${r.id === 'assets' && attention ? html`<span class="count num">${num(attention)}</span>` : ''}</a>`)}</nav>
       <div class="foot">
         <div class="row between"><span class="muted">ارزش خالص</span><span class="b"><${Money} v=${pf.net} s=${s} compact /></span></div>
-        <div class="row between xs" style="margin-top:4px"><span class="muted" title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">امروز</span><${Delta} p=${todayMove?.pct} showAbs=${false} /></div>
+        <div class="row between xs" style="margin-top:4px"><span class="muted" title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">${todayMove?.stale ? `از ${fmtJ(todayMove.from, 'dm')}` : 'امروز'}</span><${Delta} p=${todayMove?.pct} showAbs=${false} /></div>
       </div>
     </aside>
     <main class="main">
@@ -369,6 +375,7 @@ function App() {
       ${page === 'welcome' && html`<${WelcomePage} ...${ctx} />`}
       ${page === 'capture' && html`<${CapturePage} ...${ctx} />`}
     </main>
+    ${priceRef && html`<${PriceDetail} key=${E.quoteId(priceRef)} st=${st} s=${s} refOf=${priceRef} onClose=${() => setPriceRef(null)} />`}
     ${editing && html`<${AssetEditor} key=${editing.asset?.id || "new"} st=${st} s=${s} asset=${editing.asset} preset=${editing.preset} onClose=${() => setEditing(null)} />`}
     <${Toasts} />
   </div>`;

@@ -27,20 +27,21 @@ export function CalcPage({ st, s, open, route }) {
   </div>`;
   return html`<div class="page" style="max-width:920px">
     <a class="calc-back" href="#/calc"><${Icon} n="chevronRight" cls="sm" />همه ماشین‌حساب‌ها</a>
-    ${tool.id === 'convert' && html`<${Converter} st=${st} s=${s} />`}
+    ${tool.id === 'convert' && html`<${Converter} st=${st} s=${s} toId=${route.q.to} />`}
     ${tool.id === 'gold' && html`<${GoldInvoice} st=${st} s=${s} open=${open} />`}
     ${tool.id === 'rent' && html`<${RentTool} st=${st} s=${s} />`}
     ${tool.id === 'loan' && html`<${LoanTool} st=${st} s=${s} />`}
     ${tool.id === 'deposit' && html`<${DepositTool} st=${st} s=${s} />`}
-    ${tool.id === 'breakeven' && html`<${BreakEven} st=${st} s=${s} />`}
+    ${tool.id === 'breakeven' && html`<${BreakEven} st=${st} s=${s} initial=${route.q.pick} />`}
   </div>`;
 }
 
 /* ------------------------------------------------ converter ------------------------------------------------ */
-function Converter({ st, s }) {
-  const [dir, setDir] = useState('from');
+function Converter({ st, s, toId }) {
+  // opened from a price's page: start from that asset («how much is a quantity of it»)
+  const [dir, setDir] = useState(toId && K.itemById(toId) ? 'to' : 'from');
   const [amount, setAmount] = useState(1_000_000_000);
-  const [pick, setPick] = useState('sekee');
+  const [pick, setPick] = useState(toId && K.itemById(toId) ? toId : 'sekee');
   const [qty, setQty] = useState(1);
   const rows = useMemo(() => K.convertFrom(amount, st.quotes), [amount, st.quotes]);
   const to = useMemo(() => K.convertTo(pick, qty, st.quotes), [pick, qty, st.quotes]);

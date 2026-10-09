@@ -106,7 +106,8 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const isNew = !asset;
   const [a, setA] = useState(() => {
     // a draft from a calculator (e.g. «ثبت به‌عنوان دارایی» on a gold invoice) fills the new asset; the owner still reviews it
-    const base = asset ? structuredClone(asset) : { ...blank(preset?.category || 'bank'), ...(preset?.draft || {}) };
+    // an edited sample row is the owner's now: it no longer goes with «پاک‌کردن داده نمونه»
+    const base = asset ? (({ sample, ...x }) => x)(structuredClone(asset)) : { ...blank(preset?.category || 'bank'), ...(preset?.draft || {}) };
     if (!base.price) base.price = { source: 'manual', value: null, ref: null, adjustPct: 0, factor: 1 };
     if (!base.rate) base.rate = { principal: null, annualPct: null, start: todayIso(), mode: 'payout', payoutTo: 'self', maturity: null };
     if (!base.loan) base.loan = blankLoan();
@@ -281,7 +282,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       ${!isNew && html`<button class="btn danger" onClick=${() => { act.deleteAsset(a.id); onClose(); }}><${Icon} n="trash" cls="sm" />حذف</button>`}`}>
 
     <div class="sec"><div class="st"><${Icon} n="layers" cls="sm" />دسته‌بندی${T('cat')}</div>
-      <div class="catgrid">${CATEGORIES.flatMap((c, i) => (c.liability && !CATEGORIES[i - 1]?.liability ? [html`<div class="catsep">چیزی که بدهکاری</div>`, c] : [c])).map((c) => c.id === undefined ? c : html`<button type="button" class=${'catbtn' + (a.category === c.id ? ' on' : '')} title=${CAT_GUIDE[c.id]} aria-pressed=${a.category === c.id ? 'true' : 'false'} onClick=${() => pickCat(c.id)}><${Ava} cat=${c.id} size=${24} /><span class="ellipsis">${c.short}</span></button>`)}</div>
+      <div class="catgrid">${CATEGORIES.flatMap((c, i) => (c.liability && !CATEGORIES[i - 1]?.liability ? [html`<div class="catsep">بدهی‌ها</div>`, c] : [c])).map((c) => c.id === undefined ? c : html`<button type="button" class=${'catbtn' + (a.category === c.id ? ' on' : '')} title=${CAT_GUIDE[c.id]} aria-pressed=${a.category === c.id ? 'true' : 'false'} onClick=${() => pickCat(c.id)}><${Ava} cat=${c.id} size=${24} /><span class="ellipsis">${c.short}</span></button>`)}</div>
       <div class="catguide"><span><b>${cat.short}:</b> ${CAT_GUIDE[a.category]}</span>
         ${isNew && CAT_SWITCH[a.category] && html`<span class="cswitch">${CAT_SWITCH[a.category].q} <button type="button" class="linkbtn" onClick=${() => pickCat(CAT_SWITCH[a.category].to)}>${CAT_SWITCH[a.category].btn}</button></span>`}</div>
     </div>
@@ -342,7 +343,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
           <div class="row between"><div><div class="sb small">${LT('این حساب سود ماهانه می‌دهد', 'interest')}</div><div class="xs muted">برای حساب کوتاه‌مدت: سود هر روز روی مانده همان روز حساب و ماهی یک بار به همین حساب واریز می‌شود.</div></div>
             <${Toggle} title="این حساب سود ماهانه می‌دهد" on=${!!a.interest?.on} onChange=${(v) => set({ interest: v ? { basis: 365, payDay: 0, ...(a.interest || {}), on: true, since: todayIso(), sinceMs: Date.now(), lastAccrual: null, accrued: 0 } : { ...(a.interest || {}), on: false } })} /></div>
           ${a.interest?.on && html`<div class="grid2">
-            <${NumField} label=${LT('نرخ سود سالانه', 'rpct')} suffix="٪" value=${a.interest.annualPct} onInput=${(v) => set({ interest: { ...a.interest, annualPct: v } })} digits=${2} err=${E_('irate')} />
+            <${NumField} label=${LT(r.mode === 'compound' ? 'بازده مؤثر سالانه' : 'نرخ سود سالانه', 'rpct')} suffix="٪" value=${a.interest.annualPct} onInput=${(v) => set({ interest: { ...a.interest, annualPct: v } })} digits=${2} err=${E_('irate')} />
             <div class="field"><label>${LT('روز واریز سود', 'payDay')}</label><select class="input" value=${a.interest.payDay ?? 1} onChange=${(e) => set({ interest: { ...a.interest, payDay: +e.target.value } })}>
               <option value="0">آخر هر ماه</option>${Array.from({ length: 30 }, (_, i) => i + 1).map((d) => html`<option value=${d}>روز ${num(d)} هر ماه</option>`)}</select>
               <span class="hint">همان روزی که بانک سود را می‌ریزد؛ اگر نمی‌دانی، آخر ماه.</span></div>
@@ -359,7 +360,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       ${a.mode === 'rate' && html`
         <div class="grid2">
           <${MoneyField} label=${LT(cat.liability ? 'اصل بدهی' : 'اصل سرمایه', 'principal')} rial=${r.principal} onRial=${(v) => setRate({ principal: v })} s=${s} err=${E_('rprin')} />
-          <${NumField} label=${LT('نرخ سود سالانه', 'rpct')} suffix="٪" value=${r.annualPct} onInput=${(v) => setRate({ annualPct: v })} digits=${2} err=${E_('rpct')} />
+          <${NumField} label=${LT(r.mode === 'compound' ? 'بازده مؤثر سالانه' : 'نرخ سود سالانه', 'rpct')} suffix="٪" value=${r.annualPct} onInput=${(v) => setRate({ annualPct: v })} digits=${2} err=${E_('rpct')} />
         </div>
         ${!isNew && asset?.mode === 'rate' && asset.rate?.start && asset.rate.start < todayIso() && r.start === asset.rate.start && (+r.annualPct !== +asset.rate.annualPct || r.mode !== asset.rate.mode || (r.basis || 365) !== (asset.rate.basis || 365)) && html`<div class="callout"><${Icon} n="info" cls="sm" /><div>شرایط جدید از امروز حساب می‌شود؛ سودی که تا امروز گرفته‌ای همان می‌ماند.</div></div>`}
         <div class="field"><label>${LT('نحوه محاسبه سود', 'rmode')}</label>

@@ -65,8 +65,10 @@ export function Toasts() {
 }
 
 /* ---------------- atoms ---------------- */
+// arrows that mean «forward» or «back» point the other way in a right-to-left page
+const MIRROR = new Set(['send', 'undo', 'redo']);
 export function Icon({ n, cls = '' }) {
-  return html`<svg class=${'i ' + cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: ICONS[n] || '' }}></svg>`;
+  return html`<svg class=${'i ' + cls + (MIRROR.has(n) ? ' rtl-flip' : '')} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{ __html: ICONS[n] || '' }}></svg>`;
 }
 
 /** Split a Rial amount into isolated sign+number, scale word and unit so RTL text never flips the sign. */
@@ -132,7 +134,16 @@ export function Toggle({ on, onChange, title }) {
   return html`<button type="button" class=${'toggle' + (on ? ' on' : '')} title=${title} role="switch" aria-checked=${on ? 'true' : 'false'} aria-label=${title || undefined} onClick=${() => onChange(!on)}></button>`;
 }
 export function Seg({ value, options, onChange, cls = '' }) {
-  return html`<div class=${'seg ' + cls} role="radiogroup">${options.map(([v, l]) => html`<button type="button" role="radio" aria-checked=${v === value ? 'true' : 'false'} class=${v === value ? 'on' : ''} onClick=${() => onChange(v)}>${l}</button>`)}</div>`;
+  // a radio group: one tab stop (the chosen option), arrow keys move the choice — in RTL, ← is «next»
+  const key = (e, i) => {
+    const step = { ArrowLeft: 1, ArrowDown: 1, ArrowRight: -1, ArrowUp: -1 }[e.key];
+    const to = step ? (i + step + options.length) % options.length : e.key === 'Home' ? 0 : e.key === 'End' ? options.length - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault(); onChange(options[to][0]);
+    const btns = e.currentTarget.parentElement?.children; setTimeout(() => btns?.[to]?.focus(), 0);
+  };
+  const cur = options.findIndex(([v]) => v === value);
+  return html`<div class=${'seg ' + cls} role="radiogroup">${options.map(([v, l], i) => html`<button type="button" role="radio" aria-checked=${v === value ? 'true' : 'false'} tabindex=${i === (cur < 0 ? 0 : cur) ? 0 : -1} class=${v === value ? 'on' : ''} onClick=${() => onChange(v)} onKeyDown=${(e) => key(e, i)}>${l}</button>`)}</div>`;
 }
 
 /* ---------------- inputs ---------------- */
@@ -293,7 +304,10 @@ export function Slider({ label, value, onChange, min = -50, max = 100, step = 1,
 /** Minimal, safe Markdown → HTML (bold, lists, headings, paragraphs) */
 export function Markdown({ text }) {
   const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const inline = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  // numbers written by the AI get the same separators as the rest of the page («۲۳٫۲٪», «۱٬۲۰۰»)
+  const digits = (t) => (getDigits() === 'fa' ? t.replace(/(\d),(?=\d{3}(?!\d))/g, '$1٬').replace(/(\d)\.(?=\d)/g, '$1٫') : t);
+  // (code spans are left as written)
+  const inline = (t) => esc(t).split(/(`[^`]+`)/).map((x, i) => (i % 2 ? `<code>${x.slice(1, -1)}</code>` : digits(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'))).join('');
   const out = []; let list = null;
   for (const raw of String(text || '').split('\n')) {
     const line = raw.trimEnd();
@@ -382,7 +396,8 @@ export function Sparkline({ values, w = 96, h = 30, color = 'var(--accent)', fil
  * Area chart (time axis left→right, as on Iranian market sites).
  * points: [{date, value}]
  */
-export function AreaChart({ points, height = 180, fmt = (v) => num(v), color = 'var(--accent)', stroke, onDark = false, emptyText = 'هنوز داده‌ای برای نمودار ثبت نشده' }) {
+/** refLine: { value, label } — a dashed level (e.g. your average cost); marks: [{ i, kind: 'buy'|'sell' }] on the line. */
+export function AreaChart({ points, height = 180, fmt = (v) => num(v), color = 'var(--accent)', stroke, onDark = false, emptyText = 'هنوز داده‌ای برای نمودار ثبت نشده', refLine = null, marks = [] }) {
   const ref = useRef(); const [w, setW] = useState(560); const [hov, setHov] = useState(null);
   useEffect(() => {
     const ro = new ResizeObserver((e) => setW(Math.max(200, e[0].contentRect.width)));
@@ -394,7 +409,8 @@ export function AreaChart({ points, height = 180, fmt = (v) => num(v), color = '
     return html`<div ref=${ref} style=${`height:${height}px;display:grid;place-items:center;font-size:12px;opacity:.75;text-align:center;padding:0 20px`}>${emptyText}</div>`;
   }
   const vals = points.map((p) => p.value);
-  let min = Math.min(...vals), max = Math.max(...vals);
+  const hasRef = refLine && isFinite(refLine.value) && refLine.value > 0;
+  let min = Math.min(...vals, ...(hasRef ? [refLine.value] : [])), max = Math.max(...vals, ...(hasRef ? [refLine.value] : []));
   if (min === max) { min *= 0.98; max *= 1.02; if (min === max) { min -= 1; max += 1; } }
   const pad = (max - min) * 0.12; min -= pad; max += pad;
   const n = points.length;
@@ -423,6 +439,9 @@ export function AreaChart({ points, height = 180, fmt = (v) => num(v), color = '
       <path d=${area} fill=${`url(#${id})`} />
       ${estLine && html`<path d=${estLine} fill="none" stroke=${sc} stroke-width="2" stroke-dasharray="4 4" opacity=".75" stroke-linejoin="round" />`}
       ${realLine && html`<path d=${realLine} fill="none" stroke=${sc} stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />`}
+      ${hasRef && html`<g class="refline"><line x1="0" x2=${w} y1=${Y(refLine.value)} y2=${Y(refLine.value)} stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="5 4" />
+        <text x=${w - 4} y=${Y(refLine.value) - 5} text-anchor="end" fill="var(--warn)" style="font-size:10.5px;font-weight:700">${refLine.label || ''}</text></g>`}
+      ${(marks || []).filter((m) => m.i >= 0 && m.i < n).map((m) => html`<circle cx=${X(m.i)} cy=${Y(points[m.i].value)} r="4" fill=${m.kind === 'sell' ? 'var(--neg)' : 'var(--pos)'} stroke="var(--surface)" stroke-width="1.5"><title>${m.kind === 'sell' ? 'فروش' : 'خرید'}، ${fmtJ(points[m.i].date, 'dm')}</title></circle>`)}
       ${ticks.map((i) => html`<text x=${X(i)} y=${height - 5} text-anchor=${i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle'}>${fmtJ(points[i].date, longSpan ? 'my' : 'dm')}</text>`)}
       ${hov !== null && html`<g><line x1=${X(hov)} x2=${X(hov)} y1=${padT} y2=${height - padB} stroke=${onDark ? 'rgba(255,255,255,.4)' : 'var(--line-2)'} />
         <circle cx=${X(hov)} cy=${Y(points[hov].value)} r="4.5" fill=${onDark ? '#fff' : 'var(--surface)'} stroke=${sc} stroke-width="2.5" /></g>`}
@@ -503,7 +522,7 @@ export function Explain({ get, s, title = 'این عدد از کجا آمد؟', 
 }
 
 /** «بپرس»: opens the assistant with a question about this spot, already sent. */
-export function AskBtn({ q, label = 'بپرس', cls = '', title }) {
+export function AskBtn({ q, label = 'از دستیار بپرس', cls = '', title }) {
   return html`<a class=${'askbtn ' + cls} href=${'#/assistant?ask=' + encodeURIComponent(q)} title=${title || q} onClick=${(e) => e.stopPropagation()}><${Icon} n="sparkles" cls="sm" />${label ? html`<span>${label}</span>` : ''}</a>`;
 }
 

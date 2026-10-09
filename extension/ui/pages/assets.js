@@ -1,5 +1,7 @@
 import { isoFromDate, todayIso } from '../../lib/jalali.js';
 import { html, useOnce, useState, useMemo, useRef, useEffect, Icon, Money, Delta, Ava, StatusPill, refLabel, providerName, Modal, NumField, MoneyField, JDateField, Seg, AreaChart, toast, send, num, pct, fmtJ, money, Explain, AskBtn } from '../components.js';
+// a row that is fine says so quietly; a coloured pill is kept for what needs a look (stale, error, matured)
+const QUIET = { live: 'آنلاین', auto: 'خودکار', manual: 'دستی', settled: 'تسویه شده' };
 import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
@@ -215,7 +217,7 @@ function MaturedModal({ st, s, asset, onClose }) {
 }
 
 /* ---------------- expanded row ---------------- */
-function Expanded({ st, r, s, pf, open, onModal }) {
+function Expanded({ st, r, s, pf, open, onModal, openPrice }) {
   const a = r.asset;
   const isMarket = a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key;
   const [view, setView] = useState('value');
@@ -270,7 +272,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   return html`<div class="xpanel-wrap"><div class=${'xpanel' + (showChart || loan ? '' : ' solo')}>
     ${loan && html`<div class="card flat" style="padding:0;overflow:hidden">
       ${!ls.done && html`<div style="padding:12px 14px 0"><div class="row between small"><span class="sb">${num(ls.paid + ls.before)} از ${num(ls.n + ls.before)} قسط پرداخت شد</span><span class="muted">${pct((ls.paid + ls.before) / (ls.n + ls.before), { sign: false, digits: 0 })}</span></div>
-        <div class="progress" style="margin-top:6px"><i style=${`width:${Math.round((ls.paid + ls.before) / (ls.n + ls.before) * 100)}%;background:${r.cat.color}`}></i></div></div>`}
+        <div class="progress" style="margin-top:6px"><i style=${`width:${Math.round((ls.paid + ls.before) / (ls.n + ls.before) * 100)}%;background:var(--accent)`}></i></div></div>`}
       <${LoanSchedule} asset=${a} s=${s} /></div>`}
     ${showChart && html`<div class="card flat" style="padding:14px">
       <div class="row between" style="margin-bottom:6px"><span class="sb small row" style="gap:4px">${view === 'price' ? 'قیمت واحد (۱۲۰ روز)' : html`${r.cat.liability ? 'مانده بدهی امروز' : 'ارزش امروز'}: <${Money} v=${r.value} s=${s} compact /><${Explain} s=${s} get=${() => I.explainAsset(a, st.quotes, s)} ask=${`ارزش «${a.name}» دقیقاً چطور حساب شده؟ با ابزار explain_value توضیح بده.`} />`}</span>
@@ -288,7 +290,8 @@ function Expanded({ st, r, s, pf, open, onModal }) {
       <div class="row wrap">
         ${mainAct && html`<button class="btn sm primary" onClick=${() => onModal({ t: mainAct[0], a })}><${Icon} n=${mainAct[1]} cls="sm" />${mainAct[2]}</button>`}
         <button class="btn sm" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" />ویرایش</button>
-        <${AskBtn} q=${`درباره «${a.name}» توضیح بده: ارزشش چطور حساب شده، اخیراً چرا تغییر کرده و چه ریسکی در پرتفوی من دارد؟`} label="درباره‌اش بپرس" />
+        ${a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key && openPrice && html`<button class="btn sm" onClick=${() => openPrice(a.price.ref)}><${Icon} n="chart" cls="sm" />نمودار قیمت</button>`}
+        <${AskBtn} q=${`درباره «${a.name}» توضیح بده: ارزشش چطور حساب شده، اخیراً چرا تغییر کرده و چه ریسکی در پرتفوی من دارد؟`} label="از دستیار بپرس" />
         <span class="grow"></span>
         <button class="btn sm ghost danger" onClick=${() => act.deleteAsset(a.id)}><${Icon} n="trash" cls="sm" />حذف</button>
       </div>
@@ -296,7 +299,7 @@ function Expanded({ st, r, s, pf, open, onModal }) {
   </div></div>`;
 }
 
-export function AssetsPage({ st, pf, s, open, route, q }) {
+export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const [cat, setCat] = useState(route.q.cat || 'all');
   const [group, setGroup] = useState('cat');
   const [sort, setSort] = useState('value');
@@ -369,13 +372,13 @@ export function AssetsPage({ st, pf, s, open, route, q }) {
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
               <td class="n small c-today">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
               ${hasPnl && html`<td class="n small c-pnl">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>`}
-              <td class="c-status"><${StatusPill} status=${r.status} at=${r.at} title=${r.error || ''} /><div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
+              <td class="c-status">${E.needsAttention(r.status) ? html`<${StatusPill} status=${r.status} at=${r.at} title=${r.error || ''} />` : html`<span class="xs muted" title=${r.error || ''}>${QUIET[r.status] || ''}</span>`}<div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
               <td onClick=${(e) => e.stopPropagation()}><div class="row" style="gap:2px;justify-content:flex-end">
                 <button class="btn icon sm ghost acts" title="ویرایش" onClick=${() => open(a)}><${Icon} n="edit" cls="sm" /></button>
                 <button class="btn icon sm ghost" title=${isOpen ? 'بستن جزئیات' : 'جزئیات'} onClick=${() => setOpenId(isOpen ? null : a.id)}><${Icon} n="chevronDown" cls="sm chev" /></button>
               </div></td>
             </tr>
-            ${isOpen && html`<tr class="xrow"><td colspan=${hasPnl ? 8 : 7}><${Expanded} st=${st} r=${r} s=${s} pf=${pf} open=${open} onModal=${setModal} /></td></tr>`}`;
+            ${isOpen && html`<tr class="xrow"><td colspan=${hasPnl ? 8 : 7}><${Expanded} st=${st} r=${r} s=${s} pf=${pf} open=${open} onModal=${setModal} openPrice=${openPrice} /></td></tr>`}`;
           })}`)}
         </tbody>
         <tfoot><tr><td class="b" style="padding:14px 12px">جمع ${fCat !== 'all' || fAtt || term ? 'فیلترشده' : 'ارزش خالص'}</td><td class="c-qty"></td><td class="c-price"></td>

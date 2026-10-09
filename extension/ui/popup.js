@@ -1,4 +1,4 @@
-import { html, render, useState, useMemo, useEffect, useStore, useTick, Icon, Money, MoneyField, Delta, Seg, StackBar, StatusPill, send, num, money, pct, Toasts, toast, refLabel } from './components.js';
+import { html, render, useState, useMemo, useEffect, useStore, useTick, Icon, Money, MoneyField, Delta, Seg, StackBar, StatusPill, send, num, money, pct, fmtJ, Toasts, toast, refLabel } from './components.js';
 import * as K from '../lib/calc.js';
 import * as I from '../lib/insights.js';
 import * as E from '../lib/engine.js';
@@ -137,7 +137,7 @@ function Popup() {
       <div class="v num"><${Money} v=${pf.net} s=${s} compact=${s.compact} unit=${false} /><span class="u">${s.currency === 'rial' ? 'ریال' : 'تومان'}</span></div>
       ${s.compact && html`<div class="f num"><${Money} v=${pf.net} s=${s} /></div>`}
       <div class="r">
-        <span title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">امروز <${Delta} p=${d1.pct} abs=${d1.abs} s=${s} /></span>
+        <span title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">${d1.stale ? `از ${fmtJ(d1.from, 'dm')}` : 'امروز'} <${Delta} p=${d1.pct} abs=${d1.abs} s=${s} /></span>
         ${rates.usd && html`<span>≈ <b class="money"><span class="n"><span class="ltr">${num(pf.net / rates.usd)}</span></span></b> دلار</span>`}
         ${rates.gold && html`<span>≈ <b class="money"><span class="n"><span class="ltr">${num(pf.net / rates.gold, 1)}</span></span></b> گرم طلا</span>`}
       </div>

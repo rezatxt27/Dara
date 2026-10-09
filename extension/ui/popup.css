@@ -1,3 +1,4 @@
+html:has(body.popup) { overflow-x: hidden; }
 body.popup { width: 392px; min-height: 540px; background: var(--bg); }
 .pp { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .pp-h { display: flex; align-items: center; gap: 8px; }

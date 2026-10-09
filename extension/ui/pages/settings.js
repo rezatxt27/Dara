@@ -1,4 +1,4 @@
-import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Toggle, Money, toast, send, num, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Toggle, Money, toast, send, num, pct, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
 import * as store from '../../lib/store.js';
 import * as E from '../../lib/engine.js';
 import { parseDelimited, toCSV } from '../../lib/importer.js';
@@ -136,7 +136,10 @@ function ImportPanel({ st, s, onDone, compact }) {
   }, [rows, cfg, cats]);
   const assets = useMemo(() => (src?.backup ? src.assets : items.filter((x) => x.asset).map((x) => x.asset)), [src, items]);
   const left = items.filter((x) => !x.asset);
-  const pf = useMemo(() => (assets.length ? E.portfolio(assets, {}, s) : null), [assets]);
+  // valued at today's prices, as it will be once imported (a coin read as grams shows up here, not after)
+  const pf = useMemo(() => (assets.length ? E.portfolio(assets, quotes, s) : null), [assets, quotes]);
+  // an amount unit that was only guessed must be confirmed: a 10× mistake would carry into every number
+  const unitOk = !cfg || cfg.unitWhy !== 'guess';
   const rowOf = pf ? Object.fromEntries(pf.rows.map((r) => [r.asset.id, r])) : {};
 
   const setRole = (i, role) => setCfg({ ...cfg, kind: 'map', map: SM.setRole(map, i, role) });
@@ -256,21 +259,25 @@ function ImportPanel({ st, s, onDone, compact }) {
         <div class="imp-list">${(src.backup ? assets.map((a) => ({ asset: a, cat: a.category, i: a.id, fixed: true })) : items.filter((x) => x.asset)).map((x) => {
           const r = rowOf[x.asset.id]; if (!r) return null;
           const a = x.asset;
+          const gap = src.backup ? null : SM.priceGap(a, quotes);
           return html`<div class="imp-it" key=${x.i}><${Ava} cat=${a.category} size=${30} />
             <span class="grow" style="min-width:0"><span class="sb ellipsis">${a.name}</span>
-              <span class="xs muted">${a.custodian && a.custodian !== a.name ? a.custodian + ' · ' : ''}${a.mode === 'units' ? `${num(a.quantity, 4)} ${a.unit || ''} · ${a.price?.source === 'market' ? 'قیمت آنلاین: ' + refLabel(a.price.ref) : 'قیمت دستی'}` : a.mode === 'rate' ? 'نرخ ثابت' : 'مانده'}${a.review ? ' · ⚠ ' + a.review : ''}${x.note ? ' · ' + x.note : ''}</span></span>
+              <span class="xs muted">${a.custodian && a.custodian !== a.name ? a.custodian + ' · ' : ''}${a.mode === 'units' ? `${num(a.quantity, 4)} ${a.unit || ''} · ${a.price?.source === 'market' ? 'قیمت آنلاین: ' + refLabel(a.price.ref) : 'قیمت دستی'}` : a.mode === 'rate' ? 'نرخ ثابت' : 'مانده'}${a.review ? ' · ⚠ ' + a.review : ''}${x.note ? ' · ' + x.note : ''}</span>
+              ${gap !== null && html`<span class="xs warn">⚠ قیمت هر واحد در فایل ${pct(Math.abs(gap), { sign: false, digits: 0 })} ${gap < 0 ? 'کمتر' : 'بیشتر'} از قیمت امروز «${refLabel(a.price.ref)}» است؛ نوع یا واحد را بررسی کن</span>`}</span>
             ${x.fixed ? html`<span class="xs muted">${r.cat.short}</span>` : html`<select class="imp-cat" value=${x.cat} aria-label=${'دسته ' + a.name} onChange=${(e) => setCats({ ...cats, [x.i]: e.target.value })}>
               ${CATEGORIES.map((c) => html`<option value=${c.id}>${c.short}</option>`)}</select>`}
             <span class="small num imp-v"><${Money} v=${r.signedValue} s=${s} compact /></span></div>`;
         })}</div>
         ${left.length > 0 && html`<div class="xs muted"><button class="imp-link" onClick=${() => setShowOut(!showOut)}>${num(left.length)} ردیف وارد نمی‌شود</button>
           ${showOut && html`<div class="col" style="gap:2px;margin-top:6px">${left.map((x) => html`<div>• «${x.name}»: ${x.skipped === 'total' ? 'سطر جمع است' : x.note || 'مبلغی ندارد'}</div>`)}</div>`}</div>`}
+        ${!src.backup && !unitOk && html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div class="grow">مبالغ این فایل به تومان است یا ریال؟ از روی عددها معلوم نشد و اشتباهش همه چیز را ۱۰ برابر می‌کند.</div>
+          <div class="row" style="gap:6px"><button class="btn sm" onClick=${() => setCfg({ ...cfg, unit: 'toman', unitWhy: 'you' })}>تومان</button><button class="btn sm" onClick=${() => setCfg({ ...cfg, unit: 'rial', unitWhy: 'you' })}>ریال</button></div></div>`}
         <div class="row wrap">
           ${src.backup
             ? html`<button class="btn primary" onClick=${() => commit('replace')}>جایگزینی همه داده‌ها با این پشتیبان</button><button class="btn" onClick=${() => commit('merge')}>افزودن به داده‌های فعلی</button>`
             : hasAssets
-              ? html`<button class="btn primary" onClick=${() => commit('merge')}>افزودن ${num(assets.length)} دارایی</button><button class="btn" title="دارایی‌های فعلی کنار می‌روند؛ تا چند ثانیه با «برگشت» قابل بازگشت است" onClick=${() => commit('replace')}>جایگزینی دارایی‌های فعلی</button>`
-              : html`<button class="btn primary" onClick=${() => commit('replace')}>وارد کردن ${num(assets.length)} دارایی</button>`}
+              ? html`<button class="btn primary" disabled=${!unitOk} onClick=${() => commit('merge')}>افزودن ${num(assets.length)} دارایی</button><button class="btn" disabled=${!unitOk} title="دارایی‌های فعلی کنار می‌روند؛ تا چند ثانیه با «برگشت» قابل بازگشت است" onClick=${() => commit('replace')}>جایگزینی دارایی‌های فعلی</button>`
+              : html`<button class="btn primary" disabled=${!unitOk} onClick=${() => commit('replace')}>وارد کردن ${num(assets.length)} دارایی</button>`}
           <span class="grow"></span><button class="btn ghost" onClick=${reset}>انصراف</button></div>
       </div>`
       : html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>در این ${src.sheets?.length > 1 ? 'برگه' : 'فایل'} ردیفی که دارایی باشد پیدا نشد${left.length ? `؛ ${num(left.length)} ردیف مبلغ نداشت` : ''}. ${cfg?.kind === 'map' && !edit ? html`<button class="imp-link" onClick=${() => setEdit(true)}>ستون‌ها را بررسی کن</button>` : ''}</div></div>`)}
@@ -278,16 +285,17 @@ function ImportPanel({ st, s, onDone, compact }) {
 }
 
 /* ---------------- sample data ---------------- */
+export const clearSample = () => act.clearSample();
 function sampleData() {
   const now = Date.now(); const t = todayIso();
-  const bank = { id: uid('a'), code: 'A-001', name: 'بانک نمونه', custodian: 'حساب جاری', category: 'bank', mode: 'balance', balance: 850_000_000, balanceAt: now, liquidity: 'high', createdAt: now, updatedAt: now };
+  const bank = { id: uid('a'), code: 'A-001', name: 'بانک نمونه', custodian: 'حساب جاری', category: 'bank', mode: 'balance', balance: 850_000_000, balanceAt: now, liquidity: 'high', createdAt: now, updatedAt: now, sample: true };
   return [
     bank,
-    { id: uid('a'), code: 'A-002', name: 'طلای آب‌شده', custodian: 'پلتفرم طلای آنلاین', category: 'gold_online', mode: 'units', quantity: 12.5, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: -1, factor: 1 }, liquidity: 'mid', costBasis: 2_400_000_000, createdAt: now, updatedAt: now },
-    { id: uid('a'), code: 'A-003', name: 'ربع سکه', custodian: 'صندوق امانات', category: 'gold', mode: 'units', quantity: 3, unit: 'عدد', price: { source: 'market', ref: { provider: 'tgju', key: 'rob' } }, liquidity: 'mid', createdAt: now, updatedAt: now },
-    { id: uid('a'), code: 'A-004', name: 'دلار نقد', custodian: 'خانه', category: 'fx', mode: 'units', quantity: 1200, unit: 'دلار', price: { source: 'market', ref: { provider: 'tgju', key: 'price_dollar_rl' } }, liquidity: 'high', createdAt: now, updatedAt: now },
-    { id: uid('a'), code: 'A-005', name: 'سپرده کوتاه‌مدت', custodian: 'بانک نمونه', category: 'fixed', mode: 'rate', rate: { principal: 3_000_000_000, annualPct: 23, start: addDaysIso(t, -40), mode: 'payout', payoutTo: bank.id, lastPayout: E.prevMonthlyOnOrBefore(addDaysIso(t, -40), t) }, liquidity: 'high', createdAt: now, updatedAt: now },
-    { id: uid('a'), code: 'A-006', name: 'تتر', custodian: 'صرافی', category: 'crypto', mode: 'units', quantity: 900, unit: 'USDT', price: { source: 'market', ref: { provider: 'nobitex', key: 'usdt' } }, liquidity: 'high', createdAt: now, updatedAt: now },
+    { id: uid('a'), code: 'A-002', name: 'طلای آب‌شده', custodian: 'پلتفرم طلای آنلاین', category: 'gold_online', mode: 'units', quantity: 12.5, unit: 'گرم', price: { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: -1, factor: 1 }, liquidity: 'mid', costBasis: 2_400_000_000, createdAt: now, updatedAt: now, sample: true },
+    { id: uid('a'), code: 'A-003', name: 'ربع سکه', custodian: 'صندوق امانات', category: 'gold', mode: 'units', quantity: 3, unit: 'عدد', price: { source: 'market', ref: { provider: 'tgju', key: 'rob' } }, liquidity: 'mid', createdAt: now, updatedAt: now, sample: true },
+    { id: uid('a'), code: 'A-004', name: 'دلار نقد', custodian: 'خانه', category: 'fx', mode: 'units', quantity: 1200, unit: 'دلار', price: { source: 'market', ref: { provider: 'tgju', key: 'price_dollar_rl' } }, liquidity: 'high', createdAt: now, updatedAt: now, sample: true },
+    { id: uid('a'), code: 'A-005', name: 'سپرده کوتاه‌مدت', custodian: 'بانک نمونه', category: 'fixed', mode: 'rate', rate: { principal: 3_000_000_000, annualPct: 23, start: addDaysIso(t, -40), mode: 'payout', payoutTo: bank.id, lastPayout: E.prevMonthlyOnOrBefore(addDaysIso(t, -40), t) }, liquidity: 'high', createdAt: now, updatedAt: now, sample: true },
+    { id: uid('a'), code: 'A-006', name: 'تتر', custodian: 'صرافی', category: 'crypto', mode: 'units', quantity: 900, unit: 'USDT', price: { source: 'market', ref: { provider: 'nobitex', key: 'usdt' } }, liquidity: 'high', createdAt: now, updatedAt: now, sample: true },
   ];
 }
 
@@ -420,7 +428,7 @@ function UpdateCard({ s }) {
         <div class="xs muted">${s.lastUpdateCheck ? `آخرین بررسی ${ago(s.lastUpdateCheck)}. ` : ''}دارا هر دقیقه هم خودش بررسی می‌کند؛ نسخه جدید با تازه‌سازی صفحه نصب می‌شود و داده‌ها دست نمی‌خورد.</div></div>
       <div class="row" style="gap:8px">
         ${state?.kind === 'ready' && html`<button class="btn primary" onClick=${() => U.applyUpdate(location.href)}><${Icon} n="download" cls="sm" />نصب نسخه ${faVer(state.v)}</button>`}
-        ${state?.kind === 'remote' && state.url && html`<a class="btn primary" href=${state.url} target="_blank" rel="noopener"><${Icon} n="download" cls="sm" />دریافت نسخه ${faVer(state.v)}</a>`}
+        ${state?.kind === 'remote' && /^https:\/\//.test(state.url || '') && html`<a class="btn primary" href=${state.url} target="_blank" rel="noopener"><${Icon} n="download" cls="sm" />دریافت نسخه ${faVer(state.v)}</a>`}
         <button class="btn" onClick=${check} disabled=${busy}><${Icon} n="refresh" cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال بررسی…' : 'بررسی نسخه جدید'}</button>
       </div>
     </div>
@@ -441,7 +449,13 @@ function UpdateCard({ s }) {
 
 export function SettingsPage({ st, pf, s }) {
   const set = (p) => act.setSettings(p);
-  const backup = async () => { const b = await store.exportBackup(); download(`dara-backup-${todayIso()}.json`, JSON.stringify(b, null, 1)); };
+  // with a backup password set, this copy is locked too (it lands in the same Downloads folder the password protects)
+  const backup = async () => {
+    const b = await store.exportBackup();
+    const { vault } = hasChrome ? await chrome.storage.local.get('vault') : {};
+    if (vault?.key) { download(`dara-backup-${todayIso()}-locked.json`, JSON.stringify(await BK.encrypt(b, vault))); toast('پشتیبان با رمز پشتیبان‌گیری قفل شد'); }
+    else download(`dara-backup-${todayIso()}.json`, JSON.stringify(b, null, 1));
+  };
   const csv = () => download(`dara-assets-${todayIso()}.csv`, toCSV(pf.rows), 'text/csv;charset=utf-8');
   const wipe = async () => {
     if (!confirm('همه دارایی‌ها، تاریخچه و تنظیمات پاک شود؟ قبلش از «پشتیبان‌گیری» استفاده کن. (فایل‌های پشتیبانی که در پوشه دانلود هستند دست نمی‌خورند.)')) return;
@@ -480,14 +494,17 @@ export function SettingsPage({ st, pf, s }) {
         <${BackfillButton} st=${st} label="بازسازی" /></div>
       <div class="sb small" style="margin-bottom:8px">ورود اطلاعات</div>
       <${ImportPanel} st=${st} s=${s} />
-      <hr class="sep" />
-      <div class="row between"><div><div class="sb neg">پاک‌کردن همه داده‌ها</div><div class="xs muted">غیرقابل برگشت</div></div><button class="btn danger" onClick=${wipe}><${Icon} n="trash" cls="sm" />پاک‌کردن</button></div>
     </div>
 
     <${UpdateCard} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="lock" cls="sm" />حریم خصوصی و درباره</h3><span class="sub num">نسخه ${ver}</span></div>
       <div class="small ink2" style="line-height:2">همه اطلاعات دارایی‌ها فقط در حافظه همین مرورگر (chrome.storage) ذخیره می‌شود و به هیچ سروری ارسال نمی‌شود. دارا فقط قیمت‌های عمومی را از tgju، TSETMC، فیپیران و نوبیتکس می‌خواند. برای انتقال به دستگاه دیگر از پشتیبان JSON استفاده کن.</div>
+    </div>
+    <div class="card danger-zone" id="danger"><div class="card-h"><h3><${Icon} n="alert" cls="sm" />کارهای برگشت‌ناپذیر</h3></div>
+      ${st.assets.some((a) => a.sample) && html`<div class="row between" style="gap:16px;margin-bottom:12px"><div><div class="sb">پاک‌کردن داده نمونه</div><div class="xs muted">فقط دارایی‌های نمونه؛ چیزی که خودت اضافه یا ویرایش کرده‌ای می‌ماند</div></div>
+        <button class="btn" onClick=${async () => { if (!confirm('دارایی‌های نمونه پاک شود؟ چیزی که خودت اضافه یا ویرایش کرده‌ای می‌ماند.')) return; await clearSample(); toast('داده نمونه پاک شد'); }}>پاک‌کردن نمونه</button></div>`}
+      <div class="row between" style="gap:16px"><div><div class="sb neg">پاک‌کردن همه داده‌ها</div><div class="xs muted">دارایی‌ها، تاریخچه و تنظیمات؛ برگشت ندارد — قبلش پشتیبان بگیر</div></div><button class="btn danger" onClick=${wipe}><${Icon} n="trash" cls="sm" />پاک‌کردن همه</button></div>
     </div>
   </div>`;
 }

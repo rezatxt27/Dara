@@ -21,7 +21,7 @@ export const COIN_KEYS = Object.keys(COINS);
 export const isCoinRef = (ref) => ref?.provider === 'tgju' && !!COINS[ref.key];
 export const pureGrams = (key) => { const c = COINS[key] || GOLD_REF[key]; return c ? c.gross * c.fine : 0; };
 
-const qAt = (q, now) => q.at || q.fetchedAt || now;
+const qAt = (q) => q.at || q.fetchedAt || 0;
 /** Usable for today's comparison: has a price, no fetch error, not older than 3 days. */
 const fresh = (q, now) => !!q && q.price > 0 && !q.error && now - qAt(q, now) <= 3 * DAY;
 

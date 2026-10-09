@@ -327,6 +327,72 @@ async def main():
             await pg.close()
         await step('calc', t_calc())
 
+        # a price's detail page: chart, stats, your position with the average-cost line, shortcuts into the tools
+        async def t_price():
+            pg = await newpage('market')
+            await pg.evaluate("""async () => {
+              const { history, quotes, assets } = await chrome.storage.local.get(['history', 'quotes', 'assets']);
+              const p = quotes['tgju:geram18'].price, now = Date.now(), pts = [];
+              for (let k = 365; k >= 0; k--) { const d = new Date(now - k * 86400000); pts.push([d.toISOString().slice(0, 10), Math.round(p * (0.6 + 0.4 * (365 - k) / 365))]); }
+              await chrome.storage.local.set({ history: { ...(history || {}), 'tgju:geram18:366': { at: now, points: pts } } });
+              for (const g of assets.filter((a) => a.price?.ref?.key === 'geram18' && a.mode === 'units')) g.costBasis = Math.round(g.quantity * (g.price.factor || 1) * p * 0.8);
+              const { settings } = await chrome.storage.local.get('settings'); settings.providers = { ...settings.providers, tgju: true };
+              await chrome.storage.local.set({ assets, settings });
+            }""")
+            await pg.reload(); await pg.wait_for_timeout(1200)
+            await pg.click('.list .it:has-text("طلای ۱۸ عیار")'); await pg.wait_for_selector('.drawer .pd'); await pg.wait_for_timeout(1200)
+            txt = (await pg.inner_text('.drawer')).translate(FA)
+            check('price page: high, low, periods and your position', 'بالاترین' in txt and 'پایین‌ترین' in txt and 'سال' in txt and 'سهم تو' in txt, txt[:120].replace('\n', ' | '))
+            check('price page: your average cost drawn on the chart', await pg.locator('.drawer .refline').count() == 1)
+            check('price page: profit since purchase (cost 80% of today → about +25%, less the asset\'s own price adjustment)', bool(re.search(r'\(\+2[3-5][.٫]\d٪\)', txt)), re.findall(r'سود یا زیان[^\n]*\n[^\n]*', txt)[:1])
+            await pg.click('.drawer .pd-ctl .seg button:has-text("دلار")'); await pg.wait_for_timeout(500)
+            check('dollar view hides the average-cost line', await pg.locator('.drawer .refline').count() == 0)
+            await pg.click('.drawer .chip:has-text("با یک مبلغ")'); await pg.wait_for_timeout(700)
+            check('shortcut: the converter opens on this asset', 'calc?t=convert&to=geram18' in pg.url and await pg.locator('.calc-card .seg button.on:has-text("از دارایی")').count() == 1)
+            await pg.goto(pg.url.split('#')[0] + '#/market'); await pg.wait_for_timeout(800)
+            await pg.click('.list .it:has-text("نیم سکه")'); await pg.wait_for_selector('.drawer .pd'); await pg.wait_for_timeout(600)
+            await pg.click('.drawer .chip:has-text("مقایسه با نگه‌داشتن")'); await pg.wait_for_timeout(1200)
+            sel = await pg.locator('#compare .cmp-pick select').nth(1).input_value()
+            check('shortcut: comparison opens with this coin as option «ب»', sel == 'nim', sel)
+            o = await newpage('overview'); await o.click('.prices .pcell >> nth=0'); await o.wait_for_timeout(800)
+            check('the overview\'s key prices open the same page', await o.locator('.drawer .pd').count() == 1)
+            await o.close(); await pg.close()
+        await step('price', t_price())
+
+        # 1.12 review: unit must be confirmed when only guessed; sample data can be cleared; arrow keys in Seg; jumps
+        async def t_qc():
+            pg = await newpage('settings')
+            await pg.click('.imp-or button:has-text("چسباندن از اکسل")')
+            await pg.fill('.imp-paste', 'نام\tارزش\nحساب الف\t5000000\nحساب ب\t7000000')
+            await pg.click('.imp button:has-text("ادامه")'); await pg.wait_for_timeout(600)
+            btn = pg.locator('.imp .btn.primary:has-text("دارایی")').first
+            blocked = await btn.is_disabled() and await pg.locator('.imp .callout:has-text("تومان است یا ریال")').count() == 1
+            await pg.click('.imp .callout button:has-text("تومان")'); await pg.wait_for_timeout(300)
+            check('a guessed amount unit must be confirmed before import', blocked and not await btn.is_disabled())
+            await pg.click('.imp button:has-text("انصراف")')
+            check('irreversible actions sit in their own section at the end', await pg.locator('.danger-zone button:has-text("پاک‌کردن همه")').count() == 1)
+            # sample data: banner on the overview clears only the sample rows
+            await pg.evaluate("""async () => { const { assets } = await chrome.storage.local.get('assets');
+              await chrome.storage.local.set({ assets: [...assets, { id: 'smp1', code: 'S-1', name: 'نمونه آزمایشی', category: 'bank', mode: 'balance', balance: 1000, balanceAt: Date.now(), sample: true }] }); }""")
+            o = await newpage('overview')
+            n0 = len(await get(o, 'assets'))
+            o.once('dialog', lambda d: asyncio.ensure_future(d.accept()))
+            await o.click('.callout button:has-text("پاک کن و شروع کن")'); await o.wait_for_timeout(800)
+            a1 = await get(o, 'assets')
+            check('sample data clears only the sample rows', len(a1) == n0 - 1 and not any(a.get('sample') for a in a1), (n0, len(a1)))
+            # radio group: arrow keys move the choice (RTL: ← is next)
+            await o.focus('.hero .seg button.on'); await o.keyboard.press('ArrowLeft'); await o.wait_for_timeout(400)
+            st = await get(o, 'settings')
+            check('arrow keys change a segmented choice', st.get('denom') == 'usd', st.get('denom'))
+            await o.evaluate("async () => { const { settings } = await chrome.storage.local.get('settings'); await chrome.storage.local.set({ settings: { ...settings, denom: 'money' } }); }")
+            a = await newpage('analysis')
+            check('analysis has jumps to each part', await a.locator('.jumps .chip').count() == 6)
+            await a.click('.jumps .chip:has-text("مقایسه")'); await a.wait_for_timeout(700)
+            y = await a.evaluate("() => document.getElementById('compare').getBoundingClientRect().top")
+            check('a jump scrolls its part into view', 0 <= y < 900, y)
+            await a.close(); await o.close(); await pg.close()
+        await step('qc', t_qc())
+
         check('no console/page errors', not errors, errors[:6])
         await ctx.close()
 

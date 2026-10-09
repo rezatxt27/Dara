@@ -36,12 +36,14 @@ export const isUsdRef = (ref) => !!ref && ref.provider === 'tgju' && !!TGJU_BY_K
 function tehranDayEnd(d) {
   const iso = String(d).replace(/\//g, '-').slice(0, 10);
   const t = new Date(iso + 'T23:59:00+03:30').getTime();
-  return isNaN(t) ? Date.now() : Math.min(t, Date.now());
+  return isNaN(t) ? undefined : Math.min(t, Date.now()); // no date: left out, so the fetch time stands in (never «now» by default)
 }
+/** The older of the times that are known (a price built from two is as old as the older); undefined when none is. */
+const oldestAt = (...ts) => { const k = ts.filter((t) => t > 0); return k.length ? Math.min(...k) : undefined; };
 function tehranTs(ts) {
-  if (!ts) return Date.now();
+  if (!ts) return undefined;
   const d = new Date(String(ts).replace(' ', 'T') + '+03:30');
-  return isNaN(d) ? Date.now() : Math.min(d.getTime(), Date.now());
+  return isNaN(d) ? undefined : Math.min(d.getTime(), Date.now());
 }
 
 /* ------------------------------ tgju ------------------------------ */
@@ -130,7 +132,7 @@ export async function cryptoViaTgju(refs, usdQuote) {
       if (!last) throw new Error('داده‌ای نیست');
       const cp = (1 + last.changePct) * (1 + (usdQuote.changePct || 0)) - 1;
       const price = last.close * usdQuote.price;
-      out[r.key] = { price, usdPrice: last.close, changePct: cp, change: price - price / (1 + cp), at: Math.min(tehranDayEnd(last.date), usdQuote.at || Date.now()), asOf: last.date, source: 'tgju', approx: true };
+      out[r.key] = { price, usdPrice: last.close, changePct: cp, change: price - price / (1 + cp), at: oldestAt(tehranDayEnd(last.date), usdQuote.at), asOf: last.date, source: 'tgju', approx: true };
     } catch (e) { errors[r.key] = e.message; }
   }));
   return { quotes: out, errors };
@@ -156,7 +158,7 @@ export async function cryptoViaCoingecko(refs, usdQuote) {
       const p = n(row.usd_24h_change) / 100;
       const cp = (1 + (isFinite(p) ? p : 0)) * (1 + (usdQuote.changePct || 0)) - 1;
       const price = usd * usdQuote.price;
-      out[r.key] = { price, usdPrice: usd, changePct: cp, change: price - price / (1 + cp), at: Math.min(Date.now(), usdQuote.at || Date.now()), source: 'coingecko', approx: true };
+      out[r.key] = { price, usdPrice: usd, changePct: cp, change: price - price / (1 + cp), at: oldestAt(Date.now(), usdQuote.at), source: 'coingecko', approx: true };
     }
   } catch (e) { for (const r of refs) if (cryptoMeta(r).cg) errors[r.key] = 'CoinGecko: ' + e.message; }
   return { quotes: out, errors };
@@ -207,20 +209,20 @@ export async function tsetmcResolve(symbol) {
   return null;
 }
 function tseDate(dEven, hEven) {
-  if (!dEven) return { at: Date.now(), asOf: '' };
+  if (!dEven) return { at: undefined, asOf: '' };
   const s = String(dEven); const h = String(hEven || 0).padStart(6, '0');
   const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${h.slice(0, 2)}:${h.slice(2, 4)}:${h.slice(4, 6)}+03:30`);
-  return { at: isNaN(d) ? Date.now() : Math.min(d.getTime(), Date.now()), asOf: `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` };
+  return { at: isNaN(d) ? undefined : Math.min(d.getTime(), Date.now()), asOf: `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` };
 }
 export async function tsetmcQuote(insCode, field = 'close') {
   if (field === 'nav') {
-    const j = await getJSON(`https://cdn.tsetmc.com/api/Fund/GetETFByInsCode/${insCode}`);
+    const j = await getJSON(`https://cdn.tsetmc.com/api/Fund/GetETFByInsCode/${encodeURIComponent(insCode)}`);
     const e = j.etf || {};
     const price = n(e.pRedTran);
     if (!(price > 0)) throw new Error('NAV ابطال در دسترس نیست');
     return { price, change: 0, changePct: 0, ...tseDate(e.deven, e.hEven), source: 'tsetmc' };
   }
-  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/${insCode}`);
+  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceInfo/${encodeURIComponent(insCode)}`);
   const c = j.closingPriceInfo || {};
   const price = field === 'last' ? n(c.pDrCotVal) : n(c.pClosing);
   if (!(price > 0)) throw new Error('قیمتی برای این نماد ثبت نشده');
@@ -228,7 +230,7 @@ export async function tsetmcQuote(insCode, field = 'close') {
   return { price, change: y > 0 ? price - y : 0, changePct: y > 0 ? (price - y) / y : 0, ...tseDate(c.dEven, c.hEven), source: 'tsetmc' };
 }
 export async function tsetmcHistory(insCode, limit = 400) {
-  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/${insCode}/${limit}`);
+  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/${encodeURIComponent(insCode)}/${+limit || 400}`);
   return (j.closingPriceDaily || []).map((r) => ({ date: tseDate(r.dEven).asOf, close: n(r.pClosing) }))
     .filter((r) => r.close > 0 && r.date).sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -315,7 +317,7 @@ export async function fipiranQuotes(refs) {
       const price = f && f[r.field || 'cancelNav'];
       if (price > 0) {
         const day = String(f.date || '').slice(0, 10);
-        out[idOf(r)] = { price, change: 0, changePct: 0, at: day ? tehranDayEnd(day) : Date.now(), asOf: day, source: 'fipiran' };
+        out[idOf(r)] = { price, change: 0, changePct: 0, at: day ? tehranDayEnd(day) : undefined, asOf: day, source: 'fipiran' };
       } else if (f) errors[idOf(r)] = 'فیپیران برای این صندوق قیمتی اعلام نکرده';
       else errors[idOf(r)] = items.some((x) => x.regNo === String(r.key).split('-')[0])
         ? 'این شماره ثبت چند صندوق دارد؛ صندوق را یک بار دیگر از فهرست انتخاب کن'

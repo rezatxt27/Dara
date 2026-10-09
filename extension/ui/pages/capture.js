@@ -61,7 +61,9 @@ export function CapturePage({ st, s }) {
     if (!hasChrome || !chrome.storage?.session) { setPage(null); return; }
     chrome.storage.session.get('capture').then((r) => setPage(r.capture || null));
   }, []);
-  useEffect(() => { if (page && conns.length && (st.ai.trustedSites || []).includes(hostOf(page.url))) run(); }, [page]);
+  // «فقط درصد»: reading a page means sending its amounts, so it never runs on its own — the owner asks each time
+  const pctOnly = st.ai.privacy === 'percent';
+  useEffect(() => { if (page && conns.length && !pctOnly && (st.ai.trustedSites || []).includes(hostOf(page.url))) run(); }, [page]);
 
   const run = async () => {
     setState('running'); setErr('');
@@ -127,9 +129,11 @@ export function CapturePage({ st, s }) {
       </div>
       ${showText && html`<pre style="max-height:220px;overflow:auto;background:var(--surface-2);padding:10px;border-radius:10px;font-size:11.5px;white-space:pre-wrap;margin:12px 0 0">${masked.slice(0, 6000)}</pre>`}
       ${state === 'idle' && html`<div style="margin-top:14px">
-        ${conns.length ? html`<div class="callout"><${Icon} n="lock" cls="sm" /><div>متن این صفحه — با پوشاندن شماره کارت، شبا و موبایل — برای «${conns[0].name}» ارسال می‌شود تا موجودی‌هایت شناسایی شود. هیچ تغییری بدون تأیید تو ثبت نمی‌شود.</div></div>
-          <div class="row" style="margin-top:12px"><button class="btn primary" onClick=${run}><${Icon} n="sparkles" cls="sm" />خواندن موجودی‌ها</button>
-            <label class="row small" style="cursor:pointer"><input type="checkbox" checked=${trust} onChange=${(e) => setTrust(e.target.checked)} />برای ${site} دیگر نپرس</label>
+        ${conns.length ? html`${pctOnly
+            ? html`<div class="callout warn"><${Icon} n="lock" cls="sm" /><div>حریم خصوصی روی «فقط درصد» است، ولی خواندن این صفحه <b>مبالغ واقعی</b> را هم برای «${conns[0].name}» می‌فرستد (شماره کارت، شبا و موبایل پوشانده می‌شود). فقط اگر برای همین یک بار موافقی ادامه بده؛ یا عددها را دستی انتخاب کن.</div></div>`
+            : html`<div class="callout"><${Icon} n="lock" cls="sm" /><div>متن این صفحه — با پوشاندن شماره کارت، شبا و موبایل — برای «${conns[0].name}» ارسال می‌شود تا موجودی‌هایت شناسایی شود. هیچ تغییری بدون تأیید تو ثبت نمی‌شود.</div></div>`}
+          <div class="row" style="margin-top:12px"><button class="btn primary" onClick=${run}><${Icon} n="sparkles" cls="sm" />${pctOnly ? 'این بار با مبالغ بفرست' : 'خواندن موجودی‌ها'}</button>
+            ${!pctOnly && html`<label class="row small" style="cursor:pointer"><input type="checkbox" checked=${trust} onChange=${(e) => setTrust(e.target.checked)} />برای ${site} دیگر نپرس</label>`}
             <span class="grow"></span><button class="btn ghost" onClick=${manual}>انتخاب دستی اعداد</button></div>`
         : html`<div class="callout warn"><${Icon} n="info" cls="sm" /><div>بدون هوش مصنوعی هم می‌توانی عددها را دستی به دارایی‌ها وصل کنی. برای تشخیص خودکار، در تنظیمات یک اتصال هوش مصنوعی اضافه کن.</div></div>
           <div class="row" style="margin-top:12px"><button class="btn primary" onClick=${manual}>انتخاب دستی اعداد</button><a class="btn" href="#/settings">افزودن اتصال هوش مصنوعی</a></div>`}

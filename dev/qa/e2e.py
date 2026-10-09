@@ -59,7 +59,7 @@ async def main():
             check('assets: row expands', await pg.locator('tr.xrow .xpanel').count() == 1)
             await pg.screenshot(path=f'{SH}/assets-expanded-{THEME}.png')
             rowtxt = await pg.inner_text('tr.r:has-text("کیلوگرم")')
-            check('assets: copper valued via USD', 'tgju' in rowtxt, rowtxt.replace('\n', ' | ')[:160])
+            check('assets: copper valued via USD', 'بازار آزاد' in rowtxt, rowtxt.replace('\n', ' | ')[:160])
             btxt = await pg.inner_text('tr.r:has-text("BTC")')
             check('assets: crypto priced via fallback', 'خطای دریافت' not in btxt, btxt.replace('\n', ' | ')[:180])
             await pg.click('tr.r:has-text("حساب بانکی ب") .editable'); await pg.wait_for_timeout(200)

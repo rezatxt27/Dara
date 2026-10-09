@@ -3,7 +3,7 @@
 
 import { normalizeConnection } from './ai.js';
 import { valueOf } from './engine.js';
-import { todayIso } from './jalali.js';
+import { todayIso, addDaysIso } from './jalali.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -52,16 +52,67 @@ const backend = hasChrome ? chrome.storage.local : {
   async get(keys) { const o = {}; (keys || Object.keys(mem)).forEach((k) => { if (k in mem) o[k] = structuredClone(mem[k]); }); return o; },
   async set(obj) { Object.assign(mem, structuredClone(obj)); },
   async clear() { Object.keys(mem).forEach((k) => delete mem[k]); },
+  async remove(k) { for (const x of [].concat(k)) delete mem[x]; },
 };
 
 const LISTS = new Set(['assets', 'flows', 'events', 'alerts', 'reports']);
 const MODES = new Set(['units', 'balance', 'rate', 'loan']);
-/** Drop rows that would break every page (null, wrong type, no id) — e.g. from a damaged or hand-edited backup. */
+/** A real calendar day in a sane range (a damaged file's «0500-01-01» would stop every automatic run). */
+export function okDate(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d\d-\d\d$/.test(v)) return false;
+  const y = +v.slice(0, 4);
+  if (y < 1900 || y > 2200) return false;
+  const d = new Date(v + 'T00:00:00Z');
+  return !isNaN(d) && d.toISOString().slice(0, 10) === v;
+}
+const blank = (v) => v === undefined || v === null || v === '';
+// dates inside a deposit's, an account's or a loan's terms. A bad one never makes automations replay the past:
+//  - «done up to» marks (last payout, last accrual, last installment, settled) become today — nothing is paid twice
+//  - other dates (start, maturity, first installment) are removed, so the terms fall back to their defaults
+// A date that isn't a string at all (a number from a hand-edited file) counts as bad too.
+const DONE = { rate: ['lastPayout'], interest: ['lastAccrual', 'lastPaid'], loan: ['lastRun', 'settledAt'] };
+const OTHER = { rate: ['start', 'maturity', 'offsetFrom'], interest: ['since'], loan: ['firstDue', 'start'] };
+const badDate = (v) => !blank(v) && !okDate(v);
+function fixDates(x) {
+  let out = x;
+  for (const k of ['rate', 'interest', 'loan']) {
+    const t = x[k];
+    if (!t || typeof t !== 'object') continue;
+    const done = DONE[k].filter((f) => badDate(t[f])), other = OTHER[k].filter((f) => badDate(t[f]));
+    if (!done.length && !other.length) continue;
+    const c = { ...t };
+    for (const f of done) c[f] = todayIso();
+    // a settled loan stays settled with nothing replayed: from the day after its last installment (or its first due)
+    if (done.includes('settledAt')) c.settledAt = okDate(c.lastRun) && !done.includes('lastRun') ? addDaysIso(c.lastRun, 1) : okDate(t.firstDue) ? t.firstDue : todayIso();
+    for (const f of other) delete c[f];
+    out = { ...out, [k]: c };
+  }
+  return out;
+}
+/** A recurring flow: its start must be real (else it is left out); a bad end is removed, a bad «last run» is today. */
+function fixFlow(f) {
+  if (!badDate(f.end) && !badDate(f.lastRun)) return f;
+  const c = { ...f };
+  if (badDate(c.end)) delete c.end;
+  if (badDate(c.lastRun)) c.lastRun = todayIso();
+  return c;
+}
+/** Drop rows that would break every page (null, wrong type, no id, a flow with no real start day) — e.g. from a
+ *  damaged or hand-edited backup — and remove dates that can't be real from the rest. */
 export function cleanList(key, v) {
   if (!Array.isArray(v)) return [];
-  return v.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (key !== 'assets' || (x.id && MODES.has(x.mode) && typeof x.category === 'string'
+  const out = v.filter((x) => x && typeof x === 'object' && !Array.isArray(x) && (key !== 'assets' || (x.id && MODES.has(x.mode) && typeof x.category === 'string'
     // a deposit or loan without its terms can't be valued (and would break the pages that show it)
-    && (x.mode !== 'rate' || (x.rate && typeof x.rate === 'object')) && (x.mode !== 'loan' || (x.loan && typeof x.loan === 'object')))) && (key !== 'flows' || (x.id && /^\d{4}-\d\d-\d\d$/.test(x.start || ''))));
+    && (x.mode !== 'rate' || (x.rate && typeof x.rate === 'object')) && (x.mode !== 'loan' || (x.loan && typeof x.loan === 'object'))))
+    && (key !== 'flows' || (x.id && okDate(x.start))));
+  if (out.length < v.length && typeof console !== 'undefined') console.warn(`[dara] ${v.length - out.length} damaged row(s) in «${key}» left out`);
+  return key === 'assets' ? out.map(fixDates) : key === 'flows' ? out.map(fixFlow) : out;
+}
+/** Daily snapshots: only real days holding a number (a null one would break every chart). */
+export function cleanSnapshots(v) {
+  const out = {};
+  for (const [k, x] of Object.entries(v || {})) if (okDate(k) && x && typeof x === 'object' && isFinite(+x.t)) out[k] = x;
+  return out;
 }
 
 function withDefaults(key, value) {
@@ -69,6 +120,7 @@ function withDefaults(key, value) {
   if (value === undefined || value === null) return structuredClone(d);
   if (LISTS.has(key)) return cleanList(key, value);
   if ((key === 'quotes' || key === 'snapshots' || key === 'history') && (typeof value !== 'object' || Array.isArray(value))) return structuredClone(d);
+  if (key === 'snapshots') return cleanSnapshots(value);
   if (key === 'settings') {
     return { ...structuredClone(DEFAULT_SETTINGS), ...value,
       notify: { ...DEFAULT_SETTINGS.notify, ...(value.notify || {}) },
@@ -133,7 +185,8 @@ export async function mutate(keys, fn) {
   });
 }
 
-export async function clearAll() { await backend.clear(); }
+// under the lock: a background run halfway through its write can't put the deleted data back
+export async function clearAll() { await locked(() => backend.clear()); }
 
 export function onChanged(cb) {
   if (!hasChrome) return () => {};
@@ -148,6 +201,8 @@ export async function exportBackup() {
   delete all.history; delete all.chat;
   // API keys never leave the device in a backup
   all.ai = { ...all.ai, connections: (all.ai.connections || []).map(({ apiKey, ...c }) => ({ ...c, apiKey: '' })) };
+  // nor this computer's backup log (its file paths carry the computer's user name)
+  if (all.meta) { const { backup, ...m } = all.meta; all.meta = m; }
   return { app: 'dara', schema: SCHEMA_VERSION, exportedAt: new Date().toISOString(), data: all };
 }
 
@@ -161,15 +216,28 @@ export function checkBackup(obj) {
 }
 
 /** Copy of the current data kept just before an import replaces it, so the import can be undone. */
+// kept for a day (the «برگشت» button lasts seconds; a day is plenty), then removed so an old copy doesn't linger
+export const PRE_IMPORT_MS = 24 * 3600000;
 export async function snapshotBeforeImport() {
-  const all = await loadAll(); delete all.history; delete all.chat;
+  // no API keys, chat or price history in the copy: only what an import can change
+  const all = await loadAll(); delete all.history; delete all.chat; delete all.ai;
   await backend.set({ preImport: { at: Date.now(), data: all } });
 }
 export async function undoImport() {
   const { preImport } = await backend.get(['preImport']);
-  if (!preImport?.data) throw new Error('نسخه قبل از ورود اطلاعات پیدا نشد');
-  const toSave = {}; for (const k of KEYS) if (k in preImport.data && !['ai', 'chat', 'history'].includes(k)) toSave[k] = preImport.data[k];
-  await locked(() => backend.set(toSave));
+  if (!preImport?.data || Date.now() - (+preImport.at || 0) > PRE_IMPORT_MS) throw new Error('نسخه قبل از ورود اطلاعات پیدا نشد');
+  await locked(async () => {
+    const toSave = {}; for (const k of KEYS) if (k in preImport.data && !['ai', 'chat', 'history'].includes(k)) toSave[k] = preImport.data[k];
+    // the record of backup files written since is this computer's, not the imported data's: keep it
+    if (toSave.meta) { const { meta } = await load('meta'); toSave.meta = { ...toSave.meta, backup: meta.backup }; }
+    await backend.set(toSave);
+    if (backend.remove) await backend.remove('preImport');
+  });
+}
+/** Remove the pre-import copy once it is older than a day. */
+export async function dropOldPreImport(now = Date.now()) {
+  const { preImport } = await backend.get(['preImport']);
+  if (preImport && now - (+preImport.at || 0) > PRE_IMPORT_MS && backend.remove) await backend.remove('preImport');
 }
 
 export async function importBackup(obj, { merge = false } = {}) {

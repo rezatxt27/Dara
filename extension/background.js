@@ -59,7 +59,9 @@ async function checkSelfUpdate() {
   if (!v) return { pending: null };
   const tabs = await U.openTabUrls(); const popup = await U.popupOpen();
   // nothing open (and Chrome could tell): reload now; otherwise the open page or popup applies it on its next load
-  if (tabs && !tabs.length && popup === false) { await U.applyUpdate(null); return { pending: v, applied: true }; }
+  // never in the middle of a refresh, a backup or rebuilding the chart: the next check (minutes later) applies it
+  const busy = running || backingUp || backfilling;
+  if (tabs && !tabs.length && popup === false && !busy) { await U.applyUpdate(null); return { pending: v, applied: true }; }
   chrome.runtime.sendMessage({ type: 'update-available', version: v }).catch(() => {});
   return { pending: v };
 }
@@ -118,7 +120,8 @@ async function runBackup({ force = false } = {}) {
   if (backingUp) return backingUp;
   const alive = keepAlive();
   backingUp = (async () => {
-    const st = await store.loadAll();
+    // only what deciding needs (the daily history is large); the rest is read once a backup is actually due
+    let st = await store.load('settings', 'meta', 'assets');
     const cfg = BK.backupSettings(st.settings);
     const meta = st.meta.backup || {};
     // a file still waiting in a «Save as» dialog from an earlier run: settle it first
@@ -132,6 +135,7 @@ async function runBackup({ force = false } = {}) {
     if (waiting.length) await setBackupMeta({ files });
     if (!force && (!BK.isDue(cfg, meta) || !st.assets.length)) return { skipped: true };
     if (!chrome.downloads?.download) throw new Error('این مرورگر اجازه ذخیره فایل به افزونه نمی‌دهد');
+    st = { ...st, ...(await store.load('flows', 'events', 'alerts', 'reports')) };
     const hash = BK.coreHash(st);
     if (!force && meta.lastAt && meta.lastHash === hash) { await setBackupMeta({ checkedAt: Date.now(), error: null }); return { unchanged: true }; }
     const now = Date.now();
@@ -176,6 +180,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     const st = await store.loadAll();
     const { settings } = st;
     await store.update('meta', (m) => ({ ...m, running: true, runStartedAt: t0 }));
+    store.dropOldPreImport().catch(() => {});
 
     // 1) Resolve tickers that were entered by symbol only (e.g. a gold ETF imported from a spreadsheet).
     //    In parallel, a few per cycle, and a symbol that failed is retried only after a few hours.
@@ -222,7 +227,11 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     let autos, pf, snapshots, quotes, fired, meta, events;
     await store.mutate(['assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings'], (cur) => {
       quotes = E.mergeQuotes(cur.quotes, fresh, errors);
-      autos = E.applyAutomations(cur.assets, cur.flows, quotes, todayIso());
+      // a damaged row must not stop prices, the snapshot and alerts: automations run on a copy, and if they fail the
+      // stored assets stay as they were (the error is shown) while everything else still saves
+      let autoError;
+      try { autos = E.applyAutomations(structuredClone(cur.assets), structuredClone(cur.flows), quotes, todayIso()); }
+      catch (e) { console.error('[dara] automations failed', e); autoError = String(e?.message || e); autos = { assets: cur.assets, flows: cur.flows, events: [] }; }
       E.rememberLastPrices(autos.assets, quotes);
       events = autos.events.slice().reverse().concat(cur.events).slice(0, E.EVENTS_MAX);
       E.settlePending(autos.assets, events, quotes);
@@ -230,7 +239,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
       fired = E.checkAlerts(cur.alerts, quotes);
       meta = { ...cur.meta, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
-        errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason, fatal: undefined };
+        errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason, fatal: undefined, autoError };
       Object.assign(cur, { assets: autos.assets, flows: autos.flows, events, quotes, snapshots, meta });
     });
 
@@ -308,7 +317,7 @@ async function updateBadge(pf, st) {
   try {
     let text = '', color = '#7A5AF8';
     if (settings.badge === 'change') {
-      const p = mm ? mm.pct : pf.dayChangePct;
+      const p = mm && !mm.stale ? mm.pct : pf.dayChangePct; // a badge always means today
       if (p !== null && isFinite(p) && pf.net) {
         const v = Math.abs(p * 100);
         text = (p >= 0 ? '+' : '-') + (v >= 10 ? Math.round(v) : v.toFixed(1));
@@ -326,7 +335,7 @@ async function updateBadge(pf, st) {
     await chrome.action.setBadgeText({ text });
     await chrome.action.setBadgeBackgroundColor({ color });
     if (chrome.action.setBadgeTextColor) await chrome.action.setBadgeTextColor({ color: '#FFFFFF' });
-    await chrome.action.setTitle({ title: settings.privacy ? 'دارا' : `دارا — ارزش خالص: ${money(pf.net, settings, { compact: true })}${mm && Math.abs(mm.pct) >= 0.00005 ? ' (' + pct(mm.pct) + ' امروز)' : ''}` });
+    await chrome.action.setTitle({ title: settings.privacy ? 'دارا' : `دارا — ارزش خالص: ${money(pf.net, settings, { compact: true })}${mm && !mm.stale && Math.abs(mm.pct) >= 0.00005 ? ' (' + pct(mm.pct) + ' امروز)' : ''}` });
   } catch (e) { /* ignore */ }
 }
 
@@ -494,7 +503,7 @@ const handlers = {
   async capture({ tabId }) { return captureTab(tabId); },
   async checkUpdate() { return checkSelfUpdate(); },
   async badge() {
-    const st = await store.loadAll();
+    const st = await store.load('assets', 'quotes', 'settings', 'snapshots', 'events');
     const pf = E.portfolio(st.assets, st.quotes, st.settings);
     await updateBadge(pf, st);
     return { ok: true };
@@ -502,7 +511,8 @@ const handlers = {
 };
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  const h = handlers[msg?.type];
+  // own keys only: «toString» or «constructor» from a stray message is not a handler
+  const h = typeof msg?.type === 'string' && Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
   if (!h) return false;
   h(msg).then((r) => sendResponse({ ok: true, ...r }), (e) => sendResponse({ ok: false, error: String(e?.message || e) }));
   return true;

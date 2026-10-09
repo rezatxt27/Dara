@@ -4,6 +4,7 @@
 import { parseNum, toEnDigits } from './format.js';
 import { CAT, CATEGORIES } from './catalog.js';
 import { importRows } from './importer.js';
+import { unitPriceOf } from './engine.js';
 
 export const ROLES = [
   ['name', 'نام دارایی'], ['value', 'ارزش یا مانده'], ['quantity', 'مقدار / تعداد'], ['price', 'قیمت هر واحد'], ['category', 'دسته'],
@@ -115,6 +116,7 @@ function quoteRef(name) {
   if (/نیم سکه/.test(s)) return 'tgju:nim'; if (/ربع سکه/.test(s)) return 'tgju:rob'; if (/سکه گرمی/.test(s)) return 'tgju:retail_gerami';
   if (/بهار آزادی/.test(s)) return 'tgju:sekeb'; if (/سکه امامی|تمام سکه|سکه تمام/.test(s)) return 'tgju:sekee';
   if (/طلا|gold/.test(s) && /18|گرم/.test(s) && !/صندوق|fund/.test(s)) return 'tgju:geram18';
+  if (/مثقال/.test(s)) return 'tgju:mesghal';
   if (/دلار|usd|dollar/.test(s)) return 'tgju:price_dollar_rl'; if (/یورو|eur/.test(s)) return 'tgju:price_eur';
   if (/تتر|usdt|tether/.test(s)) return 'nobitex:usdt';
   return null;
@@ -305,6 +307,19 @@ export function applyMapping(rows, map, { unit = map.unit, catOverride = {} } = 
     out.push({ i, name, cat, asset, note });
   });
   return out;
+}
+
+/**
+ * How far an imported row's own unit price is from today's market price for the price it was matched to (−0.9 = the
+ * sheet says 90% less). Only when the gap is over 30%: a coin read as grams, mesghal as grams, or rial read as toman.
+ */
+export function priceGap(asset, quotes, limit = 0.3) {
+  if (asset?.mode !== 'units' || asset.price?.source !== 'market' || !asset.price.ref) return null;
+  const sheet = +asset.price.value;
+  const u = unitPriceOf({ ...asset, price: { ...asset.price, last: null } }, quotes || {});
+  if (!(sheet > 0) || u.fallback || !(u.price > 0) || u.q?.error) return null;
+  const gap = sheet / u.price - 1;
+  return Math.abs(gap) > limit ? gap : null;
 }
 
 /* ------------------------------ Dara's own layout (its export and the template) ------------------------------ */

@@ -66,15 +66,25 @@ export function detectCategory(catText, name, holder) {
 }
 
 function detectGoldRef(name, holder, unit) {
-  const s = norm(name + ' ' + holder);
-  if (has(s, 'نیم سکه', 'نیم‌سکه')) return { provider: 'tgju', key: 'nim' };
-  if (has(s, 'ربع سکه', 'ربع‌سکه')) return { provider: 'tgju', key: 'rob' };
-  if (has(s, 'سکه گرمی')) return { provider: 'tgju', key: 'retail_gerami' };
-  if (has(s, 'بهار آزادی')) return { provider: 'tgju', key: 'sekeb' };
-  if (has(s, 'سکه امامی', 'تمام سکه')) return { provider: 'tgju', key: 'sekee' };
-  if (has(s, '۲۴', '24')) return { provider: 'tgju', key: 'geram24' };
+  // the name says what it is (where it is kept — «طلافروشی بهار» — doesn't), and a weight unit wins over any coin word
+  const n = norm(name);
+  const u = norm(unit);
+  if (has(u, 'مثقال') || (has(n, 'مثقال') && !has(u, 'گرم'))) return { provider: 'tgju', key: 'mesghal' };
+  const byWeight = has(u, 'گرم', 'گم', 'gr');
+  if (byWeight) return { provider: 'tgju', key: has(n, '۲۴', '24') ? 'geram24' : 'geram18' };
+  if (has(n, 'نیم سکه', 'نیم‌سکه')) return { provider: 'tgju', key: 'nim' };
+  if (has(n, 'ربع سکه', 'ربع‌سکه')) return { provider: 'tgju', key: 'rob' };
+  if (/سکه\s*(یک\s*)?گرمی/.test(n)) return { provider: 'tgju', key: 'retail_gerami' };
+  if (has(n, 'بهار آزادی') || /سکه\s*(تمام\s*)?بهار/.test(n)) return { provider: 'tgju', key: 'sekeb' };
+  if (has(n, 'سکه امامی', 'تمام سکه', 'سکه تمام', 'سکه امام')) return { provider: 'tgju', key: 'sekee' };
+  // a bare «سکه» counted in pieces is a full (Emami) coin — the common one; flagged so the owner checks it
+  if (/(^|\s)سکه(\s|$)/.test(n)) return { provider: 'tgju', key: 'sekee', review: '«سکه» تمام امامی فرض شد؛ اگر نوع دیگری است عوضش کن.' };
+  if (has(n, '۲۴', '24')) return { provider: 'tgju', key: 'geram24' };
+  if (has(u, 'عدد')) return { provider: 'tgju', key: 'geram18', review: 'واحد «عدد» بود ولی نوع سکه از نام معلوم نشد؛ گرم طلای ۱۸ عیار فرض شد. بررسی کن.' };
   return { provider: 'tgju', key: 'geram18' };
 }
+// the unit a gold price is quoted in
+const GOLD_UNIT = { geram18: 'گرم', geram24: 'گرم', mesghal: 'مثقال' };
 
 function detectFx(name, holder, unit) {
   const s = norm(name + ' ' + holder + ' ' + unit);
@@ -86,13 +96,21 @@ function detectFx(name, holder, unit) {
   return null;
 }
 
+// a ticker or word on its own, not inside another («tether» holds «eth»)
+const word = (s, ...ws) => ws.some((w) => new RegExp(`(^|[^a-z\u0600-\u06ff])${w}([^a-z\u0600-\u06ff]|$)`, 'i').test(s));
+const COINS = [ // order matters only within one field
+  ['btc', ['بیت ?کوین', 'بیتکوین', 'btc', 'bitcoin']], ['eth', ['اتریوم', 'اتر', 'eth', 'ethereum']], ['ton', ['تون ?کوین', 'تون', 'ton', 'toncoin']],
+  ['sol', ['سولانا', 'sol', 'solana']], ['usdt', ['تتر', 'usdt', 'tether']],
+];
 function detectCrypto(name, holder, unit, price) {
-  const s = norm(name + ' ' + holder + ' ' + unit);
-  if (has(s, 'بیت', 'btc', 'bitcoin')) return { ref: { provider: 'nobitex', key: 'btc' } };
-  if (has(s, 'اتر', 'eth')) return { ref: { provider: 'nobitex', key: 'eth' } };
-  if (has(s, 'تتر', 'usdt')) return { ref: { provider: 'nobitex', key: 'usdt' } };
-  if (has(s, 'تون', 'ton')) return { ref: { provider: 'nobitex', key: 'ton' } };
-  if (has(s, 'سولانا', 'sol')) return { ref: { provider: 'nobitex', key: 'sol' } };
+  // the name first, then the unit, then where it's kept: «BTC» priced in USDT, or kept in a «تتر» wallet, is still BTC
+  // (and whole words only: «Tether» holds «eth»)
+  for (const field of [name, unit, holder]) {
+    const s = norm(field).toLowerCase();
+    if (!s) continue;
+    const hit = COINS.find(([, ws]) => word(s, ...ws));
+    if (hit) return { ref: { provider: 'nobitex', key: hit[0] } };
+  }
   // Unit price above 10 billion Rial can only be Bitcoin
   if (price > 1e10) return { ref: { provider: 'nobitex', key: 'btc' }, review: 'رمزارز از روی قیمت، بیت‌کوین تشخیص داده شد؛ بررسی کنید.' };
   return null;
@@ -155,11 +173,12 @@ export function importRows(rows, opts = {}) {
     const units = (ref, review) => ({ ...base, mode: 'units', quantity: qty, unit: unit.replace(/\s*\/\s*عدد/, '').replace(/به تومان|به ریال/, '').trim() || 'واحد',
       price: ref ? { source: 'market', ref, adjustPct: 0, factor: 1, value: price, updatedAt: now, last: { price, at: now } } : { source: 'manual', value: price, updatedAt: now }, ...(review ? { review } : {}) });
     if (category === 'bank' || category === 'receivable' || category === 'debt' || category === 'property' || (isMoneyUnit && (!isFinite(qty) || qty === 1))) {
-      asset = { ...base, mode: 'balance', balance: total, balanceAt: now };
+      // a debt is kept as the amount owed (the sign comes from its category); a sheet may write it as −500
+      asset = { ...base, mode: 'balance', balance: category === 'debt' ? Math.abs(total) : total, balanceAt: now };
     } else if (category === 'gold' || category === 'gold_online') {
-      const ref = detectGoldRef(name, holder, unit);
-      asset = units(ref);
-      if (ref.key !== 'geram18') asset.unit = 'عدد'; else asset.unit = 'گرم';
+      const { review, ...ref } = detectGoldRef(name, holder, unit);
+      asset = units(ref, review);
+      asset.unit = GOLD_UNIT[ref.key] || 'عدد';
     } else if (category === 'metal') {
       const s2 = norm(name + ' ' + holder);
       const pr = METAL_PRESETS.find((m) => (m.id === 'silver925' && /925/.test(s2)) || (m.id === 'copper' && /(^|\s)مس/.test(s2)) || (m.id === 'platinum' && /پلاتین/.test(s2)) || (m.id === 'palladium' && /پالادیوم/.test(s2))) || METAL_PRESETS[0];

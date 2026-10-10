@@ -1,5 +1,6 @@
 // «ماشین‌حساب‌ها»: tools that need no portfolio. One tool on screen at a time; the home is a short list of tiles.
 import { html, useState, useMemo, Icon, Money, NumField, MoneyField, Seg, num, pct, fmtJ } from '../components.js';
+import { L } from '../tips.js';
 import * as I from '../../lib/insights.js';
 import { todayIso, daysBetween } from '../../lib/jalali.js';
 import * as K from '../../lib/calc.js';
@@ -135,7 +136,7 @@ function GoldInvoice({ st, s, open }) {
         ${adv && html`<div class="calc-adv">
           ${mode !== 'sell' && html`<${NumField} label="سود فروشنده" value=${sellerIn} onInput=${setSeller} suffix="٪" compact />
             <${NumField} label="مالیات بر ارزش افزوده" value=${vatIn} onInput=${setVat} suffix="٪" compact />`}
-          ${mode !== 'check' && html`<${NumField} label="عیار فروش" value=${kIn} onInput=${setK} hint=${K.clampK(kIn) === +kIn ? 'بعضی مغازه‌ها ۷۴۷ حساب می‌کنند' : html`<span class="warn">عددی بین ۶۰۰ و ۷۵۰؛ فعلاً ${num(k)} حساب می‌شود</span>`} />`}
+          ${mode !== 'check' && html`<${NumField} label=${L('عیار فروش', 'cKarat')} value=${kIn} onInput=${setK} hint=${K.clampK(kIn) === +kIn ? 'بعضی مغازه‌ها ۷۴۷ حساب می‌کنند' : html`<span class="warn">عددی بین ۶۰۰ و ۷۵۰؛ فعلاً ${num(k)} حساب می‌شود</span>`} />`}
         </div>`}
       </div>
 
@@ -193,7 +194,7 @@ function RentTool({ st, s }) {
       <div class="col" style="gap:12px">
         <${MoneyField} label="ودیعه (رهن)" rial=${dep} onRial=${setDep} s=${s} />
         <${MoneyField} label="اجاره ماهانه" rial=${rent} onRial=${setRent} s=${s} />
-        <${NumField} label="نرخ تبدیل در ماه" value=${rateIn} onInput=${setRate} suffix="٪"
+        <${NumField} label=${L('نرخ تبدیل در ماه', 'cConv')} value=${rateIn} onInput=${setRate} suffix="٪"
           hint=${html`هر ۱۰۰ میلیون ودیعه = ${num(rate, 1)} میلیون اجاره در ماه. عرف بازار، معمولاً حدود ۳٪؛ شهر به شهر و سال به سال فرق دارد.`} />
         <div class="field"><label>ترکیب تازه</label>
           <div class="row" style="gap:8px"><${Seg} value=${by} onChange=${(x) => { setBy(x); setTarget(null); }} options=${[['deposit', 'ودیعه تازه'], ['rent', 'اجاره تازه']]} />
@@ -246,10 +247,10 @@ function LoanTool({ st, s }) {
         </div>
         <button class="calc-link" style="align-self:flex-start" onClick=${() => setMore(!more)}>${more ? 'بستن شرط‌های بانک' : '+ شرط‌های بانک: کارمزد، سپرده مسدودی، پول خوابیده'}</button>
         ${more && html`<div class="calc-adv" style="grid-template-columns:1fr">
-          <${NumField} label="کارمزد و کسورات اول کار" value=${feeIn} onInput=${setFee} suffix="٪" hint="درصدی از مبلغ وام که همان اول کم می‌شود (کارمزد، بیمه، سهم صندوق…)" />
-          <div class="calc-in two" style="max-width:none"><${MoneyField} label="سپرده مسدودی در طول وام" rial=${blocked} onRial=${setBlocked} s=${s} />
+          <${NumField} label=${L('کارمزد و کسورات اول کار', 'cFee')} value=${feeIn} onInput=${setFee} suffix="٪" hint="درصدی از مبلغ وام که همان اول کم می‌شود (کارمزد، بیمه، سهم صندوق…)" />
+          <div class="calc-in two" style="max-width:none"><${MoneyField} label=${L('سپرده مسدودی در طول وام', 'cBlocked')} rial=${blocked} onRial=${setBlocked} s=${s} />
             <${NumField} label="سود سپرده مسدودی" value=${blockedPctIn} onInput=${setBlockedPct} suffix="٪" /></div>
-          <div class="calc-in two" style="max-width:none"><${MoneyField} label="پول خوابیده قبل از وام (معدل)" rial=${idle} onRial=${setIdle} s=${s} />
+          <div class="calc-in two" style="max-width:none"><${MoneyField} label=${L('پول خوابیده قبل از وام (معدل)', 'cIdle')} rial=${idle} onRial=${setIdle} s=${s} />
             <${NumField} label="چند ماه قبل" value=${idleMonthsIn} onInput=${setIdleMonths} suffix="ماه" /></div>
           ${idleNoMonths && html`<div class="xs warn">چند ماه پول باید بخوابد؟ تا ننویسی، حساب نمی‌شود.</div>`}
           ${idle > 0 && html`<${NumField} label="سودی که پول خوابیده می‌گیرد" value=${idlePctIn} onInput=${setIdlePct} suffix="٪" hint=${`اگر در حساب قرض‌الحسنه یا جاری است، صفر. هزینه‌اش سودی است که در سپرده ${num(depPct, 1)}٪ از دست می‌دهد.`} />`}
@@ -314,7 +315,7 @@ function DepositTool({ st, s }) {
         ${mode === 'break' && html`
           <${NumField} label="چند ماه از شروع گذشته" value=${heldIn} onInput=${setHeld} suffix="ماه" hint="فقط ماه‌های کامل حساب می‌شود" />
           <div class="field"><label>سود هر ماه</label><${Seg} value=${paidOut ? 'out' : 'in'} onChange=${(v) => setPaidOut(v === 'out')} options=${[['out', 'به حساب واریز می‌شده'], ['in', 'روی سپرده می‌مانده']]} /></div>
-          <${NumField} label="نرخ سود در صورت شکستن" value=${breakIn} onInput=${setBreak} suffix="٪" placeholder="از قرارداد سپرده"
+          <${NumField} label=${L('نرخ سود در صورت شکستن', 'cBreak')} value=${breakIn} onInput=${setBreak} suffix="٪" placeholder="از قرارداد سپرده"
             hint="نرخی که بانک برای ماه‌های گذشته دوباره حساب می‌کند؛ معمولاً نرخ کوتاه‌مدت یا نرخ مدت کوتاه‌تر. در قرارداد سپرده‌ات نوشته شده." />
           <${NumField} label="اگر پول را جای دیگری بگذاری، با سود سالانه (اختیاری)" value=${newIn} onInput=${setNew} suffix="٪" />`}
       </div>

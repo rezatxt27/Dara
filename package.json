@@ -1,2 +1,2 @@
-{ "name": "dara-asset-manager", "version": "1.12.0", "private": true, "type": "module",
+{ "name": "dara-asset-manager", "version": "1.12.1", "private": true, "type": "module",
   "scripts": { "test": "node --import ./dev/tests/support/register.mjs --test dev/tests/engine.test.mjs dev/tests/actions.test.mjs dev/tests/bubble.test.mjs dev/tests/cards.test.mjs dev/tests/compare.test.mjs dev/tests/sheetmap.test.mjs dev/tests/calc.test.mjs dev/tests/backup.test.mjs dev/tests/pricestats.test.mjs dev/tests/qc.test.mjs" } }

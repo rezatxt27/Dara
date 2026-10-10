@@ -1,4 +1,5 @@
 import { html, useOnce, useState, useTick, Icon, Money, Ava, Modal, Seg, NumField, MoneyField, JDateField, Toggle, StatusPill, toast, num, pct, fmtJ } from '../components.js';
+import { T as H } from '../tips.js';
 import { CAT, FLOW_TEMPLATES } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { todayIso, isoToJ, addDaysIso, isoFromDate } from '../../lib/jalali.js';
@@ -100,7 +101,7 @@ export function AutomationPage({ st, pf, s, open }) {
       <div class="kpi"><span class="t">سود ماهانه (تقریبی)</span><span class="v"><${Money} v=${auto.interest} s=${s} compact /></span><span class="s">سپرده‌ها، حساب‌های سوددار و طلب‌ها</span></div>
       <div class="kpi"><span class="t">ورودی‌های ماهانه</span><span class="v pos"><${Money} v=${auto.inflow + auto.loanGet} s=${s} compact /></span><span class="s">حقوق، اجاره، قسط‌های دریافتی و…</span></div>
       <div class="kpi"><span class="t">خروجی‌های ماهانه</span><span class="v neg"><${Money} v=${auto.outflow + auto.loanPay} s=${s} compact /></span><span class="s">${auto.loanPay ? html`هزینه‌های ثابت و اقساط (<${Money} v=${auto.loanPay} s=${s} compact />)` : 'هزینه‌های ثابت و اقساط'}</span></div>
-      <div class="kpi"><span class="t">مانده ماهانه</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span>
+      <div class="kpi"><span class="t">مانده ماهانه${H('aNet')}</span><span class=${'v ' + (auto.net >= 0 ? 'pos' : 'neg')}><${Money} v=${auto.net} s=${s} compact sign /></span>
         <span class="s" title="پولی که هر ماه به حساب‌هایت می‌رسد یا از آنها کم می‌شود؛ پرداخت اصل وام و جابه‌جایی بین حساب‌هایت پول نقد را کم و زیاد می‌کند ولی دارایی خالص را نه.">پول نقد حساب‌ها: <${Money} v=${auto.cash} s=${s} compact sign /></span></div>
     </div>
 

@@ -1,6 +1,7 @@
 import { isoFromDate } from '../lib/jalali.js';
 import { html, render, useState, useEffect, useMemo, useStore, useTick, Icon, Toasts, send, toast, Money, Delta, Seg, money, num, pct, fmtJ, AreaChart, StackBar, Ava, StatusPill, refLabel, Markdown, BackfillButton, Explain, AskBtn } from './components.js';
 import * as I from '../lib/insights.js';
+import { T as H } from './tips.js';
 import * as E from '../lib/engine.js';
 import * as BB from '../lib/bubble.js';
 import { CAT, EXPOSURES } from '../lib/catalog.js';
@@ -106,7 +107,7 @@ function WhyChanged({ st, pf, s, open }) {
   const drivers = at.cats.filter((c) => Math.abs(c.price) >= 1).sort((a, b) => Math.abs(b.price) - Math.abs(a.price));
   const top = drivers[0];
   const bars = [...drivers.slice(0, 6).map((c) => ({ name: c.name, v: c.price, color: c.color })),
-    ...(Math.abs(at.interest) >= 1 ? [{ name: 'سود (سپرده، حساب، وام)', v: at.interest }] : []),
+    ...(Math.abs(at.interest) >= 1 ? [{ name: 'سود سپرده و حساب', v: at.interest }] : []),
     ...(Math.abs(at.external) >= 1 ? [{ name: 'واریز و برداشت', v: at.external }] : []),
     ...(Math.abs(at.edits) >= 1 ? [{ name: 'ثبت و ویرایش دستی', v: at.edits }] : [])];
   const max = Math.max(1, ...bars.map((b) => Math.abs(b.v)));
@@ -122,10 +123,10 @@ function WhyChanged({ st, pf, s, open }) {
           ${showSplit ? html`<div class="small muted" style="margin-top:4px" title="تقریبی: قیمت سکه، انس و دلار در لحظه‌های کمی متفاوت ثبت می‌شوند">از این، سکه‌هایت <${Money} v=${split.total} s=${s} compact sign />: <${Money} v=${split.gold} s=${s} compact sign /> از قیمت طلا و <b class=${split.bubble >= 0 ? 'pos' : 'neg'}><${Money} v=${split.bubble} s=${s} compact sign /></b> از ${split.bubble >= 0 ? 'بزرگ‌تر شدن' : 'کوچک‌تر شدن'} حباب.</div>` : ''}
           ${at.est ? html`<div class="xs muted">مبنای مقایسه بازسازی‌شده است.</div>` : ''}</div>
         <div class="split">
-          <div class="pcell"><span class="n">تغییر قیمت</span><span class=${'v ' + (at.price >= 0 ? 'pos' : 'neg')}><${Money} v=${at.price} s=${s} compact sign /></span></div>
-          <div class="pcell"><span class="n">سود</span><span class=${'v ' + (at.interest >= 0 ? 'pos' : 'neg')}><${Money} v=${at.interest} s=${s} compact sign /></span></div>
-          <div class="pcell"><span class="n">واریز و برداشت</span><span class="v"><${Money} v=${at.external} s=${s} compact sign /></span></div>
-          ${Math.abs(at.edits) >= 1 && html`<div class="pcell"><span class="n">ثبت و ویرایش دستی</span><span class="v"><${Money} v=${at.edits} s=${s} compact sign /></span></div>`}
+          <div class="pcell"><span class="n">تغییر قیمت${H('wPrice')}</span><span class=${'v ' + (at.price >= 0 ? 'pos' : 'neg')}><${Money} v=${at.price} s=${s} compact sign /></span></div>
+          <div class="pcell"><span class="n">سود سپرده و حساب${H('wInterest')}</span><span class=${'v ' + (at.interest >= 0 ? 'pos' : 'neg')}><${Money} v=${at.interest} s=${s} compact sign /></span><span class="xs muted">${days === 1 ? 'سود یک روز' : `سود ${num(days)} روز`}</span></div>
+          <div class="pcell"><span class="n">واریز و برداشت${H('wExternal')}</span><span class="v"><${Money} v=${at.external} s=${s} compact sign /></span></div>
+          ${Math.abs(at.edits) >= 1 && html`<div class="pcell"><span class="n">ثبت و ویرایش دستی${H('wEdits')}</span><span class="v"><${Money} v=${at.edits} s=${s} compact sign /></span></div>`}
         </div>
       </div>
       <div class="wbars">${bars.length ? bars.map((b) => html`<div class="wbar"><span class="ellipsis sb">${b.name}</span>
@@ -153,7 +154,7 @@ function Kpis({ st, pf, s, open }) {
   const tierColor = { high: '#14BCDB', mid: '#8E70FF', low: 'var(--line-2)' };
   return html`<div class="kpis ov">
     <div class="kpi">
-      <div class="kh"><span class="t"><${Icon} n="shield" cls="sm" />محافظت در برابر تورم</span>
+      <div class="kh"><span class="t"><${Icon} n="shield" cls="sm" />محافظت در برابر تورم${H('kInfl')}</span>
         ${inf?.status === 'ok' ? badge('pos', 'در حد هدف') : inf?.status === 'near' ? badge('warn', 'نزدیک هدف') : inf?.status === 'below' ? badge('warn', `${num(Math.ceil((inf.target - inf.share) * 100 - 1e-9))} واحد درصد زیر هدف`) : ''}</div>
       ${inf ? html`
         <div class="kv"><span class="v num">${p0(inf.share)}</span>${inf.delta !== null && html`<span class=${'kd ' + (pts(inf.delta) ? (inf.delta > 0 ? 'pos' : 'neg') : 'muted')}>${pts(inf.delta) || 'تقریباً بدون تغییر از ماه پیش'}</span>`}</div>
@@ -168,7 +169,7 @@ function Kpis({ st, pf, s, open }) {
     </div>
 
     <div class="kpi">
-      <div class="kh"><span class="t"><${Icon} n="droplet" cls="sm" />نقدشوندگی</span></div>
+      <div class="kh"><span class="t"><${Icon} n="droplet" cls="sm" />نقدشوندگی${H('kLiq')}</span></div>
       ${liq ? html`
         <div class="kv"><span class="v num">${p0(liq.share)}</span><span class="kd muted">در چند روز نقد می‌شود</span></div>
         <div class="kbar"><div class="segs">${['high', 'mid', 'low'].map((k) => liq.tiers[k]).map((t, i) => t.share > 0 && html`<i title=${`${t.name}: ${money(t.value, s, { compact: true })}${t.names.length ? ' — ' + t.names.join('، ') : ''}`} style=${`flex:${t.share};background:${tierColor[['high', 'mid', 'low'][i]]}`}></i>`)}</div></div>
@@ -178,7 +179,7 @@ function Kpis({ st, pf, s, open }) {
     </div>
 
     <div class="kpi">
-      <div class="kh"><span class="t"><${Icon} n="zap" cls="sm" />ورودی ماهانه</span></div>
+      <div class="kh"><span class="t"><${Icon} n="zap" cls="sm" />ورودی ماهانه${H('kInc')}</span></div>
       ${inc.total > 0 || inc.next ? html`
         <div class="kv">${inc.total > 0 ? html`<span class="v"><${Money} v=${inc.total} s=${s} compact /></span><span class="kd muted">در ماه</span>` : html`<span class="v">—</span><span class="kd muted">سود یا درآمد تکراری ثبت نشده</span>`}</div>
         <div class="klg">${inc.interest > 0 && html`<span><i style="background:var(--accent)"></i>سود <${Money} v=${inc.interest} s=${s} compact unit=${false} /></span>`}${inc.inflow > 0 && html`<span><i style="background:var(--cyan)"></i>درآمد تکراری <${Money} v=${inc.inflow} s=${s} compact unit=${false} /></span>`}</div>

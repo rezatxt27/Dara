@@ -2,6 +2,7 @@
 // owner's own position in it, what's special about it (a coin's bubble, a fund's NAV, gold against the world price),
 // and shortcuts into the tools with this price already chosen.
 import { html, useState, useEffect, useMemo, Icon, Money, Delta, Seg, Drawer, AreaChart, AskBtn, num, pct, fmtJ, money, send, refLabel, providerName } from '../components.js';
+import { T as H } from '../tips.js';
 import * as E from '../../lib/engine.js';
 import * as BB from '../../lib/bubble.js';
 import * as K from '../../lib/calc.js';
@@ -84,7 +85,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
 
       <div class="pd-ctl">
         <${Seg} value=${range} onChange=${setRange} options=${RANGES} />
-        ${canDollar && html`<${Seg} value=${view} onChange=${setView} options=${[['rial', s.currency === 'rial' ? 'ریال' : 'تومان'], ['usd', 'دلار']]} />`}
+        ${canDollar && html`<span class="row" style="gap:4px"><${Seg} value=${view} onChange=${setView} options=${[['rial', s.currency === 'rial' ? 'ریال' : 'تومان'], ['usd', 'دلار']]} />${H('pDollar')}</span>`}
       </div>
       <div class="pd-chart">${hist === null ? html`<div class="empty small" style="height:200px;display:grid;place-items:center">در حال دریافت تاریخچه…</div>`
         : html`<${AreaChart} points=${shown.map(([date, value]) => ({ date, value }))} height=${200} fmt=${fmtV}
@@ -96,14 +97,14 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         <div class="pcell"><span class="n">بالاترین</span><span class="small sb"><${V} v=${st8.hi.v} /></span><span class="xs muted">${fmtJ(st8.hi.date, range > 91 ? 'long' : 'dm')}</span></div>
         <div class="pcell"><span class="n">پایین‌ترین</span><span class="small sb"><${V} v=${st8.lo.v} /></span><span class="xs muted">${fmtJ(st8.lo.date, range > 91 ? 'long' : 'dm')}</span></div>
         <div class="pcell"><span class="n">تغییر در این بازه</span><span class="small"><${Delta} p=${st8.change} showAbs=${false} /></span></div>
-        <div class="pcell"><span class="n">فاصله از بالاترین</span><span class="small sb ltr">${Math.abs(st8.fromHigh) < 0.0005 ? 'روی بالاترین' : pct(st8.fromHigh, { digits: 1 })}</span></div>
+        <div class="pcell"><span class="n">فاصله از بالاترین${H('pFromHigh')}</span><span class="small sb ltr">${Math.abs(st8.fromHigh) < 0.0005 ? 'روی بالاترین' : pct(st8.fromHigh, { digits: 1 })}</span></div>
       </div>`}
       ${series.length > 1 && html`<div class="pd-periods">${PERIODS.map(([d, t]) => html`<div><span class="xs muted">${t}</span><span class="small">${changes[d] === null ? html`<span class="faint">—</span>` : html`<${Delta} p=${changes[d]} showAbs=${false} />`}</span></div>`)}</div>`}
 
       ${pos && html`<div class="pd-card">
         <div class="sb small row" style="gap:6px"><${Icon} n="assets" cls="sm" />سهم تو</div>
         <div class="pd-line"><span>${pos.unit ? `${num(pos.qty, pos.qty < 10 ? 3 : 2)} ${pos.unit}` : `${num(pos.assets.length)} دارایی`}</span><b><${Money} v=${pos.value} s=${s} /></b></div>
-        ${pos.avg && html`<div class="pd-line"><span>میانگین قیمت خرید</span><span><${Money} v=${pos.avg} s=${s} /></span></div>`}
+        ${pos.avg && html`<div class="pd-line"><span>میانگین قیمت خرید${H('pAvg')}</span><span><${Money} v=${pos.avg} s=${s} /></span></div>`}
         ${pos.pnl !== null && html`<div class="pd-line"><span>سود یا زیان${pos.partialCost ? html` <span class="xs muted">(فقط آن‌هایی که قیمت خرید دارند)</span>` : ''}</span><span class=${pos.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${pos.pnl} s=${s} sign /> <span class="xs ltr">(${pct(pos.ret, { digits: 1 })})</span></span></div>`}
         ${!pos.cost && html`<div class="xs muted">قیمت خرید ثبت نشده؛ برای دیدن سود و زیان و خط میانگین خرید، در ویرایش دارایی «قیمت خرید کل» را بنویس.</div>`}
         ${marks.length > 0 && html`<div class="xs muted"><span class="pd-dot buy"></span> خرید <span class="pd-dot sell"></span> فروش، روی نمودار</div>`}
@@ -119,7 +120,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
       ${fund && html`<div class="pd-card"><div class="sb small">صندوق</div>
         <div class="pd-line"><span>NAV ابطال</span><span><${Money} v=${fund.nav} s=${s} /></span></div>
         <div class="pd-line"><span>حباب (قیمت بازار ÷ NAV)</span><b class="ltr">${pct(fund.bubble, { digits: 1 })}</b></div></div>`}
-      ${goldGap !== null && pure && !pure.stale && html`<div class="pd-card"><div class="sb small">در برابر قیمت جهانی</div>
+      ${goldGap !== null && pure && !pure.stale && html`<div class="pd-card"><div class="sb small">در برابر قیمت جهانی${H('pWorld')}</div>
         <div class="pd-line"><span>طلای خالص هر گرم (انس × دلار)</span><span><${Money} v=${pure.price} s=${s} /></span></div>
         <div class="pd-line"><span>طلای ۱۸ عیار بازار نسبت به آن</span><b class="ltr">${pct(goldGap, { digits: 1 })}</b></div>
         <div class="xs muted">هر گرم ۱۸ عیار، ۷۵۰ از ۱۰۰۰ طلای خالص است؛ مثبت یعنی بازار داخل گران‌تر از قیمت جهانی با دلار آزاد است.</div></div>`}

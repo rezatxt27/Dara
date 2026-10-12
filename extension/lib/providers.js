@@ -229,10 +229,62 @@ export async function tsetmcQuote(insCode, field = 'close') {
   const y = n(c.priceYesterday);
   return { price, change: y > 0 ? price - y : 0, changePct: y > 0 ? (price - y) / y : 0, ...tseDate(c.dEven, c.hEven), source: 'tsetmc' };
 }
+/**
+ * Daily rows (newest first, as TSETMC sends them) → ascending [{date, close, raw, vol, val, py}] with closes ADJUSTED for
+ * capital increases and dividends: on the day after such an event TSETMC's «priceYesterday» is the adjusted base, not the
+ * previous close, so every earlier close is scaled by priceYesterday ÷ previous close. Without this a 100% capital
+ * increase would look like a 50% fall. The latest close is never changed.
+ */
+export function adjustDaily(rows) {
+  // Days without a single trade carry no price (and TSETMC fills days before a listing with a nominal 1000): drop them.
+  // A halted stock's next traded day still has the right «priceYesterday», so an event during the halt is still caught.
+  const noTrade = (r) => { const t = r.zTotTran ?? r.qTotTran5J; return t !== undefined && t !== null && !(+t > 0); };
+  const list = (rows || []).filter((r) => !noTrade(r))
+    .map((r) => ({ date: tseDate(r.dEven).asOf, raw: n(r.pClosing), py: n(r.priceYesterday), vol: n(r.qTotTran5J) || 0, val: n(r.qTotCap) || 0 }))
+    .filter((r) => r.raw > 0 && r.date).sort((a, b) => b.date.localeCompare(a.date));
+  let f = 1;
+  for (let i = 0; i < list.length; i++) {
+    list[i].close = list[i].raw * f;
+    const older = list[i + 1];
+    if (older && list[i].py > 0 && Math.abs(list[i].py / older.raw - 1) > 0.0005) f *= list[i].py / older.raw;
+  }
+  const out = list.reverse();
+  // the newest day the list covers, traded or not: a stock is «checked through» that day even if it didn't trade
+  out.through = (rows || []).reduce((m, r) => { const d = r?.dEven ? tseDate(r.dEven).asOf : ''; return d > m ? d : m; }, '') || null;
+  return out;
+}
+export async function tsetmcDaily(insCode, limit = 400, { allowEmpty = false } = {}) {
+  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/${encodeURIComponent(insCode)}/${Math.max(1, Math.round(+limit) || 400)}`, { timeout: 20000 });
+  if (!allowEmpty && (!Array.isArray(j?.closingPriceDaily) || !j.closingPriceDaily.length)) throw new Error('سابقهٔ قیمت این نماد خالی آمد');
+  return adjustDaily(j.closingPriceDaily);
+}
+/** Real (unadjusted) closes of traded days — what a holding was actually worth; the radar uses tsetmcDaily's adjusted ones. */
 export async function tsetmcHistory(insCode, limit = 400) {
-  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetClosingPriceDailyList/${encodeURIComponent(insCode)}/${+limit || 400}`);
-  return (j.closingPriceDaily || []).map((r) => ({ date: tseDate(r.dEven).asOf, close: n(r.pClosing) }))
-    .filter((r) => r.close > 0 && r.date).sort((a, b) => a.date.localeCompare(b.date));
+  return (await tsetmcDaily(insCode, limit, { allowEmpty: true })).map((r) => ({ date: r.date, close: r.raw }));
+}
+/** The whole market in one request: stocks (1), the base market (2) and exchange-traded funds (8). Raw rows. */
+export async function tsetmcMarketWatch(types = [1, 2, 8]) {
+  const q = types.map((t, i) => `paperTypes%5B${i}%5D=${t}`).join('&');
+  const j = await getJSON(`https://cdn.tsetmc.com/api/ClosingPrice/GetMarketWatch?market=0&industrialGroup=&${q}&showTraded=false&withBestLimits=false`, { timeout: 30000 });
+  if (!Array.isArray(j?.marketwatch)) throw new Error('دیده‌بان بورس پاسخ نداد');
+  return j.marketwatch;
+}
+/** The day of the latest trading session (from the main index's intraday list): 'YYYY-MM-DD' and the time of its last point. */
+export async function tsetmcSessionDay() {
+  const j = await getJSON('https://cdn.tsetmc.com/api/Index/GetIndexB1LastDay/32097828799138957');
+  const l = (j?.indexB1 || []).filter((x) => x.dEven);
+  if (!l.length) throw new Error('تاریخ آخرین جلسه بورس معلوم نشد');
+  const last = l.reduce((a, b) => (b.dEven > a.dEven || (b.dEven === a.dEven && b.hEven > a.hEven) ? b : a));
+  return { day: tseDate(last.dEven).asOf, hEven: last.hEven };
+}
+/** Instrument details: estimated EPS, the sector's P/E, 52-week range (unadjusted), shares, market name. */
+export async function tsetmcInstrumentInfo(insCode) {
+  const j = await getJSON(`https://cdn.tsetmc.com/api/Instrument/GetInstrumentInfo/${encodeURIComponent(insCode)}`);
+  const i = j?.instrumentInfo;
+  if (!i) throw new Error('اطلاعات نماد پیدا نشد');
+  return { insCode: String(i.insCode), symbol: persianize(i.lVal18AFC), name: persianize(i.lVal30), eps: n(i.eps?.estimatedEPS ?? i.eps?.epsValue),
+    sectorPE: n(i.eps?.sectorPE), sector: persianize(i.sector?.lSecVal || ''), sectorCode: String(i.sector?.cSecVal || '').trim(),
+    minYear: n(i.minYear), maxYear: n(i.maxYear), avgVol: n(i.qTotTran5JAvg), shares: n(i.zTitad), market: persianize(i.cgrValCotTitle || i.flowTitle || '') };
 }
 export async function tsetmcQuotes(refs) {
   const out = {}; const errors = {};
@@ -268,7 +320,11 @@ export function parseFunds(raw) {
     const name = fundName(f.name); const regNo = String(f.regNo);
     const it = { key: fundKey(regNo, name, count[f.regNo] > 1), regNo, name, type: FUND_TYPES[f.fundType] || '', fundType: f.fundType,
       cancelNav: n(f.cancelNav), issueNav: n(f.issueNav), statisticalNav: n(f.statisticalNav), date: f.date || '',
-      annual: n(f.annualEfficiency), symbol: persianize(f.smallSymbolName || ''), size: n(f.netAsset) || n(f.fundSize) || 0 };
+      annual: n(f.annualEfficiency), symbol: persianize(f.smallSymbolName || ''), size: n(f.netAsset) || n(f.fundSize) || 0,
+      // returns are percent over each period (as Fipiran publishes them); insCode links an exchange-traded fund to TSETMC
+      ret: { d1: n(f.dailyEfficiency), w1: n(f.weeklyEfficiency), m1: n(f.monthlyEfficiency), m3: n(f.quarterlyEfficiency), m6: n(f.sixMonthEfficiency), y1: n(f.annualEfficiency) },
+      since: String(f.initiationDate || '').slice(0, 10), traded: f.typeOfInvest === 'Negotiable', insCode: f.insCode ? String(f.insCode) : '',
+      mix: { stock: n(f.stock), bond: n(f.bond), deposit: n(f.deposit), cash: n(f.cash), other: n(f.other) }, manager: persianize(f.manager || '') };
     const prev = byKey.get(it.key); // the same fund listed twice: keep the newer NAV
     if (!prev || (!(prev.cancelNav > 0) && it.cancelNav > 0) || String(it.date) > String(prev.date)) byKey.set(it.key, it);
   }

@@ -482,7 +482,12 @@ export function SettingsPage({ st, pf, s }) {
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="bell" cls="sm" />اعلان‌ها</h3></div>
-      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
+      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند'], ['radar', 'مورد تازه در قاعده‌های رادار']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
+    </div>
+
+    <div class="card"><div class="card-h"><h3><${Icon} n="radar" cls="sm" />رادار فرصت‌ها</h3></div>
+      <${Row} t="نمایش رادار" d="بخشی در منو که هر روز بعد از بازار، سهام و صندوق‌هایی را که ارزش بررسی دارند نشان می‌دهد. خاموش باشد، بررسی روزانه هم انجام نمی‌شود."><${Toggle} title="نمایش رادار" on=${s.radar !== false} onChange=${(v) => set({ radar: v })} /></${Row}>
+      <${Row} t="چک‌لیست پیش از خرید" d="وقتی خرید سهم یا صندوق را ثبت می‌کنی، بالای فرم: سهمش در دارایی‌ها، حباب، فاصله از سقف سال، نقدشوندگی و مقایسه با سپرده."><${Toggle} title="چک‌لیست پیش از خرید" on=${s.preBuyCheck !== false} onChange=${(v) => set({ preBuyCheck: v })} /></${Row}>
     </div>
 
     <${BackupCard} st=${st} s=${s} />

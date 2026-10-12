@@ -676,3 +676,28 @@ select.input.imp-sheet { width: auto; max-width: 45%; height: 32px; font-size: 1
 .danger-zone h3 { color: var(--neg); }
 .jumps { display: flex; gap: 6px; flex-wrap: wrap; position: sticky; top: 0; z-index: 3; padding: 6px 0; background: var(--bg); }
 #perf, #scenario, #risk, #compare, #targets, #pnl { scroll-margin-top: 56px; }
+
+/* ---------------- radar ---------------- */
+.rd-top h3 { display: flex; align-items: center; gap: 6px; }
+.rd-prog { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.rd-note { margin-top: 10px; }
+.rd-sec { display: flex; flex-direction: column; gap: 10px; }
+.rd-sec-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rd-sec-h h4 { margin: 0; font-size: 14.5px; }
+.rd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.rd-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; margin: 0; }
+.rd-name { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; border-radius: 8px; }
+.rd-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rd-name b { font-size: 15px; }
+.rd-why, .rd-check { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 10px; }
+.rd-why { background: var(--accent-soft); }
+.rd-check { background: var(--surface-2); color: var(--ink-2); }
+.rd-why > .xs, .rd-check > .xs.sb { color: var(--muted); }
+.rd-hits { display: flex; flex-direction: column; gap: 2px; padding: 4px 0 2px; }
+.rd-hit { all: unset; cursor: pointer; display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 8px; }
+.rd-hit:hover, .rd-hit:focus-visible { background: var(--surface-2); }
+.btn.icon.on { color: var(--accent); }
+.prebuy summary { cursor: pointer; list-style: none; }
+.prebuy summary::-webkit-details-marker { display: none; }
+.prebuy-l { margin: 4px 0 6px; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.prebuy-l li.warn { color: var(--warn); }

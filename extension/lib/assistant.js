@@ -4,6 +4,7 @@ import * as I from './insights.js';
 import * as CMP from './compare.js';
 import * as AI from './ai.js';
 import * as BB from './bubble.js';
+import * as RD from './radar.js';
 import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
@@ -35,6 +36,7 @@ export function systemPrompt(st, privacy = 'full') {
 - برای هر محاسبه (سناریو، تغییرات، زمان‌بندی، تاریخچه) ابزار مربوط را صدا بزن و خودت حساب نکن.
 - مبالغ را به ${unit} بنویس، با جداکننده هزارگان؛ برای اعداد بزرگ از «میلیون/میلیارد» استفاده کن.
 - توصیه قطعی خرید و فروش نده؛ گزینه‌ها، اثر و ریسک هرکدام را بگو و تصمیم را به کاربر بسپار.
+- دربارهٔ هر سهم یا صندوق، اول get_symbol_report را صدا بزن و فقط با همان عددها حرف بزن؛ منبع و تاریخ را بگو. هرگز نگو «بخر» یا «بفروش»؛ حداکثر بگو «ارزش بررسی دارد» و کنار دلیلش، ریسک‌ها و چیزهایی را که باید بررسی شود بیاور. بازدهی گذشته تضمینی برای آینده نیست.
 - برای تغییر داده‌ها فقط ابزارهای propose_* را صدا بزن؛ تغییر بعد از تأیید کاربر اعمال می‌شود. بعد از پیشنهاد، به کاربر بگو دکمه تأیید را بزند.
 ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» فعال است: مبالغ مطلق در دسترس تو نیست؛ با درصدها پاسخ بده.\n' : ''}
 امروز: ${fmtJ(todayIso())}. واحد نمایش: ${unit}.
@@ -47,6 +49,12 @@ function loanLine(a, settings) {
   const st = E.loanState(a.loan);
   if (st.done) return 'وام قسطی، تسویه شده';
   return `${E.isLiability(a) ? 'وام' : 'طلب'} قسطی ${a.loan.annualPct}٪، ${st.paid + st.before} از ${st.n + st.before} قسط پرداخت شده، قسط بعدی ${fmtJ(st.next.date)}${settings ? `، مبلغ قسط ${disp(st.next.payment, settings)}` : ''}`;
+}
+
+/** The radar scan: from the caller, or straight from storage (the assistant page doesn't keep it in its state). */
+async function radarOf(ctx) {
+  if (ctx.getRadar) return ctx.getRadar();
+  try { return typeof chrome !== 'undefined' && chrome.storage?.local ? (await chrome.storage.local.get('radar')).radar || null : null; } catch { return null; }
 }
 
 export function makeTools(ctx) {
@@ -288,6 +296,42 @@ export function makeTools(ctx) {
           plan: r.rows.filter((x) => x.add >= 1).map((x) => ({ category: x.cat.name, share_of_amount_pct: pct(x.add / r.amount), share_after_pct: pct(x.afterShare), target_pct: pct(x.target), example_asset: x.vehicle?.name,
             ...(P() ? {} : { add: disp(x.add, s.settings), share_now_pct: pct(x.currentShare) }) })),
           max_gap_before_pct: pct(r.maxDevBefore), max_gap_after_pct: pct(r.maxDevAfter) };
+      },
+    },
+    {
+      name: 'get_symbol_report',
+      description: 'کارنامهٔ یک سهم یا صندوق از اسکن روزانهٔ «رادار فرصت‌ها»: P/E و میانهٔ گروه، EPS، بازدهی ۱/۳/۱۲ ماه (تعدیل‌شده)، فاصله از سقف و کف سال، نقدشوندگی؛ برای صندوق: نوع، بازدهی‌ها، رتبه در گروه، اندازه، ترکیب، NAV و حباب. برای هر سؤال دربارهٔ یک نماد بورسی یا صندوق اول این را صدا بزن.',
+      schema: { type: 'object', properties: { query: { type: 'string', description: 'نماد (مثل فولاد، فزر، عیار) یا نام صندوق' } }, required: ['query'] },
+      run: async ({ query }) => {
+        const radar = await radarOf(ctx);
+        if (!radar?.day) return { error: 'رادار هنوز اسکنی ندارد (در تنظیمات خاموش است یا اولین بررسی انجام نشده). عددی نساز.' };
+        const hit = RD.find(radar, query);
+        const rep = hit && RD.report(radar, hit);
+        if (!rep) return { error: `«${query}» در اسکن بازار پیدا نشد. فقط سهام بورس و فرابورس و صندوق‌های فیپیران پوشش داده می‌شوند.` };
+        const p = (x, d = 1) => (x === null || x === undefined || !isFinite(x) ? null : +(x * 100).toFixed(d));
+        const m = rep.m;
+        if (rep.kind === 'stock') {
+          return { kind: 'سهم', symbol: rep.sym, name: rep.name, source: 'بورس تهران (TSETMC)', session_day: fmtJ(rep.day), prices_adjusted_for_capital_increase_and_dividends: true, history_incomplete: rep.partial,
+            pe: m.pe, sector_median_pe: m.sectorPE, eps_rial: isFinite(m.eps) ? m.eps : null, return_pct: { m1: p(m.ret30), m3: p(m.ret91), y1: p(m.ret365) },
+            from_year_high_pct: m.fullYear ? p(m.fromHigh) : null, from_year_low_pct: m.fullYear ? p(m.fromLow) : null, avg_daily_value: disp(m.avgVal, st().settings), unit: unitName(st().settings),
+            volume_vs_usual: m.volRatio !== null ? +m.volRatio.toFixed(1) : null, sector: rep.sector, market: rep.market };
+        }
+        return { kind: 'صندوق', symbol: rep.sym, name: rep.name, type: rep.type, source: 'فیپیران', nav_day: rep.navDay ? fmtJ(rep.navDay) : null,
+          return_pct: { m1: p(m.m1), m3: p(m.m3), m6: p(m.m6), y1: p(m.y1) }, rank_in_type_by_y1: rep.rank ? `${rep.rank.pos} از ${rep.rank.of}` : null,
+          age_days: m.ageDays, size: disp(rep.size, st().settings), unit: unitName(st().settings), mix_pct: rep.mix, bubble_pct_same_day: p(m.bubble) };
+      },
+    },
+    {
+      name: 'get_radar_today',
+      description: 'کارت‌های امروز «رادار فرصت‌ها»: نمادها و صندوق‌هایی که با قاعده‌های ثابت ارزش بررسی دارند، با دلیل و نکته‌های بررسی هر کدام.',
+      schema: { type: 'object', properties: { kind: { type: 'string', enum: ['all', 'stock', 'fund'] } }, required: [] },
+      run: async ({ kind = 'all' } = {}) => {
+        const radar = await radarOf(ctx);
+        if (!radar?.day) return { error: 'رادار هنوز اسکنی ندارد.' };
+        const s = st().settings;
+        const b = RD.buildCards(radar, { depositPct: I.defaultDepositPct(st()), money: (v) => `${disp(v, s)?.toLocaleString('en-US')} ${unitName(s)}` });
+        return { session_day: fmtJ(b.day), note: 'این‌ها پیشنهاد خرید نیستند؛ فقط از قاعده‌های ثابت رد شده‌اند.',
+          cards: b.cards.filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => ({ signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check })) };
       },
     },
     {

@@ -24,7 +24,7 @@ export function coreHash(st) {
   const s = { ...(st.settings || {}) };
   for (const k of ['lastUpdateCheck', 'theme', 'privacy', 'backup', 'compact', 'digits']) delete s[k];
   const assets = (st.assets || []).map((a) => (a?.price?.last ? { ...a, price: { ...a.price, last: undefined } } : a));
-  const text = JSON.stringify([assets, st.flows || [], st.events || [], st.alerts || [], s, (st.reports || []).length]);
+  const text = JSON.stringify([assets, st.flows || [], st.events || [], st.alerts || [], s, (st.reports || []).length, ...(st.radarUser ? [st.radarUser.rules, st.radarUser.marks] : [])]);
   let h = 2166136261; // FNV-1a, 32-bit — enough to notice a change, not a security measure
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); }
   return (h >>> 0).toString(36) + ':' + text.length.toString(36);

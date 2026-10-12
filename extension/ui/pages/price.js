@@ -1,7 +1,8 @@
 // A price's detail page (a drawer): its chart over a week to a year, high and low, changes over common periods, the
 // owner's own position in it, what's special about it (a coin's bubble, a fund's NAV, gold against the world price),
 // and shortcuts into the tools with this price already chosen.
-import { html, useState, useEffect, useMemo, Icon, Money, Delta, Seg, Drawer, AreaChart, AskBtn, num, pct, fmtJ, money, send, refLabel, providerName } from '../components.js';
+import { html, useState, useEffect, useMemo, Icon, Money, Delta, Seg, Drawer, AreaChart, AskBtn, num, pct, fmtJ, money, send, refLabel, providerName, useRadar } from '../components.js';
+import * as RD from '../../lib/radar.js';
 import { T as H } from '../tips.js';
 import * as E from '../../lib/engine.js';
 import * as BB from '../../lib/bubble.js';
@@ -59,7 +60,15 @@ export function PriceDetail({ st, s, refOf, onClose }) {
   const fmtV = (v) => (view === 'usd' && canDollar ? '$' + num(v, v < 10 ? 3 : v < 1000 ? 2 : 0) : money(v, s, { compact: true }));
   const V = ({ v, big }) => (v === null || v === undefined || !isFinite(v) ? html`<span class="muted">—</span>` : view === 'usd' && canDollar ? html`<b class=${'num ltr' + (big ? ' pd-big' : '')}>${fmtV(v)}</b>` : html`<${Money} v=${v} s=${s} cls=${big ? 'pd-big' : ''} />`);
 
-  const price = q?.price > 0 ? (usdNative ? q.price * (rate || 0) : q.price) : null; // in Rial
+  // a stock's or fund's report card from the daily radar scan (or, for a stock it doesn't have, TSETMC's own details)
+  const radar = useRadar();
+  const market = ref.provider === 'tsetmc' || ref.provider === 'fipiran';
+  const rep = useMemo(() => (market && radar?.day ? RD.report(radar, ref.provider === 'fipiran' ? { fundKey: ref.key } : { ins: ref.key }) : null), [radar, id]);
+  const [info, setInfo] = useState(null);
+  useEffect(() => { if (ref.provider === 'tsetmc' && ref.key && radar && !rep) send('symbolInfo', { ins: ref.key }).then((r) => r?.ok && setInfo(r.info)); }, [radar !== null, !!rep, id]);
+  // opened from the radar, a price may not be one Dara fetches: the last close of its history (or its NAV) stands in
+  const lastPt = hist?.points?.length ? hist.points[hist.points.length - 1] : null;
+  const price = q?.price > 0 ? (usdNative ? q.price * (rate || 0) : q.price) : lastPt ? lastPt[1] : rep?.kind === 'fund' ? rep.nav || null : rep?.kind === 'stock' ? rep.m.close || null : null; // in Rial
   const stale = !price || !!q?.error || Date.now() - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
   const name = refLabel(ref);
   // what's special about this price
@@ -110,6 +119,8 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         ${marks.length > 0 && html`<div class="xs muted"><span class="pd-dot buy"></span> خرید <span class="pd-dot sell"></span> فروش، روی نمودار</div>`}
       </div>`}
 
+      ${(rep || info) && html`<${Report} rep=${rep} info=${info} price=${price} s=${s} />`}
+
       ${coin && !coin.stale && html`<div class="pd-card">
         <div class="sb small">حباب سکه</div>
         <div class="pd-line"><span>حباب امروز</span><b class="ltr">${pct(coin.bubble, { digits: 1 })}</b></div>
@@ -137,4 +148,42 @@ export function PriceDetail({ st, s, refOf, onClose }) {
     </div>
     ${alertOpen && html`<${AlertModal} s=${s} st=${st} init=${{ ref, price: q?.price }} onClose=${() => setAlertOpen(false)} />`}
   </${Drawer}>`;
+}
+
+/** «کارنامه»: a stock's valuation and returns, or a fund's returns, rank among its kind, size and mix — every number
+ *  with its source and day. Facts only; nothing here says buy or sell. */
+function Report({ rep, info, price, s }) {
+  const P = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? html`<span class="faint">—</span>` : html`<${Delta} p=${x} showAbs=${false} digits=${d} />`);
+  const line = (t, v) => html`<div class="pd-line"><span>${t}</span><span>${v}</span></div>`;
+  if (rep?.kind === 'fund') {
+    const m = rep.m;
+    return html`<div class="pd-card"><div class="sb small row" style="gap:6px"><${Icon} n="file" cls="sm" />کارنامهٔ صندوق</div>
+      ${line('نوع', rep.type || '—')}
+      <div class="pd-periods">${[['۱ ماه', m.m1], ['۳ ماه', m.m3], ['۶ ماه', m.m6], ['۱۲ ماه', m.y1]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><span class="small">${P(v, 1)}</span></div>`)}</div>
+      ${rep.rank && line('رتبه در صندوق‌های هم‌نوع (۱۲ ماه)', `${num(rep.rank.pos)} از ${num(rep.rank.of)}`)}
+      ${line('اندازهٔ صندوق', html`<${Money} v=${rep.size} s=${s} compact />`)}
+      ${rep.mix && isFinite(rep.mix.stock) && line('ترکیب', `${num(rep.mix.stock, 0)}٪ سهام، ${num((rep.mix.bond || 0) + (rep.mix.deposit || 0), 0)}٪ اوراق و سپرده، ${num((rep.mix.cash || 0) + (rep.mix.other || 0), 0)}٪ سایر`)}
+      ${line(`NAV ابطال${rep.navDay ? ` (${fmtJ(rep.navDay, 'dm')})` : ''}`, html`<${Money} v=${rep.nav} s=${s} />`)}
+      ${m.bubble !== null && line('حباب در همان روز', html`<b class="ltr">${pct(m.bubble, { digits: 1 })}</b>`)}
+      <div class="xs muted">منبع: فیپیران${rep.navDay ? `، ${fmtJ(rep.navDay)}` : ''}. بازدهی‌ها مال گذشته‌اند.</div></div>`;
+  }
+  if (rep?.kind === 'stock') {
+    const m = rep.m;
+    return html`<div class="pd-card"><div class="sb small row" style="gap:6px"><${Icon} n="file" cls="sm" />کارنامهٔ نماد</div>
+      ${line('P/E', html`<span class="num">${m.pe !== null ? num(m.pe, 1) : '—'}${m.sectorPE ? html` <span class="xs muted">میانهٔ گروه ${num(m.sectorPE, 1)}</span>` : ''}</span>`)}
+      ${line('EPS برآوردی', isFinite(m.eps) ? `${num(m.eps)} ریال` : '—')}
+      <div class="pd-periods">${[['۱ ماه', m.ret30], ['۳ ماه', m.ret91], ['۱۲ ماه', m.ret365]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><span class="small">${P(v)}</span></div>`)}</div>
+      ${m.fromHigh !== null && line(m.fullYear ? 'فاصله از بالاترین و کمترین سال' : 'فاصله از بالاترین و کمترین (سابقهٔ کمتر از یک سال)', html`<span class="ltr num">${pct(m.fromHigh, { digits: 0 })} / ${pct(m.fromLow, { digits: 0 })}</span>`)}
+      ${line('میانگین ارزش معاملات روزانه', html`<${Money} v=${m.avgVal} s=${s} compact />`)}
+      ${(rep.sector || rep.market) && line('گروه و بازار', [rep.sector, rep.market].filter(Boolean).join('، '))}
+      <div class="xs muted">منبع: بورس تهران، جلسهٔ ${fmtJ(rep.day)}. قیمت‌ها برای افزایش سرمایه و سود نقدی تعدیل شده‌اند.${rep.partial ? ' سابقهٔ یک‌سالهٔ این نماد هنوز در حال جمع شدن است.' : ''}</div></div>`;
+  }
+  // not in the radar: TSETMC's own details (its 52-week range is not adjusted for capital increases)
+  const pe = info.eps > 0 && price > 0 ? price / info.eps : null;
+  return html`<div class="pd-card"><div class="sb small row" style="gap:6px"><${Icon} n="file" cls="sm" />کارنامهٔ نماد</div>
+    ${line('P/E', html`<span class="num">${pe !== null ? num(pe, 1) : '—'}${info.sectorPE > 0 ? html` <span class="xs muted">P/E گروه ${num(info.sectorPE, 1)}</span>` : ''}</span>`)}
+    ${line('EPS برآوردی', isFinite(info.eps) ? `${num(info.eps)} ریال` : '—')}
+    ${info.maxYear > 0 && info.minYear > 0 && price > 0 && line('فاصله از بالاترین و کمترین سال', html`<span class="ltr num">${pct(price / info.maxYear - 1, { digits: 0 })} / ${pct(price / info.minYear - 1, { digits: 0 })}</span>`)}
+    ${(info.sector || info.market) && line('گروه و بازار', [info.sector, info.market].filter(Boolean).join('، '))}
+    <div class="xs muted">منبع: بورس تهران. بالاترین و کمترین سال تعدیل‌نشده‌اند؛ با روشن بودن رادار، کارنامهٔ کامل‌تر (بازدهی‌های تعدیل‌شده) اینجا می‌آید.</div></div>`;
 }

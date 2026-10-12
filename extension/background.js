@@ -12,6 +12,7 @@ import { money, pct, uid } from './lib/format.js';
 import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
+import * as RD from './lib/radar.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir'];
 const REFERERS = {
@@ -45,6 +46,7 @@ async function schedule() {
   if (!(await chrome.alarms.get('daily'))) await chrome.alarms.create('daily', { periodInMinutes: 60 * 6, delayInMinutes: 1 });
   if (!(await chrome.alarms.get('weekly'))) await chrome.alarms.create('weekly', { periodInMinutes: 60 * 2, delayInMinutes: 3 });
   if (!(await chrome.alarms.get('backup'))) await chrome.alarms.create('backup', { periodInMinutes: 60 * 3, delayInMinutes: 2 });
+  if (!(await chrome.alarms.get('radar'))) await chrome.alarms.create('radar', { periodInMinutes: 15, delayInMinutes: 4 });
   // only a folder install («Load unpacked») updates by copying files; a packed install never needs the 1-minute check
   let dev = true; try { dev = (await chrome.management.getSelf()).installType === 'development'; } catch (e) { /* unknown: keep checking */ }
   if (dev && !(await chrome.alarms.get('selfupdate'))) await chrome.alarms.create('selfupdate', { periodInMinutes: 1, delayInMinutes: 1 });
@@ -135,7 +137,7 @@ async function runBackup({ force = false } = {}) {
     if (waiting.length) await setBackupMeta({ files });
     if (!force && (!BK.isDue(cfg, meta) || !st.assets.length)) return { skipped: true };
     if (!chrome.downloads?.download) throw new Error('این مرورگر اجازه ذخیره فایل به افزونه نمی‌دهد');
-    st = { ...st, ...(await store.load('flows', 'events', 'alerts', 'reports')) };
+    st = { ...st, ...(await store.load('flows', 'events', 'alerts', 'reports', 'radarUser')) };
     const hash = BK.coreHash(st);
     if (!force && meta.lastAt && meta.lastHash === hash) { await setBackupMeta({ checkedAt: Date.now(), error: null }); return { unchanged: true }; }
     const now = Date.now();
@@ -440,6 +442,99 @@ async function captureTab(tabId) {
 }
 
 /* ------------------------------- messaging ------------------------------- */
+/* ------------------------------------ radar ------------------------------------ */
+// Once a session is over: one market-watch request for the whole stock market, the Fipiran fund list, and — a batch at
+// a time, busiest stocks first — each stock's daily closes for the year (needed once; after that the market watch
+// keeps them going). Then the owner's rules run and a new match can raise a notification.
+let radarRun = null;
+async function loadRadar() { const o = await chrome.storage.local.get('radar'); return o.radar?.v === RD.VERSION ? o.radar : RD.empty(); }
+async function runRadar({ force = false, batch = 40 } = {}) {
+  if (radarRun) return radarRun;
+  const done = keepAlive();
+  radarRun = (async () => {
+    const { settings, assets, radarUser } = await store.load('settings', 'assets', 'radarUser');
+    if (settings.radar === false && !force) return { off: true };
+    const tse = settings.providers?.tsetmc !== false, fip = settings.providers?.fipiran !== false;
+    if (!tse && !fip) return { error: 'منبع‌های «بورس تهران» و «فیپیران» در تنظیمات خاموش‌اند' };
+    const radar = await loadRadar();
+    const prevError = radar.error ?? null;
+    let changed = false; radar.error = tse ? null : 'منبع «بورس تهران» در تنظیمات خاموش است؛ فقط صندوق‌ها بررسی می‌شوند';
+    // 1) the latest session, once its closing prices are final (never an older one than we already have)
+    if (tse) try {
+      const s = await P.tsetmcSessionDay();
+      if (RD.sessionFinal(s.day) && (!radar.day || s.day > radar.day || (force && s.day === radar.day))) {
+        const rows = await P.tsetmcMarketWatch();
+        // the largest stocks' own daily lists: is the market watch really that session (or already reset for the next
+        // one), and which sessions happened lately — was one missed while the browser was off?
+        const refs = RD.largest(rows, 4);
+        await Promise.all(refs.map(async (r) => { try { r.rows = await P.tsetmcDaily(r.ins, 60); } catch { r.rows = []; } }));
+        const mode = RD.snapshotMode(rows, refs, s.day);
+        if (mode !== 'wait') {
+          const sessions = new Set(refs.flatMap((r) => r.rows.map((x) => x.date)));
+          RD.applySession(radar, rows, s.day, [...sessions], mode);
+          changed = true;
+        }
+      }
+      if (!radar.sectorsAt || Date.now() - radar.sectorsAt > 30 * 864e5) {
+        try {
+          const j = await P.getJSON('https://cdn.tsetmc.com/api/StaticData/GetStaticData');
+          radar.sectors = Object.fromEntries((j.staticData || []).filter((x) => x.type === 'IndustrialGroup').map((x) => [String(x.code).padStart(2, '0'), P.persianize(x.name)]));
+          radar.sectorsAt = Date.now(); changed = true;
+        } catch { /* names are optional */ }
+      }
+    } catch (e) { radar.error = e.message; }
+    // 2) funds: a few times a day (Fipiran publishes NAVs once a day, usually a day behind)
+    if (fip && (force || Date.now() - (radar.fundsAt || 0) > 3 * 3600e3)) {
+      try { radar.funds = (await P.fipiranFunds(10 * 60e3)).map(RD.slimFund); radar.fundsAt = Date.now(); changed = true; }
+      catch (e) { radar.error = radar.error || 'فیپیران: ' + e.message; }
+    }
+    // 3) a batch of stock histories (a stock whose list keeps failing is left as it is after 3 tries, till the next session)
+    const todo = tse && radar.day ? RD.nextToFetch(radar, batch) : [];
+    let fails = 0;
+    for (let i = 0; i < todo.length; i += 4) {
+      await Promise.all(todo.slice(i, i + 4).map(async ({ ins, need }) => {
+        const rec = radar.stocks[ins];
+        try { RD.mergeDaily(rec, await P.tsetmcDaily(ins, need), RD.dayNum(radar.day)); rec.fails = 0; }
+        catch { fails++; rec.fails = (rec.fails || 0) + 1; if (rec.fails >= 3) { rec.need = 0; rec.fails = 0; } }
+        changed = true;
+      }));
+      if (fails >= 8) { radar.error = radar.error || 'دریافت سابقهٔ قیمت نمادها با خطا روبه‌رو شد؛ بعداً ادامه می‌دهد'; break; }
+    }
+    // 4) which cards are new today (per signal), and the owner's rules
+    const pending = Object.values(radar.stocks).filter((r) => r.need > 0).length;
+    const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
+    if (changed && radar.day) {
+      const ids = [...new Set(RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }) }).cards.map(RD.cardKey))];
+      const prev = radar.results || {};
+      radar.results = { day: radar.day, at: Date.now(), ids, before: prev.day === radar.day ? prev.before || [] : prev.ids || [] };
+      const notes = [];
+      for (const rule of radarUser.rules || []) {
+        // a stock rule waits until every stock is up to date: half-gathered data would make old matches look new
+        if (rule.kind === 'stock' && pending) continue;
+        const hits = RD.runRule(radar, rule);
+        const { fresh, ids: hitIds } = RD.newHits(radar.ruleHits[rule.id], hits);
+        if (rule.notify && radar.ruleHits[rule.id] && fresh.length) notes.push(`«${rule.name}»: ${fresh.slice(0, 4).map((x) => x.sym || x.name).join('، ')}${fresh.length > 4 ? ' و …' : ''}`);
+        radar.ruleHits[rule.id] = hitIds;
+      }
+      if (notes.length && settings.notify?.radar !== false) notify('dara-radar', 'رادار فرصت‌ها: مورد تازه', notes.join('\n'));
+    }
+    // a small summary for the menu badge (the scan itself is too large to load on every page)
+    const res = radar.results || {};
+    const newCount = res.before?.length ? new Set((res.ids || []).filter((x) => !res.before.includes(x)).map((x) => x.split('|')[1])).size : 0;
+    await store.update('meta', (m) => ({ ...m, radar: { day: radar.day, newCount, pending, at: Date.now() } }));
+    // the store is several MB: written only when something changed (closes kept to 8 significant digits)
+    if (changed || radar.error !== prevError) {
+      for (const r of Object.values(radar.stocks)) r.p = r.p.map((v) => +v.toPrecision(8));
+      radar.at = Date.now();
+      await chrome.storage.local.set({ radar });
+    }
+    return { day: radar.day, pending, year, total: Object.keys(radar.stocks).length, funds: radar.funds.length, error: radar.error };
+  })().finally(() => { radarRun = null; done(); });
+  return radarRun;
+}
+/** A stock's details for its report card (P/E of its sector, 52-week range), fetched when the radar doesn't have it. */
+async function symbolInfo(insCode) { return P.tsetmcInstrumentInfo(insCode); }
+
 const handlers = {
   async refresh() { return runCycle({ force: true, reason: 'manual' }); },
   async automate() {
@@ -502,6 +597,8 @@ const handlers = {
   async weekly({ force = true, days = 7 }) { return generateWeekly({ force, days }); },
   async capture({ tabId }) { return captureTab(tabId); },
   async checkUpdate() { return checkSelfUpdate(); },
+  async radar({ force = false, batch = 40 } = {}) { return runRadar({ force, batch }); },
+  async symbolInfo({ ins }) { return { info: await symbolInfo(ins) }; },
   async badge() {
     const st = await store.load('assets', 'quotes', 'settings', 'snapshots', 'events');
     const pf = E.portfolio(st.assets, st.quotes, st.settings);
@@ -522,6 +619,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'refresh' || a.name === 'daily') runCycle({ reason: a.name });
   if (a.name === 'selfupdate') checkSelfUpdate().catch(() => {});
   if (a.name === 'backup') runBackup().catch(() => {});
+  if (a.name === 'radar') runRadar().catch(() => {});
   if (a.name === 'weekly') { const { ai } = await store.load('ai'); if (ai.weekly !== false) generateWeekly({ force: false }).catch(() => {}); }
 });
 

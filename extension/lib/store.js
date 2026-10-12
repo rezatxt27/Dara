@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   privacy: false,           // blur amounts
   refreshMinutes: 30,
   badge: 'change',          // change | gold | usd | none
-  notify: { interest: true, flows: true, alerts: true, stale: true },
+  notify: { interest: true, flows: true, alerts: true, stale: true, radar: true },
   remindDays: { price: 7, balance: 30 },
   providers: { tgju: true, tsetmc: true, fipiran: true, nobitex: true },
   targets: {},              // categoryId -> target share (0..1)
@@ -24,6 +24,8 @@ export const DEFAULT_SETTINGS = {
   watch: [],                // market watchlist refs (price only, not holdings)
   depositPct: null,
   updateUrl: '',            // optional public JSON {version, url} announcing the latest release
+  radar: true,              // «رادار فرصت‌ها» in the menu and its daily scan
+  preBuyCheck: true,        // the checklist above a new stock or fund purchase
   lastUpdateCheck: 0,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
 };
 
@@ -38,6 +40,7 @@ export const DEFAULTS = {
   history: {},  // quoteId -> {at, points:[[iso, price]]}
   ai: { connections: [], activeId: null, privacy: 'full', fallback: true, weekly: true, trustedSites: [] },
   chat: { messages: [] },
+  radarUser: { rules: [], marks: [], seenDay: null }, // the owner's radar rules and «پیگیری» list (the scan itself is in «radar», not backed up)
   reports: [],  // weekly narratives [{id, weekOf, createdAt, facts, text, by, model}]
   critique: null, // last AI portfolio review {at, points:[{title, detail, check, level}], by}
   meta: { lastRun: 0, lastOk: 0, running: false, errors: {}, schema: SCHEMA_VERSION, lastStaleNotice: 0 },
@@ -129,6 +132,7 @@ function withDefaults(key, value) {
       targets: { ...(value.targets || {}) } };
   }
   if (key === 'meta') return { ...structuredClone(DEFAULTS.meta), ...value };
+  if (key === 'radarUser') return { rules: Array.isArray(value.rules) ? value.rules.filter((r) => r && r.id) : [], marks: Array.isArray(value.marks) ? value.marks.filter((m) => m && m.id) : [], seenDay: value.seenDay || null };
   if (key === 'ai') { const v = { ...structuredClone(DEFAULTS.ai), ...value }; v.connections = (v.connections || []).map(normalizeConnection); return v; }
   return value;
 }

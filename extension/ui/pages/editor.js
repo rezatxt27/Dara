@@ -1,4 +1,7 @@
-import { html, useState, useEffect, useMemo, useRef, Tip, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ, money } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Tip, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ, money, useRadar } from '../components.js';
+import * as RD from '../../lib/radar.js';
+import * as I from '../../lib/insights.js';
+import * as BB from '../../lib/bubble.js';
 import { CryptoPicker } from '../pickers.js';
 import { CATEGORIES, CAT, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY, LIQUIDITY, METAL_PRESETS, GOLD_PRESETS } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
@@ -196,6 +199,23 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const fundDefault = a.mode === 'loan' ? +L.amount || 0 : a.mode === 'rate' ? +a.rate.principal || 0 : a.mode === 'units' && +a.costBasis > 0 ? +a.costBasis : Math.abs(val.value) || 0;
   const fundAmt = fund.amount ?? fundDefault;
   const fundShort = fundAcc && !liabCat && fundAmt > (E.valueOf(fundAcc, st.quotes, s).value || 0) + 0.5;
+  // «پیش از خرید ببین»: a new stock or fund bought at market — facts only, never blocks saving
+  const radar = useRadar();
+  const pbRef = isNew && s.preBuyCheck !== false && a.mode === 'units' && a.price.source === 'market' && (a.price.ref?.provider === 'tsetmc' || a.price.ref?.provider === 'fipiran') && a.price.ref?.key ? a.price.ref : null;
+  const preBuy = useMemo(() => {
+    const buy = fund.on && fundAmt > 0 ? fundAmt : val.value;
+    if (!pbRef || !(buy > 0)) return null;
+    const rep = radar?.day ? RD.report(radar, pbRef.provider === 'fipiran' ? { fundKey: pbRef.key } : { ins: pbRef.key }) : null;
+    const pf = E.portfolio(st.assets, quotes, s);
+    const id = E.quoteId(pbRef);
+    const sum = (f) => pf.rows.filter((r) => !r.cat.liability && f(r)).reduce((t, r) => t + Math.max(0, r.value), 0);
+    const tse = (r) => r.asset.mode === 'units' && r.asset.price?.source === 'market' && r.asset.price.ref?.provider === 'tsetmc' ? r.asset.price.ref.key : null;
+    const sec = rep?.kind === 'stock' ? radar.stocks?.[pbRef.key]?.sector : null;
+    const isFund = rep?.kind === 'fund' || pbRef.provider === 'fipiran';
+    const fb = rep?.kind === 'fund' ? rep.m.bubble : (() => { const b = BB.fundBubble(pbRef, quotes); return b && !b.stale ? b.bubble : null; })();
+    return { lines: RD.preBuy({ value: buy, funded: fund.on && !!fundAcc, held: { gross: pf.gross, sameRef: sum((r) => r.asset.price?.ref && E.quoteId(r.asset.price.ref) === id), sameSector: sec ? sum((r) => tse(r) && radar.stocks?.[tse(r)]?.sector === sec) : 0 },
+      rep, bubble: fb, depositPct: I.defaultDepositPct(st), fee: pbRef.provider === 'fipiran' ? 0 : isFund ? 0.5 : 1.5, kind: isFund ? 'fund' : 'stock' }), rep };
+  }, [pbRef && E.quoteId(pbRef), val.value, fund.on, fundAmt, fundAcc?.id, radar, st.assets, quotes, s]);
   const [dbad, setDbad] = useState({});
   const dB = (k) => (b) => setDbad((d) => (!!d[k] === b ? d : { ...d, [k]: b }));
   // what's missing or wrong, by field (shown in red on the field itself after a save attempt)
@@ -444,6 +464,12 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       ${fundShort && html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>مانده «${fundAcc.name}» کافی نیست؛ اگر ثبت کنی منفی می‌شود.</div></div>`}`}
       <span class="hint">${fund.on ? (liabCat ? 'مبلغ به آن حساب اضافه می‌شود؛ ارزش خالص تغییری نمی‌کند.' : 'مبلغ از آن حساب کم می‌شود؛ پول تازه یا سود حساب نمی‌شود.') : (liabCat ? 'اگر پول وام به حسابی رفته که در دارا ثبت کرده‌ای، انتخابش کن.' : 'اگر همین حالا با پول یکی از حساب‌هایت خریدی، انتخابش کن تا از آن کم شود.')}</span>
     </div>`}
+
+    ${preBuy?.lines.length > 0 && html`<details class="sec prebuy" open>
+      <summary class="st"><${Icon} n="info" cls="sm" />پیش از خرید ببین</summary>
+      <ul class="prebuy-l">${preBuy.lines.map((l) => html`<li class=${l.warn ? 'warn' : ''}>${l.t}</li>`)}</ul>
+      <span class="hint">${preBuy.rep ? `از رادار، جلسهٔ ${fmtJ(preBuy.rep.day)}.` : 'با روشن بودن رادار فرصت‌ها، P/E، فاصله از سقف و نقدشوندگی هم اینجا می‌آید.'} فقط برای اطلاع است؛ ثبت را عوض نمی‌کند. در تنظیمات می‌شود خاموشش کرد.</span>
+    </details>`}
 
     <div class="sec"><div class="st"><${Icon} n="target" cls="sm" />جزئیات بیشتر (اختیاری)</div>
       ${!cat.liability && a.mode !== 'rate' && a.mode !== 'loan' && a.category !== 'bank' && html`<div class="grid2">

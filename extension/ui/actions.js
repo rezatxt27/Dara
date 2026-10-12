@@ -294,6 +294,18 @@ export const act = {
     send('refresh');
   },
 
+  /** The radar's own settings: rules and the «پیگیری» list (patch object, or a function of the current value). */
+  async setRadarUser(patch) { await store.update('radarUser', (u) => ({ ...u, ...(typeof patch === 'function' ? patch(u) : patch) })); },
+  async saveRadarRule(rule) {
+    await act.setRadarUser((u) => { const i = u.rules.findIndex((r) => r.id === rule.id); const rules = u.rules.slice(); if (i >= 0) rules[i] = rule; else rules.push({ ...rule, id: rule.id || uid('r') }); return { rules }; });
+  },
+  async deleteRadarRule(id) { await act.setRadarUser((u) => ({ rules: u.rules.filter((r) => r.id !== id) })); },
+  /** Add to or remove from «پیگیری», remembering the price and day it was marked. */
+  async toggleRadarMark(card, price, day) {
+    await act.setRadarUser((u) => (u.marks.some((m) => m.id === card.id) ? { marks: u.marks.filter((m) => m.id !== card.id) }
+      : { marks: [{ id: card.id, sym: card.sym || '', name: card.name, ref: card.ref, kind: card.kind, price: price || null, day }, ...u.marks].slice(0, 100) }));
+  },
+
   async deleteAsset(id) {
     let ev = null;
     await store.mutate(['assets', 'flows', 'events', 'quotes'], (st) => {

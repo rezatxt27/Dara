@@ -14,6 +14,7 @@ import { MarketPage } from './pages/market.js';
 import { AutomationPage } from './pages/automation.js';
 import { AnalysisPage } from './pages/analysis.js';
 import { CalcPage } from './pages/calc.js';
+import { RadarPage } from './pages/radar.js';
 import { PriceDetail } from './pages/price.js';
 import { SettingsPage, WelcomePage, clearSample } from './pages/settings.js';
 import { AssistantPage } from './pages/assistant.js';
@@ -25,6 +26,7 @@ const ROUTES = [
   { id: 'assets', t: 'دارایی‌ها', icon: 'assets' },
   { id: 'assistant', t: 'دستیار هوشمند', icon: 'sparkles' },
   { id: 'market', t: 'بازار و قیمت‌ها', icon: 'market' },
+  { id: 'radar', t: 'رادار فرصت‌ها', icon: 'radar' },
   { id: 'automation', t: 'خودکارسازی', icon: 'automation' },
   { id: 'analysis', t: 'تحلیل و سناریو', icon: 'analysis' },
   { id: 'calc', t: 'ماشین‌حساب‌ها', icon: 'calculator' },
@@ -343,11 +345,14 @@ function App() {
   const page = route.page;
   const cur = ROUTES.find((r) => r.id === page) || { t: HIDDEN[page] || 'دارا' };
   const attention = pf.attention.length;
+  // new radar cards since the owner last opened the radar (a small summary the background keeps in meta)
+  const rm = st.meta.radar;
+  const radarNew = s.radar !== false && rm?.day && st.radarUser?.seenDay !== rm.day ? rm.newCount || 0 : 0;
   const themeNext = { auto: 'light', light: 'dark', dark: 'auto' }[s.theme];
   return html`<div class="shell">
     <aside class="side">
       <div class="brand"><div class="logo"><${Icon} n="layers" /></div><div><div class="name">دارا</div><div class="tag">مدیریت هوشمند دارایی</div></div></div>
-      <nav class="nav">${ROUTES.map((r) => html`<a href=${'#/' + r.id} class=${page === r.id ? 'on' : ''} title=${r.t} aria-label=${r.t} aria-current=${page === r.id ? 'page' : undefined}><${Icon} n=${r.icon} />${r.t}${r.id === 'assets' && attention ? html`<span class="count num">${num(attention)}</span>` : ''}</a>`)}</nav>
+      <nav class="nav">${ROUTES.filter((r) => r.id !== 'radar' || s.radar !== false).map((r) => html`<a href=${'#/' + r.id} class=${page === r.id ? 'on' : ''} title=${r.t} aria-label=${r.t} aria-current=${page === r.id ? 'page' : undefined}><${Icon} n=${r.icon} />${r.t}${r.id === 'radar' && radarNew > 0 && page !== 'radar' ? html`<span class="count num" title="مورد تازه در رادار امروز">${num(radarNew)}</span>` : ''}${r.id === 'assets' && attention ? html`<span class="count num">${num(attention)}</span>` : ''}</a>`)}</nav>
       <div class="foot">
         <div class="row between"><span class="muted">ارزش خالص</span><span class="b"><${Money} v=${pf.net} s=${s} compact /></span></div>
         <div class="row between xs" style="margin-top:4px"><span class="muted" title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">${todayMove?.stale ? `از ${fmtJ(todayMove.from, 'dm')}` : 'امروز'}</span><${Delta} p=${todayMove?.pct} showAbs=${false} /></div>
@@ -372,6 +377,7 @@ function App() {
       ${page === 'automation' && html`<${AutomationPage} ...${ctx} />`}
       ${page === 'analysis' && html`<${AnalysisPage} ...${ctx} />`}
       ${page === 'calc' && html`<${CalcPage} ...${ctx} />`}
+      ${page === 'radar' && (s.radar !== false ? html`<${RadarPage} ...${ctx} />` : html`<div class="page"><div class="card"><div class="empty small">رادار فرصت‌ها در تنظیمات خاموش است.</div></div></div>`)}
       ${page === 'settings' && html`<${SettingsPage} ...${ctx} />`}
       ${page === 'welcome' && html`<${WelcomePage} ...${ctx} />`}
       ${page === 'capture' && html`<${CapturePage} ...${ctx} />`}

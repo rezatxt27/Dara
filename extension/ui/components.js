@@ -47,6 +47,21 @@ export function useStore() {
   return st;
 }
 
+/** The radar's daily scan (kept apart from the main store: large, rebuilt every day, never backed up). null while loading. */
+export function useRadar() {
+  const [r, setR] = useState(null);
+  useEffect(() => {
+    if (!hasChrome) { setR({}); return; }
+    let alive = true;
+    const load = () => chrome.storage.local.get('radar').then((o) => { if (alive) setR(o.radar || {}); });
+    load();
+    const h = (changes, area) => { if (area === 'local' && changes.radar) setR(changes.radar.newValue || {}); };
+    chrome.storage.onChanged.addListener(h);
+    return () => { alive = false; chrome.storage.onChanged.removeListener(h); };
+  }, []);
+  return r;
+}
+
 export function useTick(ms = 5000) {
   const [, set] = useState(0);
   useEffect(() => { const t = setInterval(() => set((x) => x + 1), ms); return () => clearInterval(t); }, [ms]);

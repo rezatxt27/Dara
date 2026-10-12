@@ -334,8 +334,11 @@ export function parseFunds(raw) {
 /** maxAge: how old (ms) a cached list may be. NAVs change once a day, so a few minutes is plenty. */
 export async function fipiranFunds(maxAge = 30 * 60 * 1000) {
   if (fundCache.items.length && Date.now() - fundCache.at < maxAge) return fundCache.items;
-  const j = await getJSON(FIPIRAN_FUNDS_URL, { method: 'POST', timeout: 25000, headers: { 'Content-Type': 'application/json' },
+  const ask = (timeout) => getJSON(FIPIRAN_FUNDS_URL, { method: 'POST', timeout, headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ regNos: [], showMarketMakers: false }) });
+  // Fipiran is sometimes slow for a while (the list is ~0.5 MB): one more, longer try before giving up
+  let j;
+  try { j = await ask(25000); } catch (e) { if (!/مهلت|اتصال/.test(e.message)) throw e; j = await ask(45000); }
   const items = parseFunds(j);
   if (!items.length) throw new Error('فهرست صندوق‌ها خالی برگشت');
   fundCache = { at: Date.now(), items };

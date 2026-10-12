@@ -462,19 +462,27 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     // 1) the latest session, once its closing prices are final (never an older one than we already have)
     if (tse) try {
       const s = await P.tsetmcSessionDay();
-      if (RD.sessionFinal(s.day) && (!radar.day || s.day > radar.day || (force && s.day === radar.day))) {
+      const final = RD.sessionFinal(s.day);
+      const newer = !radar.day || s.day > radar.day || (force && s.day === radar.day);
+      // while the latest session can't be used yet (unfinished, or not yet in the daily lists), the last session the lists
+      // do have is used instead — once per session day, so a first scan doesn't stay empty for hours
+      if (newer && (final || radar.prevFor !== s.day || force)) {
         const rows = await P.tsetmcMarketWatch();
         // the largest stocks' own daily lists: is the market watch really that session (or already reset for the next
         // one), and which sessions happened lately — was one missed while the browser was off?
         const refs = RD.largest(rows, 4);
         await Promise.all(refs.map(async (r) => { try { r.rows = await P.tsetmcDaily(r.ins, 60); } catch { r.rows = []; } }));
-        const mode = RD.snapshotMode(rows, refs, s.day);
+        const sessions = [...new Set(refs.flatMap((r) => r.rows.map((x) => x.date)))].sort();
+        const mode = final ? RD.snapshotMode(rows, refs, s.day) : 'wait';
         if (mode !== 'wait') {
-          const sessions = new Set(refs.flatMap((r) => r.rows.map((x) => x.date)));
-          RD.applySession(radar, rows, s.day, [...sessions], mode);
-          changed = true;
+          RD.applySession(radar, rows, s.day, sessions, mode);
+          radar.waitFor = null; changed = true;
+        } else {
+          radar.prevFor = s.day; radar.waitFor = s.day; changed = true;
+          const last = sessions.filter((d) => d < s.day).pop();
+          if (last && (!radar.day || last > radar.day)) RD.applySession(radar, rows, last, sessions.filter((d) => d <= last), 'prev');
         }
-      }
+      } else if (!newer && radar.waitFor) { radar.waitFor = null; changed = true; }
       if (!radar.sectorsAt || Date.now() - radar.sectorsAt > 30 * 864e5) {
         try {
           const j = await P.getJSON('https://cdn.tsetmc.com/api/StaticData/GetStaticData');
@@ -486,7 +494,7 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     // 2) funds: a few times a day (Fipiran publishes NAVs once a day, usually a day behind)
     if (fip && (force || Date.now() - (radar.fundsAt || 0) > 3 * 3600e3)) {
       try { radar.funds = (await P.fipiranFunds(10 * 60e3)).map(RD.slimFund); radar.fundsAt = Date.now(); changed = true; }
-      catch (e) { radar.error = radar.error || 'فیپیران: ' + e.message; }
+      catch (e) { radar.error = radar.error || `صندوق‌ها: فیپیران فعلاً جواب نداد (${e.message})؛ چند دقیقهٔ دیگر خودکار دوباره امتحان می‌شود. سهام جدا بررسی می‌شوند.`; }
     }
     // 3) a batch of stock histories (a stock whose list keeps failing is left as it is after 3 tries, till the next session)
     const todo = tse && radar.day ? RD.nextToFetch(radar, batch) : [];
@@ -506,7 +514,9 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     if (changed && radar.day) {
       const ids = [...new Set(RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }) }).cards.map(RD.cardKey))];
       const prev = radar.results || {};
-      radar.results = { day: radar.day, at: Date.now(), ids, before: prev.day === radar.day ? prev.before || [] : prev.ids || [] };
+      // «تازه» compares with the last COMPLETE day (a day whose prices were still being gathered lacks most stocks)
+      const before = prev.day === radar.day ? prev.before || [] : prev.complete !== false ? prev.ids || [] : prev.before || [];
+      radar.results = { day: radar.day, at: Date.now(), ids, before, complete: !pending };
       const notes = [];
       for (const rule of radarUser.rules || []) {
         // a stock rule waits until every stock is up to date: half-gathered data would make old matches look new

@@ -86,10 +86,12 @@ export function missed(sessions, lastDay, day) {
  * Apply one finished session's market watch to the store (mutates). sessions: recent session days (from a few busy
  * stocks' daily lists) — they tell whether a session was missed while the browser was closed. Stocks whose series
  * can't simply take today's close get `need` = how many daily rows to fetch. mode (see snapshotMode): in 'list' mode
- * only names, sectors and EPS are taken; every stock's close comes from its own daily list.
+ * only names, sectors and EPS are taken; every stock's close comes from its own daily list. 'prev': the market watch is
+ * already a LATER session (today's, unfinished or not yet in the daily lists) and `day` is the last session the lists
+ * have — used so a first scan doesn't wait for hours; no price at all is taken from the market watch.
  */
 export function applySession(radar, rows, day, sessions = [], mode = 'live') {
-  const live = mode === 'live';
+  const live = mode === 'live', prev = mode === 'prev';
   const D = dayNum(day);
   // recent session days (liquidity is averaged over the last 20 of them, days without a trade counting as zero)
   radar.sess = [...new Set([...(radar.sess || []), ...sessions.filter((x) => x <= day), day])].sort().slice(-40);
@@ -97,6 +99,7 @@ export function applySession(radar, rows, day, sessions = [], mode = 'live') {
   for (const raw of rows) {
     const r = mwRow(raw);
     if (isEtfIsin(r.isin)) {
+      if (prev) continue; // its price is a later session's: the bubble waits for a finished one
       // a few days of closes: Fipiran's NAV is usually a day behind, and a bubble needs the price of the NAV's own day
       // (a reset market watch still shows the session's close; only its value traded is gone — keep the last known)
       const old = radar.etf[r.ins];
@@ -112,7 +115,7 @@ export function applySession(radar, rows, day, sessions = [], mode = 'live') {
     const sameDay = rec.today?.day === day;
     Object.assign(rec, { sym: r.sym, name: r.name, sector: r.sector, isin: r.isin, eps: r.eps, pe: r.pe, cap: r.cap });
     if (live) rec.today = { day, close: r.close, py: r.py, vol: r.vol, val: r.val };
-    else if (!sameDay) rec.today = { day, close: r.close, py: null, vol: 0, val: 0 }; // filled in from its daily list
+    else if (!sameDay) rec.today = { day, close: prev ? null : r.close, py: null, vol: 0, val: 0 }; // filled in from its daily list
     // sessions since this stock was last brought up to date (a halted stock's list has no rows for its idle days, so
     // its last close can be old while it is in fact current: `upTo` is the last session its list was checked through)
     const upTo = Math.max(lastD || 0, rec.upTo || 0);

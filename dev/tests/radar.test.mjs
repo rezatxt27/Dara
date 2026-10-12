@@ -335,3 +335,18 @@ test('find: a whole name wins even when it is part of another name', () => {
   R.funds = [{ key: 'a', name: 'صندوق طلا', symbol: 'x1' }, { key: 'b', name: 'صندوق طلای ب', symbol: 'x2' }];
   assert.equal(RD.find(R, 'صندوق طلا').fundKey, 'a');
 });
+
+test('prev mode: while today is unfinished, the last session in the lists is used and no price comes from the market watch', () => {
+  const R = RD.empty();
+  // first install during the session of D(1): the market watch shows today's intraday prices
+  RD.applySession(R, [mw({ ins: 'A', close: 999, py: 100 }), mw({ ins: 'E', isin: 'IRTKTEST0001', close: 77 })], DAY0, [D(-2), D(-1), DAY0], 'prev');
+  assert.equal(R.day, DAY0);
+  const a = R.stocks.A;
+  assert.equal(a.need, RD.FULL_ROWS); assert.equal(a.today.close, null);
+  assert.equal(R.etf.E, undefined); // no bubble from a later session's price
+  RD.mergeDaily(a, adjustDaily(rows([[D(-2), 98], [D(-1), 100], [DAY0, 103]])), RD.dayNum(DAY0));
+  assert.deepEqual(a.p, [98, 100, 103]); assert.equal(a.today.close, 103); assert.equal(a.today.py, 100);
+  // the finished session D(1) then appends normally
+  RD.applySession(R, [mw({ ins: 'A', close: 106, py: 103 })], D(1), [D(-2), D(-1), DAY0, D(1)], 'live');
+  assert.deepEqual(a.p, [98, 100, 103, 106]); assert.equal(a.need, 0);
+});

@@ -74,6 +74,7 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${pending > 0 && total > 0 && html`<div class="rd-prog"><div class="row between xs"><span>${year > 0 ? 'در حال جمع کردن قیمت‌های یک سال' : 'در حال گرفتن قیمت‌های پایانی جلسه'}: ${num(total - pending)} از ${num(total)} نماد</span><span class="muted">${run && !run.error ? 'تا این صفحه باز است ادامه دارد' : 'در پس‌زمینه ادامه دارد'}</span></div>
       <div class="progress"><i style=${`width:${Math.round(((total - pending) / total) * 100)}%;background:var(--accent)`}></i></div>
       <div class="xs muted">تا کامل شود، کارت‌های سهام فقط برای نمادهای آماده ساخته می‌شوند.</div></div>`}
+    ${radar?.waitFor && day && radar.waitFor > day && html`<div class="xs muted" style="margin-top:8px">قیمت‌های پایانی جلسهٔ ${fmtJ(radar.waitFor)} هنوز کامل منتشر نشده (معمولاً بعد از ساعت ۱۳:۳۰ و گاهی دیرتر)؛ تا آن موقع کارت‌ها از جلسهٔ ${fmtJ(day)} هستند و خودکار به‌روز می‌شوند.</div>`}
     ${(run?.error || radar?.error) && html`<div class="callout warn" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>${run?.error || radar.error}</div></div>`}
     <div class="xs muted rd-note">این‌ها پیشنهاد خرید یا فروش نیستند؛ فهرست چیزهایی است که با قاعده‌های بالا ارزش بررسی دارند. بازدهی گذشته تضمینی برای آینده نیست.</div>
   </div>`;

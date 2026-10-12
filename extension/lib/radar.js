@@ -356,10 +356,10 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   if (gold.length >= 3) gold.slice(0, 3).forEach((x, i) => { if (!(x.m.bubble <= -0.01)) fpush('goldBubble', x, [`حباب ${fa(P(x.m.bubble, 1))}؛ ${i === 0 ? 'کمترین' : `رتبهٔ ${fa(i + 1)}`} از ${fa(gold.length)} صندوق طلای پرمعامله`, 'بیشتر دارایی این صندوق‌ها طلا و گواهی سکه است؛ حباب کمتر یعنی بهای کمتری بالای ارزش دارایی‌ها']); });
   const depEff = Math.pow(1 + depositPct / 100 / 12, 12) - 1;
   funds.filter((x) => x.f.fundType === 4 && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, max)
-    .forEach((x) => fpush('fixedBeat', x, [`بازدهی ۱۲ ماه ${fa(P(x.m.y1, 1))} در برابر ${fa(P(depEff, 1))} سپرده ${fa(depositPct)}٪ با سود ماهانه`, `۳ ماه ${fa(P(x.m.m3, 1))}، ۱ ماه ${fa(P(x.m.m1, 1))}`]));
+    .forEach((x) => fpush('fixedBeat', x, [`بازدهی ۱۲ ماه ${fa(P(x.m.y1, 1))} در برابر ${fa(P(depEff, 1))} سپرده ${fa(depositPct)}٪ با سود ماهانه`]));
   for (const t of [6, 7, 5, 23, 21, 22]) {
     funds.filter((x) => x.f.fundType === t && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 2)
-      .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`, `۳ ماه ${fa(P(x.m.m3))}، ۱ ماه ${fa(P(x.m.m1))}`]));
+      .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`]));
   }
   return { day, cards, ready, total: stocks.length, funds: funds.length };
 }

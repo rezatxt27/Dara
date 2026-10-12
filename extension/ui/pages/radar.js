@@ -1,6 +1,6 @@
 // «رادار فرصت‌ها»: what in the stock market and among funds is worth a look today — each card says why it showed up and
 // what to check before deciding. Not advice: fixed rules, plain numbers, the other side always shown. Logic: lib/radar.js.
-import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Modal, NumField, AskBtn, Sparkline, YearBar, ReturnBars, toast, send, num, fmtJ, money, useRadar } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Modal, NumField, AskBtn, Sparkline, YearBar, toast, send, num, fmtJ, money, useRadar } from '../components.js';
 import * as RD from '../../lib/radar.js';
 import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
@@ -189,10 +189,11 @@ function Marks({ radar, user, s, openPrice }) {
     <div class="xs muted" style="margin-top:8px">قیمت سهام تعدیل‌شده است؛ برای صندوق‌های غیربورسی NAV ابطال.</div></div>`;
 }
 
-/** A stock's year in a small line and where today's price sits between its low and high; a fund's returns as bars. */
+/** A stock's year in a small line, where today's price sits between its low and high, and its returns; a fund's returns. */
 function Viz({ kind, m, rec, day, s, compact = false }) {
   if (!m) return null;
-  if (kind === 'fund') return html`<${ReturnBars} r=${m} />`;
+  // a fund: only its returns over each period are known (Fipiran publishes no daily NAV) — the same row as a stock's
+  if (kind === 'fund') return html`<${Rets} items=${[['۱ ماه', m.m1], ['۳ ماه', m.m3], ['۶ ماه', m.m6], ['۱۲ ماه', m.y1]]} />`;
   const v = rec && day ? RD.spark(rec, RD.dayNum(day)) : [];
   const up = v.length > 1 && v[v.length - 1] >= v[0];
   return html`<div class=${'rd-viz' + (compact ? ' compact' : '')}>

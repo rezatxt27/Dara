@@ -146,7 +146,10 @@ async def main():
             check('cards: a year sparkline and the year bar', await card.locator('.rd-spark svg path').count() >= 1 and await card.locator('.yb-t i').count() == 1)
             pos = await card.locator('.yb-t i').evaluate("e => parseFloat(e.style.left)")
             check('year bar: a stock at its high sits at the right end', pos >= 99, pos)
-            check('cards: a fund shows its returns as bars', await pg.locator('.rd-card:has-text("درآمد ثابت برتر") .rbars .rbar').count() == 4)
+            fr = await pg.locator('.rd-card:has-text("درآمد ثابت برتر") .rd-rets').inner_text()
+            check('cards: a fund shows its returns in the same row as a stock', all(t in fr for t in ['۱ ماه', '۳ ماه', '۶ ماه', '۱۲ ماه']), fr.replace('\n', ' | '))
+            sr = await card.locator('.rd-rets').inner_text()
+            check('cards: a stock\'s returns row under its chart (and no repeat in «why»)', '۶ ماه' in sr and '۱۲ ماه' in sr and '۳ ماه' not in await card.locator('.rd-why').inner_text(), sr.replace('\n', ' | '))
             # search
             await pg.keyboard.press('/'); await pg.wait_for_timeout(200)
             check('search: «/» focuses it', await pg.evaluate("document.activeElement?.getAttribute('role')") == 'combobox')

@@ -331,7 +331,11 @@ export function makeTools(ctx) {
         const s = st().settings;
         const b = RD.buildCards(radar, { depositPct: I.defaultDepositPct(st()), money: (v) => `${disp(v, s)?.toLocaleString('en-US')} ${unitName(s)}` });
         return { session_day: fmtJ(b.day), note: 'این‌ها پیشنهاد خرید نیستند؛ فقط از قاعده‌های ثابت رد شده‌اند.',
-          cards: b.cards.filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => ({ signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check })) };
+          cards: b.cards.filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => {
+            const r = c.kind === 'stock' ? [c.m.ret30, c.m.ret91, c.m.ret182, c.m.ret365] : [c.m.m1, c.m.m3, c.m.m6, c.m.y1];
+            const p = (v) => (v === null || v === undefined || !isFinite(v) ? null : pct(v));
+            return { signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check, returns_pct: { m1: p(r[0]), m3: p(r[1]), m6: p(r[2]), m12: p(r[3]) } };
+          }) };
       },
     },
     {

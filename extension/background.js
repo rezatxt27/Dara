@@ -512,12 +512,14 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     const pending = Object.values(radar.stocks).filter((r) => r.need > 0).length;
     const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
     if (changed && radar.day) {
-      const ids = [...new Set(RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }) }).cards.map(RD.cardKey))];
+      const depositPct = I.defaultDepositPct({ settings, assets });
+      const cards = RD.buildCards(radar, { depositPct }).cards;
+      const ids = [...new Set(cards.map(RD.cardKey))];
       const prev = radar.results || {};
       // «تازه» compares with the last COMPLETE day (a day whose prices were still being gathered lacks most stocks)
       const before = prev.day === radar.day ? prev.before || [] : prev.complete !== false ? prev.ids || [] : prev.before || [];
       radar.results = { day: radar.day, at: Date.now(), ids, before, complete: !pending };
-      const notes = [];
+      const notes = []; let mineNote = null;
       for (const rule of radarUser.rules || []) {
         // a stock rule waits until every stock is up to date: half-gathered data would make old matches look new
         if (rule.kind === 'stock' && pending) continue;
@@ -526,7 +528,20 @@ async function runRadar({ force = false, batch = 40 } = {}) {
         if (rule.notify && radar.ruleHits[rule.id] && fresh.length) notes.push(`«${rule.name}»: ${fresh.slice(0, 4).map((x) => x.sym || x.name).join('، ')}${fresh.length > 4 ? ' و …' : ''}`);
         radar.ruleHits[rule.id] = hitIds;
       }
+      // the owner's own stocks and funds: a new warning (a sharp fall, far under its high, a fund below the deposit…) is
+      // worth a notification — only on a complete scan, and never on the first one (that only sets what is known)
+      if (!pending) {
+        const items = RD.mine(radar, RD.holdRefs(assets, E.isLiability), { depositPct, cards });
+        const { fresh, state } = RD.newWarnings(radar.mineWarn?.seen ? radar.mineWarn : null, items, RD.dayNum(radar.day));
+        radar.mineWarn = state;
+        if (fresh.length && settings.notify?.radarMine !== false) {
+          // with amounts hidden (privacy), the lock screen doesn't name what the owner holds either
+          mineNote = settings.privacy ? 'یکی از دارایی‌هایت در رادار نکتهٔ تازه‌ای دارد؛ بخش «دارایی‌های تو» را ببین.'
+            : `${fresh.slice(0, 3).map((w) => `«${w.sym}» ${w.t}`).join('؛ ')}${fresh.length > 3 ? ' و …' : ''}`;
+        }
+      }
       if (notes.length && settings.notify?.radar !== false) notify('dara-radar', 'رادار فرصت‌ها: مورد تازه', notes.join('\n'));
+      if (mineNote) notify('dara-radar-mine', 'رادار: دربارهٔ دارایی‌های تو', mineNote);
     }
     // a small summary for the menu badge (the scan itself is too large to load on every page)
     const res = radar.results || {};

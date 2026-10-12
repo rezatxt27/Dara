@@ -63,7 +63,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
   // a stock's or fund's report card from the daily radar scan (or, for a stock it doesn't have, TSETMC's own details)
   const radar = useRadar();
   const market = ref.provider === 'tsetmc' || ref.provider === 'fipiran';
-  const rep = useMemo(() => (market && radar?.day ? RD.report(radar, ref.provider === 'fipiran' ? { fundKey: ref.key } : { ins: ref.key }) : null), [radar, id]);
+  const rep = useMemo(() => (market && radar?.day ? RD.report(radar, ref.provider === 'fipiran' ? { fundKey: ref.key, fundName: ref.name || ref.label } : { ins: ref.key }) : null), [radar, id]);
   const [info, setInfo] = useState(null);
   useEffect(() => { if (ref.provider === 'tsetmc' && ref.key && radar && !rep) send('symbolInfo', { ins: ref.key }).then((r) => r?.ok && setInfo(r.info)); }, [radar !== null, !!rep, id]);
   // opened from the radar, a price may not be one Dara fetches: the last close of its history (or its NAV) stands in

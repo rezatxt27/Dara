@@ -205,7 +205,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const preBuy = useMemo(() => {
     const buy = fund.on && fundAmt > 0 ? fundAmt : val.value;
     if (!pbRef || !(buy > 0)) return null;
-    const rep = radar?.day ? RD.report(radar, pbRef.provider === 'fipiran' ? { fundKey: pbRef.key } : { ins: pbRef.key }) : null;
+    const rep = radar?.day ? RD.report(radar, pbRef.provider === 'fipiran' ? { fundKey: pbRef.key, fundName: pbRef.name || pbRef.label } : { ins: pbRef.key }) : null;
     const pf = E.portfolio(st.assets, quotes, s);
     const id = E.quoteId(pbRef);
     const sum = (f) => pf.rows.filter((r) => !r.cat.liability && f(r)).reduce((t, r) => t + Math.max(0, r.value), 0);

@@ -427,20 +427,32 @@ export function changeSince(radar, id, day, priceThen) {
   return priceThen > 0 ? now / priceThen - 1 : null;
 }
 /** A stock's or fund's report card from the radar store, by TSETMC insCode or fund key. */
-export function report(radar, { ins = null, fundKey = null } = {}) {
+export function report(radar, { ins = null, fundKey = null, fundName = '' } = {}) {
   if (!radar?.day) return null;
   const D = dayNum(radar.day);
   if (ins && radar.stocks?.[ins]) {
     const rec = radar.stocks[ins]; const m = stockMetrics(rec, D, sectorMedians(radar.stocks), radar.sess);
     return { kind: 'stock', day: radar.day, sym: rec.sym, name: rec.name, sector: radar.sectors?.[rec.sector] || '', market: marketOf(rec.isin), m, partial: !!rec.need };
   }
-  const f = (radar.funds || []).find((x) => (fundKey && x.key === fundKey) || (ins && x.insCode === ins));
+  const f = (fundKey && fundOf(radar, fundKey, fundName)) || (ins && (radar.funds || []).find((x) => x.insCode === ins)) || null;
   if (!f) return null;
   const m = fundMetrics(f, radar, D);
   const peers = (radar.funds || []).filter((x) => x.fundType === f.fundType && isFinite(x.ret?.y1) && x.since && D - dayNum(x.since) >= 365);
   const better = peers.filter((x) => x.ret.y1 > (f.ret?.y1 ?? -Infinity)).length;
   return { kind: 'fund', day: radar.day, sym: f.symbol, name: f.name, type: FUND_KIND[f.fundType] || f.type, m, mix: f.mix, nav: f.cancelNav, navDay: m.navDay, size: f.size,
     rank: isFinite(f.ret?.y1) && peers.length && m.ageDays >= 365 ? { pos: better + 1, of: peers.length } : null };
+}
+/** The fund a saved key points at. Older refs to one class of an umbrella fund hold only its registration number: then
+ *  the saved name picks the class (as providers.findFund does for prices). */
+export function fundOf(radar, key, name = '') {
+  const fs = radar?.funds || []; const k = String(key ?? '');
+  if (!k) return null;
+  const exact = fs.find((x) => x.key === k);
+  if (exact) return exact;
+  const same = fs.filter((x) => String(x.key).split('-')[0] === k.split('-')[0]);
+  if (same.length <= 1) return same[0] || null;
+  const want = squash(name);
+  return want ? same.find((x) => squash(x.name) === want) || same.find((x) => squash(x.name).includes(want) || want.includes(squash(x.name))) || null : null;
 }
 /** A card's identity for «تازه»: the same stock under another signal is news too. */
 export const cardKey = (c) => `${c.sig}|${c.id}`;
@@ -511,4 +523,133 @@ export function preBuy({ value, funded = false, held = {}, rep = null, bubble = 
   const need = dg / keep - 1;
   out.push({ k: 'deposit', v: need, t: `برای جلو زدن از سپردهٔ ${fa(depositPct)}٪ در ۱۲ ماه، باید ${P0(need, 0)} بالا برود${fee ? ` (با ${fa(fee)}٪ هزینهٔ خرید و فروش)` : ''}` });
   return out;
+}
+
+/* ------------------------------------- pictures of a price ------------------------------------- */
+/** Up to `n` closes of the last year (oldest first), evenly picked, always ending on the latest close. */
+export function spark(rec, D, n = 48) {
+  if (!rec?.d?.length) return [];
+  let i0 = 0; while (i0 < rec.d.length && rec.d[i0] < D - 365) i0++;
+  const p = rec.p.slice(i0);
+  if (p.length <= n) return p;
+  const out = []; const step = (p.length - 1) / (n - 1);
+  for (let k = 0; k < n; k++) out.push(p[Math.round(k * step)]);
+  return out;
+}
+/** Where today's close sits in its year: 0 = the year's low, 1 = its high (null without a full year or a range). */
+export const yearPos = (m) => (m?.fullYear && m.hi52 > m.lo52 && m.close > 0 ? Math.min(1, Math.max(0, (m.close - m.lo52) / (m.hi52 - m.lo52))) : null);
+
+/* ----------------------------------------- search ----------------------------------------- */
+const squash = (s) => persianize(String(s || '')).replace(/[\s‌]+/g, '').toLowerCase();
+/**
+ * Quick search over every stock and fund in the radar: symbol first (exact, then prefix), then name. Larger first among
+ * equals. Returns [{ id, kind, sym, name, sub, ref, ins, key }].
+ */
+export function search(radar, q, n = 12) {
+  const t = squash(q);
+  if (!t || !radar) return [];
+  const hits = [];
+  const rank = (sym, name) => { const s = squash(sym), nm = squash(name); return s === t ? 0 : s.startsWith(t) ? 1 : nm.startsWith(t) ? 2 : s.includes(t) ? 3 : nm.includes(t) ? 4 : -1; };
+  for (const [ins, r] of Object.entries(radar.stocks || {})) {
+    const k = rank(r.sym, r.name); if (k < 0) continue;
+    hits.push({ k, size: r.cap || 0, id: `s:${ins}`, kind: 'stock', sym: r.sym, name: r.name, sub: [marketOf(r.isin), radar.sectors?.[r.sector] || ''].filter(Boolean).join('، '), ref: stockRef(ins, r), ins });
+  }
+  for (const f of radar.funds || []) {
+    const k = rank(f.symbol, f.name); if (k < 0) continue;
+    hits.push({ k, size: f.size || 0, id: `f:${f.key}`, kind: 'fund', sym: f.symbol || '', name: f.name, sub: [FUND_KIND[f.fundType] || f.type, f.traded ? 'قابل معامله' : 'صدور و ابطالی'].filter(Boolean).join('، '), ref: fundRef(f), key: f.key, ins: f.insCode || null });
+  }
+  return hits.sort((a, b) => a.k - b.k || b.size - a.size).slice(0, n).map(({ k, size, ...x }) => x);
+}
+
+/* ------------------------------------- the owner's holdings ------------------------------------- */
+/** Stocks and funds the owner holds at market price, one entry per symbol: [{ provider, key }]. isLiab(asset) skips debts. */
+export function holdRefs(assets = [], isLiab = () => false) {
+  const seen = new Map();
+  for (const a of assets) {
+    const r = a?.price?.ref;
+    if (a.archived || a.mode !== 'units' || a.price?.source !== 'market' || !(+a.quantity > 0) || isLiab(a)) continue;
+    if (!r?.key || (r.provider !== 'tsetmc' && r.provider !== 'fipiran')) continue;
+    const id = `${r.provider}:${r.key}`;
+    if (!seen.has(id)) seen.set(id, { provider: r.provider, key: String(r.key), label: r.symbol || r.label || r.name || a.name, assets: [] });
+    seen.get(id).assets.push(a.id);
+  }
+  return [...seen.values()];
+}
+/**
+ * The owner's holdings as the radar sees them: today's numbers, the cards they appear in, and plain facts worth a look —
+ * `warn` marks the ones that are bad news for a holder. Never a verdict. Returns
+ * [{ id, kind, sym, name, ref, hold, m, rep, sigs:[sig], flags:[{ k, t, warn }] }], warnings first.
+ */
+export function mine(radar, refs = [], { depositPct = 25, cards = null } = {}) {
+  if (!radar?.day || !refs.length) return [];
+  const D = dayNum(radar.day);
+  const list = cards || buildCards(radar, { depositPct }).cards;
+  const out = []; const byId = new Map();
+  // radar coverage is complete when no stock is still waiting for its prices and the fund list is in
+  const settled = radar.funds?.length > 0 && !Object.values(radar.stocks || {}).some((r) => r.need > 0);
+  for (const h of refs) {
+    let rep = null, id = null, ref = null;
+    if (h.provider === 'tsetmc' && radar.stocks?.[h.key]) { rep = report(radar, { ins: h.key }); id = `s:${h.key}`; ref = stockRef(h.key, radar.stocks[h.key]); }
+    else {
+      const f = h.provider === 'fipiran' ? fundOf(radar, h.key, h.label) : (radar.funds || []).find((x) => x.insCode === h.key);
+      if (f) { rep = report(radar, { fundKey: f.key }); id = `f:${f.key}`; ref = fundRef(f); }
+    }
+    if (!rep) {
+      out.push({ id: `x:${h.provider}:${h.key}`, kind: h.provider === 'fipiran' ? 'fund' : 'stock', sym: h.label, name: '', ref: { provider: h.provider, key: h.key, label: h.label }, hold: h, m: null, rep: null, sigs: [], flags: [], missing: true,
+        note: settled ? 'رادار این را پوشش نمی‌دهد (فقط سهام بورس و فرابورس و صندوق‌ها)' : 'هنوز در داده‌های رادار نیست' });
+      continue;
+    }
+    // the same fund held both by its TSETMC code and its Fipiran key: one row
+    if (byId.has(id)) { const o = byId.get(id); o.hold = { ...o.hold, assets: [...o.hold.assets, ...h.assets] }; continue; }
+    const m = rep.m;
+    const flags = [];
+    const add = (k, t, warn = false) => flags.push({ k, t, warn });
+    const sigs = [...new Set(list.filter((c) => c.id === id).map((c) => c.sig))];
+    if (rep.kind === 'stock' && rep.partial) add('partial', 'قیمت‌های یک سالش هنوز کامل جمع نشده؛ نکته‌هایش بعد از آن می‌آید');
+    else if (rep.kind === 'stock') {
+      if (m.dayChange !== null && Math.abs(m.dayChange) >= 0.04) add('day', `امروز ${P(m.dayChange, 1)}`, m.dayChange < 0);
+      if (m.ret7 !== null && m.ret7 <= -0.1) add('fall', `${P(m.ret7)} در یک هفته`, true);
+      else if (m.ret30 !== null && m.ret30 <= -0.15) add('fall', `${P(m.ret30)} در یک ماه`, true);
+      if (m.fullYear && m.fromHigh !== null && m.fromHigh <= -0.3) add('high', `${P0(m.fromHigh)} پایین‌تر از سقف سال`, !sigs.includes('nearLow'));
+      // near its low (and not already counted as far under its high); when it's also a «near its low» card, said plainly
+      else if (m.fullYear && m.fromLow !== null && m.fromLow <= 0.05 && m.fromHigh <= -0.15) add('low', 'نزدیک کمترین قیمت سال', !sigs.includes('nearLow'));
+      if (m.fullYear && m.fromHigh !== null && m.fromHigh > -0.03) add('top', 'نزدیک بالاترین قیمت سال');
+      if (m.volRatio >= 3) add('vol', `حجم امروز ${fa(N(m.volRatio))} برابر حجم معمول`);
+      if (!(m.eps > 0)) add('eps', 'سودده نیست یا P/E ندارد', true);
+      else if (m.peRel !== null && m.peRel >= 1.5) add('pe', `P/E ${fa(N(m.peRel))} برابر میانهٔ گروه`, true);
+      if (!m.traded) add('idle', 'بیش از یک هفته معامله نشده', true);
+      else if (!m.liquid) add('thin', 'معاملاتش کم است؛ فروش یک‌جا ممکن است سخت باشد', true);
+    } else {
+      const f = (radar.funds || []).find((x) => `f:${x.key}` === id);
+      if (m.bubble !== null && m.bubble >= 0.03) add('bubble', `حباب ${P(m.bubble, 1)} بالای NAV`, true);
+      else if (m.bubble !== null && m.bubble <= -0.01) add('under', `${P0(m.bubble, 1)} زیر NAV`);
+      if (m.m1 !== null && m.m1 <= -0.08) add('fall', `${P(m.m1)} در یک ماه`, true);
+      if (rep.rank && rep.rank.of >= 8) {
+        const kind = rep.type ? `صندوق‌های ${rep.type}` : 'صندوق‌های هم‌نوع';
+        if (rep.rank.pos > rep.rank.of * 0.75) add('rank', `رتبهٔ ${fa(rep.rank.pos)} از ${fa(rep.rank.of)} در ${kind} (بازدهی ۱۲ ماه)`, true);
+        else if (rep.rank.pos <= Math.max(1, Math.ceil(rep.rank.of * 0.1))) add('top', `رتبهٔ ${fa(rep.rank.pos)} از ${fa(rep.rank.of)} در ${kind}`);
+      }
+      const depEff = Math.pow(1 + depositPct / 100 / 12, 12) - 1;
+      if (f?.fundType === 4 && m.y1 !== null && m.ageDays >= 365 && m.y1 < depEff) add('dep', `بازدهی ۱۲ ماه ${P(m.y1, 1)}، کمتر از سپردهٔ ${fa(depositPct)}٪`, true);
+    }
+    const item = { id, kind: rep.kind, sym: rep.sym || '', name: rep.name, ref, hold: h, m, rep, sigs, flags };
+    byId.set(id, item); out.push(item);
+  }
+  return out.sort((a, b) => b.flags.filter((x) => x.warn).length - a.flags.filter((x) => x.warn).length || !!a.missing - !!b.missing);
+}
+/**
+ * Warnings about holdings worth a notification: [{ key, sym, t }]. prev: { seen: { key: last day number }, ids: [held ids] }
+ * from the last complete scan (null on the first: that one only remembers). Today's move («day») is never notified; a
+ * warning that went away and came back within COOL_DAYS doesn't notify again; a holding new since last time only
+ * remembers its warnings (it was just bought with them).
+ */
+export const COOL_DAYS = 7;
+export function newWarnings(prev, items, D) {
+  const seen = { ...(prev?.seen || {}) }; const ids = new Set(prev?.ids || []); const last = new Set(prev?.last || []);
+  const all = items.filter((x) => !x.missing).flatMap((x) => x.flags.filter((f) => f.warn && f.k !== 'day' && f.k !== 'partial').map((f) => ({ key: `${x.id}|${f.k}`, id: x.id, sym: x.sym || x.name, t: f.t })));
+  // still there since the last scan (however long ago that was) isn't news
+  const fresh = !prev ? [] : all.filter((w) => ids.has(w.id) && !last.has(w.key) && !(seen[w.key] >= D - COOL_DAYS));
+  for (const w of all) seen[w.key] = D;
+  for (const k of Object.keys(seen)) if (seen[k] < D - 60) delete seen[k];
+  return { fresh, state: { seen, last: all.map((w) => w.key), ids: items.filter((x) => !x.missing).map((x) => x.id) } };
 }

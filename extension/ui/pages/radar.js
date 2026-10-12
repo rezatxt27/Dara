@@ -1,7 +1,8 @@
 // «رادار فرصت‌ها»: what in the stock market and among funds is worth a look today — each card says why it showed up and
 // what to check before deciding. Not advice: fixed rules, plain numbers, the other side always shown. Logic: lib/radar.js.
-import { html, useState, useEffect, useMemo, Icon, Seg, Modal, NumField, AskBtn, toast, send, num, fmtJ, money, useRadar } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Modal, NumField, AskBtn, Sparkline, YearBar, ReturnBars, toast, send, num, fmtJ, money, useRadar } from '../components.js';
 import * as RD from '../../lib/radar.js';
+import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
 import { act } from '../actions.js';
 
@@ -71,6 +72,7 @@ export function RadarPage({ st, s, openPrice, route }) {
         <button class="btn icon ghost" title="بررسی دوباره" aria-label="بررسی دوباره" disabled=${run?.busy} onClick=${force}><${Icon} n="refresh" cls=${run?.busy ? 'sm spin' : 'sm'} /></button>
       </div>
     </div>
+    ${day && html`<${RadarSearch} radar=${radar} openPrice=${openPrice} today=${built} />`}
     ${pending > 0 && total > 0 && html`<div class="rd-prog"><div class="row between xs"><span>${year > 0 ? 'در حال جمع کردن قیمت‌های یک سال' : 'در حال گرفتن قیمت‌های پایانی جلسه'}: ${num(total - pending)} از ${num(total)} نماد</span><span class="muted">${run && !run.error ? 'تا این صفحه باز است ادامه دارد' : 'در پس‌زمینه ادامه دارد'}</span></div>
       <div class="progress"><i style=${`width:${Math.round(((total - pending) / total) * 100)}%;background:var(--accent)`}></i></div>
       <div class="xs muted">تا کامل شود، کارت‌های سهام فقط برای نمادهای آماده ساخته می‌شوند.</div></div>`}
@@ -86,11 +88,12 @@ export function RadarPage({ st, s, openPrice, route }) {
 
   return html`<div class="page">${head}
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
+      <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
       ${ORDER.map((sig) => {
         const list = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
         if (!list.length) return null;
         return html`<section class="rd-sec"><div class="rd-sec-h"><h4>${RD.SIGNALS[sig].t}</h4><span class="xs muted">${SIG_D[sig]}</span></div>
-          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div></section>`;
+          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div></section>`;
       })}
       ${!built.cards.filter((c) => only === 'all' || c.kind === only).length && html`<div class="card"><div class="empty small">امروز چیزی از این قاعده‌ها رد نشد.</div></div>`}`}
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} openPrice=${openPrice} onEdit=${setEditRule} />`}
@@ -99,7 +102,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   </div>`;
 }
 
-function Card({ c, isNew, marked, onMark, openPrice }) {
+function Card({ c, radar, s, isNew, marked, onMark, openPrice }) {
   const q = c.kind === 'stock' ? `نماد «${c.sym}» (${c.name}) امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`
     : `صندوق «${c.name}» امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`;
   return html`<article class="card rd-card">
@@ -109,6 +112,7 @@ function Card({ c, isNew, marked, onMark, openPrice }) {
         <span class="xs muted ellipsis">${c.sym ? c.name + '، ' : ''}${c.sub}</span></button>
       <button class=${'btn icon sm ghost' + (marked ? ' on' : '')} title=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-label=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-pressed=${marked ? 'true' : 'false'} onClick=${onMark}><${Icon} n=${marked ? 'circleCheck' : 'plus'} cls="sm" /></button>
     </div>
+    <${Viz} kind=${c.kind} m=${c.m} rec=${c.kind === 'stock' ? radar.stocks?.[c.ins] : null} day=${radar.day} s=${s} />
     <div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small">${t}</div>`)}</div>
     <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs">${t}</div>`)}</div>
     <div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار و کارنامه</button><span class="grow"></span><${AskBtn} q=${q} label="از دستیار بپرس" /></div>
@@ -183,4 +187,101 @@ function Marks({ radar, user, s, openPrice }) {
         <button class="btn icon sm ghost" aria-label=${'برداشتن ' + (m.sym || m.name)} title="برداشتن" onClick=${() => act.toggleRadarMark(m)}><${Icon} n="x" cls="sm" /></button></div>`;
     })}</div>
     <div class="xs muted" style="margin-top:8px">قیمت سهام تعدیل‌شده است؛ برای صندوق‌های غیربورسی NAV ابطال.</div></div>`;
+}
+
+/** A stock's year in a small line and where today's price sits between its low and high; a fund's returns as bars. */
+function Viz({ kind, m, rec, day, s, compact = false }) {
+  if (!m) return null;
+  if (kind === 'fund') return html`<${ReturnBars} r=${m} />`;
+  const v = rec && day ? RD.spark(rec, RD.dayNum(day)) : [];
+  const up = v.length > 1 && v[v.length - 1] >= v[0];
+  return html`<div class=${'rd-viz' + (compact ? ' compact' : '')}>
+    ${v.length > 1 && html`<div class="rd-spark" title="روند یک سال (قیمت تعدیل‌شده)" aria-hidden="true"><${Sparkline} values=${v} w=${compact ? 110 : 132} h=${compact ? 32 : 38} color=${up ? 'var(--pos)' : 'var(--neg)'} /></div>`}
+    <div class="grow" style="min-width:0"><${YearBar} pos=${RD.yearPos(m)} lo=${m.lo52} hi=${m.hi52} fmt=${(x) => `${money(x, s)} (تعدیل‌شده)`} /></div>
+  </div>`;
+}
+
+/** Quick search over every stock and fund in the radar. «/» focuses it from anywhere on the page. */
+function RadarSearch({ radar, openPrice, today }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const inp = useRef(null);
+  const res = useMemo(() => RD.search(radar, q, 10), [radar, q]);
+  const inRadar = useMemo(() => new Set((today?.cards || []).map((c) => c.id)), [today]);
+  useEffect(() => setHi(0), [q]);
+  useEffect(() => {
+    const k = (e) => {
+      const t = document.activeElement;
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable))) return;
+      if (document.querySelector('.drawer, .modal')) return; // a page or dialog is open on top
+      e.preventDefault(); inp.current?.focus();
+    };
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, []);
+  const go = (x) => { setOpen(false); openPrice(x.ref); };
+  const show = open && q.trim().length > 0;
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (!show) { setOpen(true); return; } setHi((h) => Math.min(res.length - 1, h + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (show) setHi((h) => Math.max(0, h - 1)); }
+    else if (e.key === 'Enter' && show && res[hi]) { e.preventDefault(); go(res[hi]); }
+    else if (e.key === 'Escape') { if (show) setOpen(false); else if (q) setQ(''); else inp.current?.blur(); }
+  };
+  return html`<div class="rd-search">
+    <label class="rd-sbox"><${Icon} n="search" cls="sm" />
+      <input ref=${inp} type="search" role="combobox" aria-label="جست‌وجوی نماد یا صندوق" aria-expanded=${show ? 'true' : 'false'} aria-controls=${show ? 'rd-sres' : undefined} aria-autocomplete="list"
+        aria-activedescendant=${show && res[hi] ? 'rd-so-' + hi : undefined} placeholder="جست‌وجوی نماد یا صندوق؛ مثلاً فولاد، طلا، اهرم" value=${q}
+        onInput=${(e) => { setQ(e.target.value); setOpen(true); }} onFocus=${() => setOpen(true)} onBlur=${() => setTimeout(() => setOpen(false), 150)} onKeyDown=${onKey} autocomplete="off" spellcheck="false" />
+      ${q ? html`<button type="button" class="btn icon sm ghost" title="پاک کردن" aria-label="پاک کردن جست‌وجو" onMouseDown=${(e) => e.preventDefault()} onClick=${() => { setQ(''); inp.current?.focus(); }}><${Icon} n="x" cls="sm" /></button>`
+        : html`<kbd class="xs" title="میان‌بر: از هر جای این صفحه / را بزن">/</kbd>`}</label>
+    <div class="sr-only" aria-live="polite">${show ? (res.length ? `${num(res.length)} نتیجه؛ با کلیدهای بالا و پایین انتخاب کن` : 'نتیجه‌ای پیدا نشد') : ''}</div>
+    ${show && html`<div class="rd-sres" id="rd-sres" role="listbox" aria-label="نتیجه‌ها">
+      ${res.length ? res.map((x, i) => html`<${Hit} x=${x} i=${i} on=${i === hi} radar=${radar} live=${inRadar.has(x.id)} onHover=${() => setHi(i)} onPick=${() => go(x)} />`)
+        : html`<div class="empty small" style="padding:14px">نمادی با «${q.trim()}» پیدا نشد.</div>`}
+    </div>`}
+  </div>`;
+}
+function Hit({ x, i, on, radar, live, onHover, onPick }) {
+  const rep = useMemo(() => RD.report(radar, x.kind === 'stock' ? { ins: x.ins } : { fundKey: x.key }), [radar, x.id]);
+  const m = rep?.m;
+  const v = x.kind === 'stock' && radar.stocks?.[x.ins] ? RD.spark(radar.stocks[x.ins], RD.dayNum(radar.day), 32) : [];
+  const nums = !m ? '' : x.kind === 'stock' ? `۱۲ ماه ${pctTxt(m.ret365)}، ۳ ماه ${pctTxt(m.ret91)}${m.pe !== null ? `، P/E ${num(m.pe, 1)}` : ''}`
+    : `۱۲ ماه ${pctTxt(m.y1)}، ۳ ماه ${pctTxt(m.m3)}${m.bubble !== null ? `، حباب ${pctTxt(m.bubble, 1)}` : ''}`;
+  return html`<button type="button" class=${'rd-sitem' + (on ? ' on' : '')} id=${'rd-so-' + i} role="option" aria-selected=${on ? 'true' : 'false'} tabindex="-1"
+    onMouseEnter=${onHover} onMouseDown=${(e) => e.preventDefault()} onClick=${onPick}>
+    <span class="rd-s-name"><span class="row" style="gap:6px"><b>${x.sym || x.name}</b><span class="pill">${x.kind === 'stock' ? 'سهم' : 'صندوق'}</span>${live && html`<span class="pill auto">در رادار امروز</span>`}</span>
+      <span class="xs muted ellipsis">${x.sym ? x.name : ''}${x.sub ? (x.sym ? '، ' : '') + x.sub : ''}</span></span>
+    <span class="xs num muted rd-s-nums">${nums}</span>
+    ${v.length > 1 ? html`<span aria-hidden="true"><${Sparkline} values=${v} w=${72} h=${24} fill=${false} color=${v[v.length - 1] >= v[0] ? 'var(--pos)' : 'var(--neg)'} /></span>` : html`<span></span>`}
+  </button>`;
+}
+
+/** «دارایی‌های تو در رادار»: the owner's own stocks and funds with today's numbers, the cards they're in, and what to watch. */
+function Mine({ radar, st, s, cards, depositPct, openPrice }) {
+  const refs = useMemo(() => RD.holdRefs(st.assets, E.isLiability), [st.assets]);
+  const items = useMemo(() => RD.mine(radar, refs, { depositPct, cards }), [radar, refs, depositPct, cards]);
+  const share = useMemo(() => {
+    if (!items.length) return {};
+    const pf = E.portfolio(st.assets, st.quotes, s);
+    const byId = new Map(pf.rows.map((r) => [r.asset.id, Math.max(0, r.value)]));
+    return Object.fromEntries(items.map((x) => [x.id, pf.gross > 0 ? x.hold.assets.reduce((t, id) => t + (byId.get(id) || 0), 0) / pf.gross : null]));
+  }, [items, st.assets, st.quotes, s]);
+  const [all, setAll] = useState(false);
+  if (!items.length) return null;
+  const warned = items.filter((x) => x.flags.some((f) => f.warn)).length;
+  const shown = all || items.length <= 6 ? items : items.slice(0, 6);
+  return html`<section class="rd-sec">
+    <div class="rd-sec-h"><h4>دارایی‌های تو در رادار</h4><span class="xs muted">${warned ? `${num(warned)} مورد نکته‌ای دارد که بهتر است نگاهی بیندازی` : 'سهم‌ها و صندوق‌هایی که داری، با عددهای همین جلسه'}</span></div>
+    <div class="card rd-mine">${shown.map((x) => html`<div class="rd-mrow">
+      <button class="rd-name" onClick=${() => openPrice(x.ref)} title="نمودار و کارنامه">
+        <b>${x.sym || x.name}</b><span class="xs muted ellipsis">${x.sym && x.name ? x.name : ''}${share[x.id] > 0 ? `${x.sym && x.name ? '، ' : ''}${pctTxt(share[x.id], share[x.id] < 0.1 ? 1 : 0).replace('+', '')} از دارایی‌هایت` : ''}</span></button>
+      <div class="rd-mviz">${x.missing ? html`<span class="xs muted">${x.note}</span>` : html`<${Viz} kind=${x.kind} m=${x.m} rec=${x.kind === 'stock' ? radar.stocks?.[x.id.slice(2)] : null} day=${radar.day} s=${s} compact />`}</div>
+      <div class="rd-mflags">
+        ${x.sigs.map((g) => html`<span class="pill auto" title=${SIG_D[g]}>${RD.SIGNALS[g].t}</span>`)}
+        ${x.flags.map((f) => html`<span class=${'pill' + (f.warn ? ' stale' : '')}>${f.warn && html`<${Icon} n="alert" cls="xs" />`}${f.t}</span>`)}
+        ${!x.missing && !x.sigs.length && !x.flags.length && html`<span class="xs muted">امروز نکتهٔ خاصی ندارد</span>`}
+      </div>
+    </div>`)}
+    ${items.length > 6 && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(items.length)})`}</button>`}
+    </div></section>`;
 }

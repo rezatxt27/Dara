@@ -53,6 +53,10 @@ async def main():
             if mt.get('lastRun') and not mt.get('running'): break
             await boot.wait_for_timeout(500)
         seed['settings']['theme'] = THEME
+        # the owner holds two of the synthetic stocks and a fixed-income fund (synthetic, for «دارایی‌های تو در رادار»)
+        hold = lambda i, name, prov, key, sym: {'id': i, 'code': i, 'name': name, 'category': 'stock' if prov == 'tsetmc' else 'fund', 'mode': 'units', 'quantity': 100, 'unit': 'واحد',
+                                                 'price': {'source': 'market', 'ref': {'provider': prov, 'key': key, 'symbol': sym, 'label': sym or name, 'field': 'close' if prov == 'tsetmc' else 'cancelNav'}}}
+        seed['assets'] = [a for a in seed['assets'] if not str(a.get('id', '')).startswith('rh')] + [hold('rh1', 'سهم داغ', 'tsetmc', 'HOT', 'داغ'), hold('rh2', 'سهم کف', 'tsetmc', 'LOW', 'کف'), hold('rh3', 'صندوق درآمد ثابت', 'fipiran', 'd2', '')]
         seed['meta'] = {**seed.get('meta', {}), 'radar': {'day': DAY, 'newCount': 3, 'pending': 1}}
         await boot.evaluate("async (s) => { await chrome.storage.local.clear(); await chrome.storage.local.set(s); }", {**seed, 'radar': radar, 'radarUser': {'rules': [], 'marks': [], 'seenDay': None}})
         await boot.close()
@@ -122,6 +126,48 @@ async def main():
             check('price page: a fund\'s report card (returns, rank, mix)', 'رتبه' in rep and '1 از 2' in rep.translate(FA) and 'ترکیب' in rep and 'فیپیران' in rep, rep[:220].replace('\n', ' | '))
             await pg.close()
         await step('page', t_page())
+
+        async def t_new():
+            pg = await newpage('radar')
+            mine = pg.locator('.rd-sec:has(h4:has-text("دارایی‌های تو در رادار"))')
+            nrow = await mine.locator('.rd-mrow').count()
+            # three synthetic holdings in the radar, plus the sample's gold ETF that the synthetic market doesn't have
+            check('holdings: a section of the owner\'s stocks and funds', await mine.count() == 1 and nrow == 4, nrow)
+            check('holdings: one the radar doesn\'t know yet says so', await mine.locator('.rd-mrow:has-text("هنوز در داده‌های رادار نیست")').count() == 1)
+            low = await mine.locator('.rd-mrow:has(b:text-is("کف"))').inner_text()
+            check('holdings: a stock far under its high is flagged (once, not twice)', 'پایین‌تر از سقف سال' in low and 'نزدیک کمترین قیمت سال' not in low, low.replace('\n', ' | '))
+            hot = await mine.locator('.rd-mrow:has(b:text-is("داغ"))').inner_text()
+            check('holdings: the cards it is in today', 'روند قوی، ۱۲ ماه' in hot, hot.replace('\n', ' | '))
+            dep = await mine.locator('.rd-mrow:has-text("درآمد ثابت معمولی")').inner_text()
+            check('holdings: a fixed-income fund under the deposit is flagged', 'کمتر از سپرده' in dep, dep.replace('\n', ' | '))
+            last = await mine.locator('.rd-mrow').last.inner_text()
+            check('holdings: rows with warnings first, unknown ones last', 'هنوز در داده‌های رادار نیست' in last or 'پوشش نمی‌دهد' in last, last[:80])
+            card = pg.locator('.rd-card:has-text("شرکت رشد تند")').first
+            check('cards: a year sparkline and the year bar', await card.locator('.rd-spark svg path').count() >= 1 and await card.locator('.yb-t i').count() == 1)
+            pos = await card.locator('.yb-t i').evaluate("e => parseFloat(e.style.left)")
+            check('year bar: a stock at its high sits at the right end', pos >= 99, pos)
+            check('cards: a fund shows its returns as bars', await pg.locator('.rd-card:has-text("درآمد ثابت برتر") .rbars .rbar').count() == 4)
+            # search
+            await pg.keyboard.press('/'); await pg.wait_for_timeout(200)
+            check('search: «/» focuses it', await pg.evaluate("document.activeElement?.getAttribute('role')") == 'combobox')
+            await pg.keyboard.type('طلا'); await pg.wait_for_timeout(300)
+            n = await pg.locator('#rd-sres [role=option]').count()
+            check('search: finds every gold fund', n == 3, n)
+            await pg.screenshot(path=f'{SH}/radar-search-{THEME}.png')
+            await pg.keyboard.press('ArrowDown'); await pg.keyboard.press('Enter'); await pg.wait_for_timeout(900)
+            dr = await pg.locator('.drawer').inner_text() if await pg.locator('.drawer').count() else ''
+            check('search: Enter opens the chosen one\'s page', await pg.locator('.drawer .pd').count() == 1 and ('طلاب' in dr or 'طلای ب' in dr), dr[:160].replace('\n', ' | '))
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(400)
+            if await pg.locator('.drawer').count(): await pg.locator('.drawer [aria-label="بستن"]').first.click(); await pg.wait_for_timeout(300)
+            box = pg.locator('.rd-sbox input'); await box.fill('داغ'); await pg.wait_for_timeout(300)
+            first = await pg.locator('#rd-sres [role=option]').first.inner_text()
+            check('search: a symbol match comes first, with numbers and «in the radar»', 'داغ' in first.split('\n')[0] and 'در رادار امروز' in first and '۱۲ ماه' in first, first.replace('\n', ' | '))
+            await box.fill('ناموجود'); await pg.wait_for_timeout(300)
+            check('search: nothing found says so', 'پیدا نشد' in await pg.locator('#rd-sres').inner_text())
+            await box.fill(''); await pg.wait_for_timeout(200)
+            await pg.screenshot(path=f'{SH}/radar-mine-{THEME}.png', full_page=True)
+            await pg.close()
+        await step('new', t_new())
 
         async def t_narrow():
             pg = await newpage('radar', 420)

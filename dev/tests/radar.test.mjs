@@ -350,3 +350,82 @@ test('prev mode: while today is unfinished, the last session in the lists is use
   RD.applySession(R, [mw({ ins: 'A', close: 106, py: 103 })], D(1), [D(-2), D(-1), DAY0, D(1)], 'live');
   assert.deepEqual(a.p, [98, 100, 103, 106]); assert.equal(a.need, 0);
 });
+
+test('search: symbol first (exact, prefix), then name; stocks and funds; nothing for an empty query', () => {
+  const R = market();
+  R.stocks.HOT.sym = 'فولاد'; R.stocks.HOT.cap = 9; R.stocks.S1.sym = 'فولاژ'; R.stocks.S1.cap = 99; R.stocks.S2.name = 'شرکت فولاد خوزستان';
+  R.funds = [{ key: 'g', name: 'صندوق طلای عیار', symbol: 'عیار', fundType: 5, size: 1 }];
+  const r = RD.search(R, 'فولاد');
+  assert.equal(r[0].id, 's:HOT'); // exact symbol beats a bigger company's prefix
+  assert.ok(r.some((x) => x.id === 's:S2')); // name match
+  assert.equal(RD.search(R, 'فول')[0].id, 's:S1'); // prefix ties: the larger first
+  assert.equal(RD.search(R, 'طلا')[0].kind, 'fund');
+  assert.equal(RD.search(R, 'طلا')[0].ref.provider, 'fipiran');
+  assert.deepEqual(RD.search(R, '  '), []);
+  assert.equal(RD.search(R, 'فولاد', 1).length, 1);
+});
+
+test('spark and year position: a year of closes, evenly picked; position between the low and high', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const v = RD.spark(R.stocks.HOT, D0, 48);
+  assert.equal(v.length, 48); assert.equal(v[v.length - 1], R.stocks.HOT.p[R.stocks.HOT.p.length - 1]);
+  assert.ok(v[0] < v[47]);
+  const m = RD.stockMetrics(R.stocks.HOT, D0, {}, R.sess);
+  close(RD.yearPos(m), 1);
+  close(RD.yearPos(RD.stockMetrics(R.stocks.LOW, D0, {}, R.sess)), 0);
+  assert.equal(RD.yearPos({ fullYear: false, hi52: 2, lo52: 1, close: 1.5 }), null);
+  assert.deepEqual(RD.spark({ d: [], p: [] }, D0), []);
+});
+
+test('holdings in the radar: one entry per symbol, warnings as facts, the cards they are in', () => {
+  const R = market();
+  R.funds = [{ key: 'fx', name: 'درآمد ثابت کم‌بازده', symbol: '', fundType: 4, cancelNav: 100, date: DAY0, size: 3e12, since: '2020-01-01', ret: { y1: 15, m3: 3, m1: 1 } },
+    { key: 'gx', name: 'صندوق طلا', symbol: 'طلا', fundType: 5, insCode: 'E9', cancelNav: 100, date: DAY0, size: 3e12, since: '2020-01-01', ret: { y1: 40, m3: 5, m1: 2 } }];
+  const units = (id, provider, key, extra = {}) => ({ id, mode: 'units', quantity: 10, price: { source: 'market', ref: { provider, key } }, ...extra });
+  const assets = [units('a', 'tsetmc', 'LOW'), units('b', 'tsetmc', 'LOW'), units('c', 'tsetmc', 'HOT'), units('d', 'fipiran', 'fx'), units('e', 'tsetmc', 'E9'),
+    units('z', 'tsetmc', 'HOT', { quantity: 0 }), units('y', 'tgju', 'sekee'), units('x', 'tsetmc', 'GONE'), { id: 'w', mode: 'balance' }];
+  const refs = RD.holdRefs(assets);
+  assert.deepEqual(refs.map((r) => r.key), ['LOW', 'HOT', 'fx', 'E9', 'GONE']);
+  assert.deepEqual(refs[0].assets, ['a', 'b']);
+  const items = RD.mine(R, refs, { depositPct: 25 });
+  const by = Object.fromEntries(items.map((x) => [x.hold.key, x]));
+  assert.ok(by.LOW.sigs.includes('nearLow'));
+  assert.ok(by.LOW.flags.some((f) => f.k === 'high' && !f.warn)); // far under its high — said plainly, it's also a «near its low» card
+  assert.ok(by.HOT.flags.some((f) => f.k === 'pe' && f.warn));
+  assert.ok(!by.LOW.flags.some((f) => f.k === 'low')); // the same fall isn't counted twice
+  assert.ok(by.HOT.sigs.includes('momentum12'));
+  assert.ok(by.HOT.flags.some((f) => f.k === 'top' && !f.warn));
+  assert.ok(by.fx.flags.some((f) => f.k === 'dep' && f.warn)); // 15% < a 25% deposit
+  assert.equal(by.E9.id, 'f:gx'); // an exchange-traded fund held by its TSETMC code is the Fipiran fund
+  assert.equal(by.GONE.missing, true);
+  assert.equal(items[items.length - 1].hold.key, 'GONE');
+  assert.ok(items[0].flags.filter((f) => f.warn).length >= items[1].flags.filter((f) => f.warn).length);
+  // notifications: the first scan only remembers; nothing twice; no flapping; a just-bought holding only remembers
+  const D0 = RD.dayNum(DAY0);
+  const w1 = RD.newWarnings(null, items, D0);
+  assert.equal(w1.fresh.length, 0); assert.ok(w1.state.seen['s:HOT|pe'] === D0);
+  assert.equal(RD.newWarnings(w1.state, items, D0 + 1).fresh.length, 0);
+  const calm = items.map((x) => ({ ...x, flags: [] }));
+  const w2 = RD.newWarnings(w1.state, calm, D0 + 2);               // the warning goes away…
+  assert.equal(RD.newWarnings(w2.state, items, D0 + 3).fresh.length, 0); // …and back within a week: quiet
+  assert.equal(RD.newWarnings(w1.state, items, D0 + 40).fresh.length, 0); // still there after a long gap: not news
+  const later = RD.newWarnings({ seen: {}, ids: w1.state.ids }, items, D0 + 30);
+  assert.ok(later.fresh.some((w) => w.key === 's:HOT|pe'));          // a really new one notifies
+  assert.equal(RD.newWarnings({ seen: {}, ids: [] }, items, D0).fresh.length, 0); // holdings new since last time: only remembered
+  const day = RD.newWarnings({ seen: {}, ids: w1.state.ids }, [{ ...by.HOT, flags: [{ k: 'day', t: 'امروز −۵٪', warn: true }] }], D0);
+  assert.equal(day.fresh.length, 0);                                    // today's move never notifies
+  // a stock still gathering its year shows only that, no false warnings
+  const P2 = market(); P2.stocks.LOW.need = 270;
+  const it = RD.mine(P2, [{ provider: 'tsetmc', key: 'LOW', label: 'کف', assets: ['a'] }])[0];
+  assert.deepEqual(it.flags.map((f) => f.k), ['partial']);
+  // one row for a fund held by its TSETMC code and by its Fipiran key
+  const two = RD.mine(R, [{ provider: 'tsetmc', key: 'E9', label: 'طلا', assets: ['e'] }, { provider: 'fipiran', key: 'gx', label: 'طلا', assets: ['f'] }]);
+  assert.equal(two.length, 1); assert.deepEqual(two[0].hold.assets, ['e', 'f']);
+  // an umbrella fund's class saved by its registration number alone, picked by name
+  R.funds.push({ key: '777-a1', name: 'صندوق چتری کلاس الف', fundType: 6, ret: {} }, { key: '777-b2', name: 'صندوق چتری کلاس ب', fundType: 6, ret: {} });
+  assert.equal(RD.fundOf(R, '777', 'صندوق چتری کلاس ب').key, '777-b2');
+  assert.equal(RD.fundOf(R, '777', ''), null);
+  assert.equal(RD.report(R, { fundKey: '777', fundName: 'صندوق چتری کلاس الف' }).name, 'صندوق چتری کلاس الف');
+  // debts aren't holdings
+  assert.equal(RD.holdRefs([units('q', 'tsetmc', 'HOT')], () => true).length, 0);
+});

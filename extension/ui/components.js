@@ -407,6 +407,26 @@ export function Sparkline({ values, w = 96, h = 30, color = 'var(--accent)', fil
   </svg>`;
 }
 
+/** Where a price sits between its year's low and high (low on the left, like the charts). pos: 0…1. */
+export function YearBar({ pos, lo, hi, fmt = (v) => num(v) }) {
+  if (pos === null || pos === undefined || !isFinite(pos)) return null;
+  const p = Math.round(pos * 100);
+  return html`<div class="yb" role="img" aria-label=${`قیمت امروز ${num(p)}٪ از کف تا سقف یک سال`} title=${lo && hi ? `کف سال ${fmt(lo)} — سقف سال ${fmt(hi)}` : ''}>
+    <div class="yb-t" dir="ltr"><i style=${`left:${p}%`}></i></div>
+    <div class="yb-l xs" dir="ltr"><span>کف سال</span><span class="faint">${num(p)}٪ از کف تا سقف</span><span>سقف سال</span></div>
+  </div>`;
+}
+/** A fund's returns over 1, 3, 6 and 12 months as four small bars (fractions; null = unknown). */
+export function ReturnBars({ r }) {
+  const items = [['۱ ماه', r.m1], ['۳ ماه', r.m3], ['۶ ماه', r.m6], ['۱۲ ماه', r.y1]].filter(([, v]) => v !== null && v !== undefined && isFinite(v));
+  if (items.length < 2) return null;
+  const max = Math.max(...items.map(([, v]) => Math.abs(v))) || 1;
+  return html`<div class="rbars" role="img" aria-label=${items.map(([t, v]) => `${t} ${pct(v, { digits: 0 })}`).join('، ')}>
+    ${items.map(([t, v]) => html`<div class="rbar"><span class=${'xs num ' + (v >= 0 ? 'pos' : 'neg')}>${pct(v, { digits: 0 })}</span>
+      <div class="rbar-c"><i class=${v >= 0 ? 'up' : 'down'} style=${`height:${Math.max(4, Math.round((Math.abs(v) / max) * 100))}%`}></i></div><span class="xs muted">${t}</span></div>`)}
+  </div>`;
+}
+
 /**
  * Area chart (time axis left→right, as on Iranian market sites).
  * points: [{date, value}]

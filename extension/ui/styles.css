@@ -738,3 +738,5 @@ select.input.imp-sheet { width: auto; max-width: 45%; height: 32px; font-size: 1
 @media (max-width: 760px) { .rd-mrow { grid-template-columns: 1fr; gap: 8px; } }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.rd-rets { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: -2px; }
+.rd-rets b { font-weight: 700; } .rd-rets .pos { color: var(--pos); } .rd-rets .neg { color: var(--neg); }

@@ -198,7 +198,14 @@ function Viz({ kind, m, rec, day, s, compact = false }) {
   return html`<div class=${'rd-viz' + (compact ? ' compact' : '')}>
     ${v.length > 1 && html`<div class="rd-spark" title="روند یک سال (قیمت تعدیل‌شده)" aria-hidden="true"><${Sparkline} values=${v} w=${compact ? 110 : 132} h=${compact ? 32 : 38} color=${up ? 'var(--pos)' : 'var(--neg)'} /></div>`}
     <div class="grow" style="min-width:0"><${YearBar} pos=${RD.yearPos(m)} lo=${m.lo52} hi=${m.hi52} fmt=${(x) => `${money(x, s)} (تعدیل‌شده)`} /></div>
-  </div>`;
+  </div>${!compact && html`<${Rets} items=${[['۱ ماه', m.ret30], ['۳ ماه', m.ret91], ['۶ ماه', m.ret182], ['۱۲ ماه', m.ret365]]} />`}`;
+}
+
+/** A small row of returns: «۱ ماه +۲۸٪ · ۳ ماه +۱۹۶٪ · …» (unknown periods left out). */
+function Rets({ items }) {
+  const l = items.filter(([, v]) => v !== null && v !== undefined && isFinite(v));
+  if (!l.length) return null;
+  return html`<div class="rd-rets">${l.map(([t, v]) => html`<span><span class="muted">${t}</span> <b class=${'num ' + (v > 0.0005 ? 'pos' : v < -0.0005 ? 'neg' : '')}>${pctTxt(v)}</b></span>`)}</div>`;
 }
 
 /** Quick search over every stock and fund in the radar. «/» focuses it from anywhere on the page. */

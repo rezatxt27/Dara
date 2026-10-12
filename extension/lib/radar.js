@@ -229,7 +229,7 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
   const avgVal = h.length ? h.filter((x) => x[0] >= from && x[0] <= D).reduce((a, x) => a + x[2], 0) / per : (rec.today?.val || 0) / per;
   const mPE = sectorPE[rec.sector];
   return {
-    close, ret7: ret(7), ret30: ret(30), ret91: ret(91), ret365: ret(365),
+    close, ret7: ret(7), ret30: ret(30), ret91: ret(91), ret182: ret(182), ret365: ret(365),
     hi52: hi, lo52: lo, fullYear, fromHigh: hi > 0 ? close / hi - 1 : null, fromLow: lo > 0 ? close / lo - 1 : null,
     volToday, volRatio: volToday > 0 && avgVol > 0 && prev.length >= 10 ? volToday / avgVol : null, avgVal, liquid: avgVal >= LIQ,
     traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
@@ -330,8 +330,8 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     return sorted.slice(0, Math.max(1, Math.floor(l.length / 10))).filter((s) => s.m[key] > 0).map((s) => ({ s, rank: sorted.indexOf(s) + 1, of: l.length }));
   };
   const used = new Set();
-  for (const { s, rank, of } of top('ret365').slice(0, max)) { used.add(s.ins); push('momentum12', s, [`بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`, `۳ ماه ${fa(P(s.m.ret91))}، ۱ ماه ${fa(P(s.m.ret30))}`]); }
-  for (const { s, rank, of } of top('ret91').filter((x) => !used.has(x.s.ins)).slice(0, max)) { used.add(s.ins); push('momentum3', s, [`بازدهی ۳ ماه ${fa(P(s.m.ret91))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`, `۱ ماه ${fa(P(s.m.ret30))}${s.m.ret365 !== null ? `، ۱۲ ماه ${fa(P(s.m.ret365))}` : ''}`]); }
+  for (const { s, rank, of } of top('ret365').slice(0, max)) { used.add(s.ins); push('momentum12', s, [`بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`]); }
+  for (const { s, rank, of } of top('ret91').filter((x) => !used.has(x.s.ins)).slice(0, max)) { used.add(s.ins); push('momentum3', s, [`بازدهی ۳ ماه ${fa(P(s.m.ret91))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`]); }
   // 2) unusual volume today (at least 3× its usual, and real money)
   live.filter((s) => s.m.volRatio >= 3 && s.rec.today?.val >= LIQ).sort((a, b) => b.m.volRatio - a.m.volRatio).slice(0, max)
     .forEach((s) => push('volume', s, [`حجم امروز ${fa(N(s.m.volRatio))} برابر حجم معمول (میانهٔ ۲۰ روز معاملهٔ قبلی)`, `ارزش معاملات امروز ${money(s.rec.today.val)}؛ تغییر قیمت امروز ${fa(P(s.m.dayChange, 1))}`]));

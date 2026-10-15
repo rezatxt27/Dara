@@ -7,7 +7,7 @@ import * as A from '../../lib/assistant.js';
 import * as store from '../../lib/store.js';
 import { ago, parseNum } from '../../lib/format.js';
 import { act } from '../actions.js';
-import { T as TT } from '../tips.js';
+import { T as TT, L } from '../tips.js';
 import * as BB from '../../lib/bubble.js';
 import * as CMP from '../../lib/compare.js';
 
@@ -221,14 +221,14 @@ export function BreakEven({ st, s, initial = null }) {
       <${AskBtn} q=${`اگر به‌جای سپرده ${num(rate, 1)}٪، روی «${name}» برای ${num(months)} ماه سرمایه‌گذاری کنم (کارمزد ${num(fee, 1)}٪)، نقطه سربه‌سر چقدر است و در گذشته چطور بوده؟`} label="از دستیار بپرس" /></div>
     <div class="be">
       <div class="col" style="gap:12px">
-        <div class="field"><label>دارایی</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
+        <div class="field"><label>${L('دارایی', 'beAsset')}</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
           ${BE_ASSETS.map(([id, n]) => html`<option value=${id}>${n}</option>`)}
           ${held.length > 0 && html`<optgroup label="دارایی‌های من">${held.map((a) => html`<option value=${a.id}>${a.name}</option>`)}</optgroup>`}</select></div>
         <div class="grid2">
-          <${NumField} label="سود سپرده (سالانه)" value=${rate} onInput=${(v) => setRate(Math.max(0, Math.min(200, v || 0)))} suffix="٪" digits=${1} />
-          <${NumField} label="کارمزد خرید و فروش" value=${fee} onInput=${(v) => setFee(Math.max(0, Math.min(50, v || 0)))} suffix="٪" digits=${1} hint=${html`اختلاف قیمت خرید و فروش، کارمزد یا اجرت ${T('fee')}`} />
+          <${NumField} label=${L('سود سپرده (سالانه)', 'beRate')} value=${rate} onInput=${(v) => setRate(Math.max(0, Math.min(200, v || 0)))} suffix="٪" digits=${1} />
+          <${NumField} label=${html`<span class="ltip">کارمزد خرید و فروش${T('fee')}</span>`} value=${fee} onInput=${(v) => setFee(Math.max(0, Math.min(50, v || 0)))} suffix="٪" digits=${1} hint="اختلاف قیمت خرید و فروش، کارمزد یا اجرت" />
         </div>
-        <div class="field"><label>مدت</label><${Seg} value=${months} onChange=${setMonths} options=${[[1, '۱ ماه'], [3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']]} /></div>
+        <div class="field"><label>${L('مدت', 'beMonths')}</label><${Seg} value=${months} onChange=${setMonths} options=${[[1, '۱ ماه'], [3, '۳ ماه'], [6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال']]} /></div>
       </div>
       <div class="col" style="gap:10px">
         ${price0 > 0 ? html`

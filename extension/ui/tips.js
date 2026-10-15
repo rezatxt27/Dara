@@ -1,5 +1,6 @@
 // Plain-language help for the add/edit asset form: what each choice means, in one or two short sentences.
 import { html, Tip } from './components.js';
+import { CALC_TIPS } from './calctips.js';
 
 /** What belongs in each category — shown under the category grid so the right one is obvious. */
 export const CAT_GUIDE = {
@@ -103,6 +104,8 @@ export const ETIPS = {
 };
 
 /** A field label with its «i» help next to it. */
+Object.assign(ETIPS, CALC_TIPS);
+
 export const L = (text, key) => html`<span class="ltip">${text}<${Tip} title=${ETIPS[key][0]} text=${ETIPS[key][1]} example=${ETIPS[key][2]} /></span>`;
 /** Just the «i» help. */
 export const T = (key) => html`<${Tip} title=${ETIPS[key][0]} text=${ETIPS[key][1]} example=${ETIPS[key][2]} />`;

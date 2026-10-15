@@ -585,7 +585,7 @@ export function Tip({ title, text, example }) {
     <button type="button" ref=${btn} class=${'xbtn tipbtn' + (pos ? ' on' : '')} aria-label=${'راهنما: ' + title} onMouseEnter=${enter} onMouseLeave=${leave} onFocus=${() => !pos && place(false)} onBlur=${leave} onClick=${click}><${Icon} n="info" cls="sm" /></button>
     ${pos && html`<div class="xpop tippop" role="tooltip" onMouseEnter=${enter} onMouseLeave=${leave} style=${`right:${pos.right}px;width:${pos.w}px;${pos.top !== null ? `top:${pos.top}px` : `bottom:${pos.bottom}px`}`}>
       <div class="sb small" style="margin-bottom:4px">${title}</div>
-      <div class="small ink2" style="line-height:1.9">${text}</div>
+      <div class="small ink2" style="line-height:1.9;white-space:pre-line">${text}</div>
       ${example && html`<div class="xs muted" style="margin-top:6px"><b>مثال:</b> ${example}</div>`}
     </div>`}
   </span>`;

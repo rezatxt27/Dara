@@ -356,6 +356,23 @@ async def main():
             for t in ['goal', 'average', 'trade']:
                 await pg.goto(pg.url.split('#')[0] + f'#/calc?t={t}'); await pg.wait_for_timeout(500)
                 await pg.screenshot(path=f'{SH}/calc-{t}.png')
+            # every tool: a «how to use» next to the title and a help next to every field label
+            for t in ['convert', 'gold', 'rent', 'loan', 'deposit', 'breakeven', 'goal', 'average', 'trade', 'instal']:
+                await pg.goto(pg.url.split('#')[0] + f'#/calc?t={t}'); await pg.wait_for_timeout(400)
+                card = pg.locator('.page .card').first
+                head = await card.locator('.card-h h3 .tipbtn').count()
+                bare = await card.evaluate("c => [...c.querySelectorAll('.field > label')].filter(l => l.textContent.trim() && !l.querySelector('.tipbtn')).map(l => l.textContent.trim())")
+                check(f'calc {t}: help on the title and on every field', head == 1 and not bare, f'title={head} bare={bare}')
+            await pg.goto(pg.url.split('#')[0] + '#/calc?t=average'); await pg.wait_for_timeout(400)
+            await pg.locator('.calc-card .card-h h3 .tipbtn').click(); await pg.wait_for_timeout(250)
+            pop = await pg.locator('.tippop').inner_text() if await pg.locator('.tippop').count() else ''
+            check('calc: the how-to tip opens with its steps', '۱)' in pop and '۳)' in pop, pop[:80])
+            await pg.screenshot(path=f'{SH}/calc-tip-{THEME}.png')
+            await pg.keyboard.press('Escape')
+            await pg.locator('.calc-blk:has-text("الان داری") .field:has-text("میانگین خرید") .tipbtn').hover(); await pg.wait_for_timeout(250)
+            pop = await pg.locator('.tippop').inner_text() if await pg.locator('.tippop').count() else ''
+            check('calc: a field tip opens on hover with its example', 'مثال' in pop, pop[:80])
+            await pg.screenshot(path=f'{SH}/calc-fieldtip-{THEME}.png')
             await pg.close()
         await step('calc', t_calc())
 

@@ -1,6 +1,6 @@
 // «ماشین‌حساب‌ها»: tools that need no portfolio. One tool on screen at a time; the home is a short list of tiles.
 import { html, useState, useMemo, Icon, Money, NumField, MoneyField, Seg, num, pct, fmtJ } from '../components.js';
-import { L } from '../tips.js';
+import { L, T } from '../tips.js';
 import * as I from '../../lib/insights.js';
 import { todayIso, daysBetween } from '../../lib/jalali.js';
 import * as K from '../../lib/calc.js';
@@ -58,10 +58,10 @@ function Converter({ st, s, toId }) {
   const to = useMemo(() => K.convertTo(pick, qty, st.quotes), [pick, qty, st.quotes]);
   const it = K.itemById(pick);
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="swap" cls="sm" />با این پول چقدر می‌شود؟</h3>
+    <div class="card-h"><h3><${Icon} n="swap" cls="sm" />با این پول چقدر می‌شود؟${T('hConvert')}</h3>
       <${Seg} value=${dir} onChange=${setDir} options=${[['from', 'از مبلغ'], ['to', 'از دارایی']]} /></div>
     ${dir === 'from' ? html`
-      <div class="calc-in"><${MoneyField} label="مبلغ" rial=${amount} onRial=${(v) => setAmount(v || 0)} s=${s} /></div>
+      <div class="calc-in"><${MoneyField} label=${L('مبلغ', 'cvAmount')} rial=${amount} onRial=${(v) => setAmount(v || 0)} s=${s} /></div>
       ${amount > 0 ? html`<div class="calc-groups">${GROUPS.map(([g, title]) => {
         const list = rows.filter((r) => r.group === g);
         if (!list.length) return null;
@@ -76,9 +76,9 @@ function Converter({ st, s, toId }) {
       })}</div>` : html`<div class="empty small">مبلغ را بنویس؛ عدد یا به حروف، مثل «صد میلیون».</div>`}`
     : html`
       <div class="calc-in two">
-        <div class="field"><label>دارایی</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
+        <div class="field"><label>${L('دارایی', 'cvAsset')}</label><select class="input" value=${pick} onChange=${(e) => setPick(e.target.value)}>
           ${GROUPS.map(([g, title]) => html`<optgroup label=${title}>${K.ITEMS.filter((x) => x.group === g).map((x) => html`<option value=${x.id}>${x.name}</option>`)}</optgroup>`)}</select></div>
-        <${NumField} label="مقدار" value=${qty} onInput=${(v) => setQty(v || 0)} suffix=${it?.unit} />
+        <${NumField} label=${L('مقدار', 'cvQty')} value=${qty} onInput=${(v) => setQty(v || 0)} suffix=${it?.unit} />
       </div>
       ${to?.price ? html`<div class="calc-result">
           <span class="small muted">ارزش امروز</span>
@@ -125,27 +125,27 @@ function GoldInvoice({ st, s, open }) {
   const Line = ({ t, v, sub, strong }) => html`<div class=${'calc-line' + (strong ? ' strong' : '')}><span>${t}${sub ? html` <span class="xs muted">${sub}</span>` : ''}</span><span class="num"><${Money} v=${v} s=${s} /></span></div>`;
 
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="gold" cls="sm" />فاکتور طلا</h3>
+    <div class="card-h"><h3><${Icon} n="gold" cls="sm" />فاکتور طلا${T('hGold')}</h3>
       <${Seg} value=${mode} onChange=${setMode} options=${[['buy', 'خرید طلای نو'], ['sell', 'فروش طلای کهنه'], ['check', 'سنجیدن قیمت مغازه']]} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        <${MoneyField} label="قیمت هر گرم طلای ۱۸ عیار" rial=${gram} onRial=${(v) => setGramIn(v || null)} s=${s}
+        <${MoneyField} label=${L('قیمت هر گرم طلای ۱۸ عیار', 'gGram')} rial=${gram} onRial=${(v) => setGramIn(v || null)} s=${s}
           hint=${gramIn && market ? html`قیمت خودت. <button class="calc-link" onClick=${() => setGramIn(null)}>برگشت به قیمت بازار</button>` : marketStale ? html`<span class="warn">قیمت بازار به‌روز نیست؛ قیمت امروز مغازه را بنویس</span>` : 'قیمت امروز بازار؛ اگر مغازه قیمت دیگری می‌گوید، عوضش کن'} />
-        <${NumField} label=${mode === 'sell' ? 'وزن کل' : 'وزن'} value=${weight} onInput=${setWeight} suffix="گرم" placeholder="مثلاً ۳٫۵" />
-        ${mode === 'buy' && html`<div class="field"><label>اجرت ساخت</label>
+        <${NumField} label=${mode === 'sell' ? L('وزن کل', 'gWeightAll') : L('وزن', 'gWeight')} value=${weight} onInput=${setWeight} suffix="گرم" placeholder="مثلاً ۳٫۵" />
+        ${mode === 'buy' && html`<div class="field"><label>${L('اجرت ساخت', 'gWage')}</label>
           <div class="row" style="gap:8px"><${Seg} value=${wageBy} onChange=${setWageBy} options=${[['pct', 'درصد'], ['per', `${unit} هر گرم`]]} />
             <span class="grow">${wageBy === 'pct'
               ? html`<${NumField} value=${wagePct} onInput=${setWagePct} suffix="٪" placeholder="مثلاً ۱۵" compact />`
               : html`<${MoneyField} rial=${wagePer} onRial=${setWagePer} s=${s} />`}</span></div></div>`}
         ${mode === 'sell' && html`
-          <${NumField} label="وزن سنگ و قطعه‌های غیرطلا (اختیاری)" value=${stones} onInput=${setStones} suffix="گرم" hint="از وزن کل کم می‌شود؛ مغازه بابتش پولی نمی‌دهد" />
-          <${MoneyField} label="قیمتی که مغازه پیشنهاد داده (اختیاری)" rial=${offer} onRial=${setOffer} s=${s} />`}
-        ${mode === 'check' && html`<${MoneyField} label="قیمت نهایی‌ای که مغازه گفته" rial=${total} onRial=${setTotal} s=${s} />`}
+          <${NumField} label=${L('وزن سنگ و قطعه‌های غیرطلا (اختیاری)', 'gStones')} value=${stones} onInput=${setStones} suffix="گرم" hint="از وزن کل کم می‌شود؛ مغازه بابتش پولی نمی‌دهد" />
+          <${MoneyField} label=${L('قیمتی که مغازه پیشنهاد داده (اختیاری)', 'gOffer')} rial=${offer} onRial=${setOffer} s=${s} />`}
+        ${mode === 'check' && html`<${MoneyField} label=${L('قیمت نهایی‌ای که مغازه گفته', 'gTotal')} rial=${total} onRial=${setTotal} s=${s} />`}
         <div class="xs muted">${mode === 'sell' ? `عیار ${num(k)} از ۷۵۰ (افت ذوب)` : `سود فروشنده ${num(seller, 1)}٪ · مالیات ${num(vat, 1)}٪ روی اجرت و سود${mode === 'buy' ? ` · فروش با عیار ${num(k)}` : ''}`}
           · <button class="calc-link" onClick=${() => setAdv(!adv)}>${adv ? 'بستن' : 'تغییر'}</button></div>
         ${adv && html`<div class="calc-adv">
-          ${mode !== 'sell' && html`<${NumField} label="سود فروشنده" value=${sellerIn} onInput=${setSeller} suffix="٪" compact />
-            <${NumField} label="مالیات بر ارزش افزوده" value=${vatIn} onInput=${setVat} suffix="٪" compact />`}
+          ${mode !== 'sell' && html`<${NumField} label=${L('سود فروشنده', 'gSeller')} value=${sellerIn} onInput=${setSeller} suffix="٪" compact />
+            <${NumField} label=${L('مالیات بر ارزش افزوده', 'gVat')} value=${vatIn} onInput=${setVat} suffix="٪" compact />`}
           ${mode !== 'check' && html`<${NumField} label=${L('عیار فروش', 'cKarat')} value=${kIn} onInput=${setK} hint=${K.clampK(kIn) === +kIn ? 'بعضی مغازه‌ها ۷۴۷ حساب می‌کنند' : html`<span class="warn">عددی بین ۶۰۰ و ۷۵۰؛ فعلاً ${num(k)} حساب می‌شود</span>`} />`}
         </div>`}
       </div>
@@ -199,14 +199,14 @@ function RentTool({ st, s }) {
   const v = K.rentVsDeposit({ ratePct: rate, depositPct: depPct });
   const per = 1_000_000_000; // «هر ۱۰۰ میلیون تومان»
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="home" cls="sm" />رهن و اجاره</h3></div>
+    <div class="card-h"><h3><${Icon} n="home" cls="sm" />رهن و اجاره${T('hRent')}</h3></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        <${MoneyField} label="ودیعه (رهن)" rial=${dep} onRial=${setDep} s=${s} />
-        <${MoneyField} label="اجاره ماهانه" rial=${rent} onRial=${setRent} s=${s} />
+        <${MoneyField} label=${L('ودیعه (رهن)', 'rDep')} rial=${dep} onRial=${setDep} s=${s} />
+        <${MoneyField} label=${L('اجاره ماهانه', 'rRent')} rial=${rent} onRial=${setRent} s=${s} />
         <${NumField} label=${L('نرخ تبدیل در ماه', 'cConv')} value=${rateIn} onInput=${setRate} suffix="٪"
           hint=${html`هر ۱۰۰ میلیون ودیعه = ${num(rate, 1)} میلیون اجاره در ماه. عرف بازار، معمولاً حدود ۳٪؛ شهر به شهر و سال به سال فرق دارد.`} />
-        <div class="field"><label>ترکیب تازه</label>
+        <div class="field"><label>${L('ترکیب تازه', 'rNew')}</label>
           <div class="row" style="gap:8px"><${Seg} value=${by} onChange=${(x) => { setBy(x); setTarget(null); }} options=${[['deposit', 'ودیعه تازه'], ['rent', 'اجاره تازه']]} />
             <span class="grow"><${MoneyField} rial=${target} onRial=${setTarget} s=${s} /></span></div></div>
       </div>
@@ -247,23 +247,23 @@ function LoanTool({ st, s }) {
   const r = K.loanCost({ amount, ratePct: pctIn(rateIn), months: monthsIn, ...c, opportunityPct: depPct });
   const idleNoMonths = more && idle > 0 && !(idleMonthsIn > 0);
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="debt" cls="sm" />هزینه واقعی وام</h3></div>
+    <div class="card-h"><h3><${Icon} n="debt" cls="sm" />هزینه واقعی وام${T('hLoan')}</h3></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        <${MoneyField} label="مبلغ وام" rial=${amount} onRial=${setAmount} s=${s} />
+        <${MoneyField} label=${L('مبلغ وام', 'lAmount')} rial=${amount} onRial=${setAmount} s=${s} />
         <div class="calc-in two" style="max-width:none">
-          <${NumField} label="سود سالانه" value=${rateIn} onInput=${setRate} suffix="٪" />
-          <${NumField} label="مدت" value=${monthsIn} onInput=${setMonths} suffix="ماه" />
+          <${NumField} label=${L('سود سالانه', 'lRate')} value=${rateIn} onInput=${setRate} suffix="٪" />
+          <${NumField} label=${L('مدت', 'lMonths')} value=${monthsIn} onInput=${setMonths} suffix="ماه" />
         </div>
         <button class="calc-link" style="align-self:flex-start" onClick=${() => setMore(!more)}>${more ? 'بستن شرط‌های بانک' : '+ شرط‌های بانک: کارمزد، سپرده مسدودی، پول خوابیده'}</button>
         ${more && html`<div class="calc-adv" style="grid-template-columns:1fr">
           <${NumField} label=${L('کارمزد و کسورات اول کار', 'cFee')} value=${feeIn} onInput=${setFee} suffix="٪" hint="درصدی از مبلغ وام که همان اول کم می‌شود (کارمزد، بیمه، سهم صندوق…)" />
           <div class="calc-in two" style="max-width:none"><${MoneyField} label=${L('سپرده مسدودی در طول وام', 'cBlocked')} rial=${blocked} onRial=${setBlocked} s=${s} />
-            <${NumField} label="سود سپرده مسدودی" value=${blockedPctIn} onInput=${setBlockedPct} suffix="٪" /></div>
+            <${NumField} label=${L('سود سپرده مسدودی', 'lBlockedPct')} value=${blockedPctIn} onInput=${setBlockedPct} suffix="٪" /></div>
           <div class="calc-in two" style="max-width:none"><${MoneyField} label=${L('پول خوابیده قبل از وام (معدل)', 'cIdle')} rial=${idle} onRial=${setIdle} s=${s} />
-            <${NumField} label="چند ماه قبل" value=${idleMonthsIn} onInput=${setIdleMonths} suffix="ماه" /></div>
+            <${NumField} label=${L('چند ماه قبل', 'lIdleMonths')} value=${idleMonthsIn} onInput=${setIdleMonths} suffix="ماه" /></div>
           ${idleNoMonths && html`<div class="xs warn">چند ماه پول باید بخوابد؟ تا ننویسی، حساب نمی‌شود.</div>`}
-          ${idle > 0 && html`<${NumField} label="سودی که پول خوابیده می‌گیرد" value=${idlePctIn} onInput=${setIdlePct} suffix="٪" hint=${`اگر در حساب قرض‌الحسنه یا جاری است، صفر. هزینه‌اش سودی است که در سپرده ${num(depPct, 1)}٪ از دست می‌دهد.`} />`}
+          ${idle > 0 && html`<${NumField} label=${L('سودی که پول خوابیده می‌گیرد', 'lIdlePct')} value=${idlePctIn} onInput=${setIdlePct} suffix="٪" hint=${`اگر در حساب قرض‌الحسنه یا جاری است، صفر. هزینه‌اش سودی است که در سپرده ${num(depPct, 1)}٪ از دست می‌دهد.`} />`}
         </div>`}
       </div>
       <div class="calc-out">
@@ -311,23 +311,23 @@ function DepositTool({ st, s }) {
   const y = mode === 'yield' ? K.depositYield({ principal, ratePct: pctIn(rateIn), months: monthsIn }) : null;
   const b = mode === 'break' && breakIn !== null ? K.depositBreak({ principal, ratePct: pctIn(rateIn), termMonths: monthsIn, heldMonths: heldIn ?? 0, breakPct: breakIn, newPct: newIn, paidOut }) : null;
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="bank" cls="sm" />سپرده</h3>
+    <div class="card-h"><h3><${Icon} n="bank" cls="sm" />سپرده${T('hDeposit')}</h3>
       <${Seg} value=${mode} onChange=${setMode} options=${[['yield', 'سود سپرده'], ['break', 'شکستن سپرده']]} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        ${mode === 'break' && mine.length > 0 && html`<div class="field"><label>از سپرده‌های من (اختیاری)</label><select class="input" value=${pick} onChange=${(e) => fromMine(e.target.value)}>
+        ${mode === 'break' && mine.length > 0 && html`<div class="field"><label>${L('از سپرده‌های من (اختیاری)', 'dMine')}</label><select class="input" value=${pick} onChange=${(e) => fromMine(e.target.value)}>
           <option value="">—</option>${mine.map((a) => html`<option value=${a.id}>${a.name}${a.custodian ? ' — ' + a.custodian : ''}</option>`)}</select></div>`}
-        <${MoneyField} label="مبلغ سپرده" rial=${principal} onRial=${setPrincipal} s=${s} />
+        <${MoneyField} label=${L('مبلغ سپرده', 'dPrincipal')} rial=${principal} onRial=${setPrincipal} s=${s} />
         <div class="calc-in two" style="max-width:none">
-          <${NumField} label="سود سالانه" value=${rateIn} onInput=${setRate} suffix="٪" />
-          <${NumField} label=${mode === 'break' ? 'مدت قرارداد' : 'مدت'} value=${monthsIn} onInput=${setMonths} suffix="ماه" />
+          <${NumField} label=${L('سود سالانه', 'dRate')} value=${rateIn} onInput=${setRate} suffix="٪" />
+          <${NumField} label=${mode === 'break' ? L('مدت قرارداد', 'dTerm') : L('مدت', 'dMonths')} value=${monthsIn} onInput=${setMonths} suffix="ماه" />
         </div>
         ${mode === 'break' && html`
-          <${NumField} label="چند ماه از شروع گذشته" value=${heldIn} onInput=${setHeld} suffix="ماه" hint="فقط ماه‌های کامل حساب می‌شود" />
-          <div class="field"><label>سود هر ماه</label><${Seg} value=${paidOut ? 'out' : 'in'} onChange=${(v) => setPaidOut(v === 'out')} options=${[['out', 'به حساب واریز می‌شده'], ['in', 'روی سپرده می‌مانده']]} /></div>
+          <${NumField} label=${L('چند ماه از شروع گذشته', 'dHeld')} value=${heldIn} onInput=${setHeld} suffix="ماه" hint="فقط ماه‌های کامل حساب می‌شود" />
+          <div class="field"><label>${L('سود هر ماه', 'dPaid')}</label><${Seg} value=${paidOut ? 'out' : 'in'} onChange=${(v) => setPaidOut(v === 'out')} options=${[['out', 'به حساب واریز می‌شده'], ['in', 'روی سپرده می‌مانده']]} /></div>
           <${NumField} label=${L('نرخ سود در صورت شکستن', 'cBreak')} value=${breakIn} onInput=${setBreak} suffix="٪" placeholder="از قرارداد سپرده"
             hint="نرخی که بانک برای ماه‌های گذشته دوباره حساب می‌کند؛ معمولاً نرخ کوتاه‌مدت یا نرخ مدت کوتاه‌تر. در قرارداد سپرده‌ات نوشته شده." />
-          <${NumField} label="اگر پول را جای دیگری بگذاری، با سود سالانه (اختیاری)" value=${newIn} onInput=${setNew} suffix="٪" />`}
+          <${NumField} label=${L('اگر پول را جای دیگری بگذاری، با سود سالانه (اختیاری)', 'dNew')} value=${newIn} onInput=${setNew} suffix="٪" />`}
       </div>
       <div class="calc-out">
         ${mode === 'yield' && (!y ? html`<div class="empty small">مبلغ و سود سالانه را بنویس.</div>` : html`
@@ -371,19 +371,19 @@ function GoalTool({ st, s }) {
   const net = useMemo(() => E.portfolio(st.assets, st.quotes, s).net, [st.assets, st.quotes]);
   const r = K.savingsGoal({ target, start, ratePct: pctIn(rateIn) || 0, inflPct: pctIn(inflIn) || 0, growPct: pctIn(growIn) || 0, ...(mode === 'monthly' ? { months: monthsIn } : { monthly }) });
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />هدف پس‌انداز</h3><${Seg} value=${mode} onChange=${setMode} options=${[['monthly', 'ماهی چقدر؟'], ['months', 'کی می‌رسم؟']]} /></div>
+    <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />هدف پس‌انداز${T('hGoal')}</h3><${Seg} value=${mode} onChange=${setMode} options=${[['monthly', 'ماهی چقدر؟'], ['months', 'کی می‌رسم؟']]} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        <${MoneyField} label="هدف (به پول امروز)" rial=${target} onRial=${setTarget} s=${s} />
-        <div class="col" style="gap:4px"><${MoneyField} label="از حالا داری" rial=${start} onRial=${setStart} s=${s} />
+        <${MoneyField} label=${L('هدف (به پول امروز)', 'gTarget')} rial=${target} onRial=${setTarget} s=${s} />
+        <div class="col" style="gap:4px"><${MoneyField} label=${L('از حالا داری', 'gStart')} rial=${start} onRial=${setStart} s=${s} />
           ${net > 0 && html`<button class="calc-link" style="align-self:flex-start" onClick=${() => setStart(Math.round(net))}>ارزش خالص فعلی‌ات را بگذار</button>`}</div>
-        ${mode === 'monthly' ? html`<${NumField} label="در چند ماه" value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />`
-          : html`<${MoneyField} label="هر ماه کنار می‌گذاری" rial=${monthly} onRial=${setMonthly} s=${s} />`}
+        ${mode === 'monthly' ? html`<${NumField} label=${L('در چند ماه', 'gMonths')} value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />`
+          : html`<${MoneyField} label=${L('هر ماه کنار می‌گذاری', 'gMonthly')} rial=${monthly} onRial=${setMonthly} s=${s} />`}
         <div class="calc-in two" style="max-width:none">
-          <${NumField} label="سود سالانهٔ پس‌انداز" value=${rateIn} onInput=${setRate} suffix="٪" hint=${`پیش‌فرض: سود سپرده (${num(depPct, 1)}٪)`} />
-          <${NumField} label="تورم سالانه" value=${inflIn} onInput=${setInfl} suffix="٪" hint="هدف هر سال این‌قدر گران‌تر می‌شود؛ خالی = بدون تورم" />
+          <${NumField} label=${L('سود سالانهٔ پس‌انداز', 'gRate')} value=${rateIn} onInput=${setRate} suffix="٪" hint=${`پیش‌فرض: سود سپرده (${num(depPct, 1)}٪)`} />
+          <${NumField} label=${L('تورم سالانه', 'gInfl')} value=${inflIn} onInput=${setInfl} suffix="٪" hint="هدف هر سال این‌قدر گران‌تر می‌شود؛ خالی = بدون تورم" />
         </div>
-        <${NumField} label="افزایش سالانهٔ مبلغ پس‌انداز" value=${growIn} onInput=${setGrow} suffix="٪" hint="مثلاً هم‌پای افزایش حقوق؛ خالی = ثابت" />
+        <${NumField} label=${L('افزایش سالانهٔ مبلغ پس‌انداز', 'gGrow')} value=${growIn} onInput=${setGrow} suffix="٪" hint="مثلاً هم‌پای افزایش حقوق؛ خالی = ثابت" />
       </div>
       <div class="calc-out">
         ${!r ? html`<div class="empty small">${mode === 'monthly' ? (+monthsIn > 1200 ? 'مدت حداکثر ۱۲۰۰ ماه (۱۰۰ سال).' : 'هدف و مدت را بنویس.') : 'هدف و مبلغ ماهانه را بنویس.'}</div>`
@@ -430,29 +430,29 @@ function AverageTool({ st, s }) {
   const r = K.averageBuy({ have: { qty: qty0, avg: avg0 }, add: { qty: qty1, price: p1 }, buyFeePct: f.buy, sellFeePct: f.sell, target });
   const h = held.find((x) => x.id === pick);
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="layers" cls="sm" />میانگین خرید</h3><${Seg} value=${kind} onChange=${setKind} options=${FEE_KINDS} /></div>
+    <div class="card-h"><h3><${Icon} n="layers" cls="sm" />میانگین خرید${T('hAverage')}</h3><${Seg} value=${kind} onChange=${setKind} options=${FEE_KINDS} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        ${held.length > 0 && html`<div class="field"><label>از دارایی‌هایم</label><select class="input" value=${pick} onChange=${(e) => choose(e.target.value)}>
+        ${held.length > 0 && html`<div class="field"><label>${L('از دارایی‌هایم', 'aPick')}</label><select class="input" value=${pick} onChange=${(e) => choose(e.target.value)}>
           <option value="">دستی می‌نویسم</option>${held.map((x) => html`<option value=${x.id}>${x.name}</option>`)}</select>
           ${h && !h.pos.avg && html`<span class="hint warn">قیمت خرید این دارایی ثبت نشده؛ میانگین فعلی را خودت بنویس.</span>`}</div>`}
         <div class="calc-blk">
           <div class="calc-bt"><span class="dot"></span>الان داری</div>
           <div class="calc-in two" style="max-width:none">
-            <${NumField} label="تعداد" value=${qty0} onInput=${setQty0} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۱۰۰" />
-            <${MoneyField} label="میانگین خرید هر واحد" rial=${avg0} onRial=${setAvg0} s=${s} placeholder="مثلاً ۵٬۰۰۰" />
+            <${NumField} label=${L('تعداد', 'aQty0')} value=${qty0} onInput=${setQty0} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۱۰۰" />
+            <${MoneyField} label=${L('میانگین خرید هر واحد', 'aAvg0')} rial=${avg0} onRial=${setAvg0} s=${s} placeholder="مثلاً ۵٬۰۰۰" />
           </div>
         </div>
         <div class="calc-blk">
           <div class="calc-bt"><span class="dot add"></span>خرید تازه</div>
           <div class="calc-in two" style="max-width:none">
-            <${NumField} label="تعداد" value=${qty1} onInput=${setQty1} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۲۰۰" />
-            <${MoneyField} label="قیمت هر واحد" rial=${p1} onRial=${setP1} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+            <${NumField} label=${L('تعداد', 'aQty1')} value=${qty1} onInput=${setQty1} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۲۰۰" />
+            <${MoneyField} label=${L('قیمت هر واحد', 'aP1')} rial=${p1} onRial=${setP1} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
           </div>
         </div>
         <div class="calc-blk soft">
           <div class="calc-bt">هدف میانگین <span class="muted" style="font-weight:500">(اختیاری)</span></div>
-          <${MoneyField} label="می‌خواهم میانگینم برسد به" rial=${target} onRial=${setTarget} s=${s} placeholder="مثلاً ۴٬۵۰۰" hint="می‌گوییم چند واحد دیگر به قیمت خرید تازه لازم است" />
+          <${MoneyField} label=${L('می‌خواهم میانگینم برسد به', 'aTarget')} rial=${target} onRial=${setTarget} s=${s} placeholder="مثلاً ۴٬۵۰۰" hint="می‌گوییم چند واحد دیگر به قیمت خرید تازه لازم است" />
         </div>
       </div>
       <div class="calc-out">
@@ -487,19 +487,19 @@ function TradeTool({ st, s }) {
   const f = fees || K.TRADE_FEES[kind];
   const r = K.stockTrade({ buy, sell, qty: qty || 1, buyFeePct: f.buy, sellFeePct: f.sell, targetPct: pctIn(targetIn) });
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="chart" cls="sm" />معاملهٔ بورس</h3><${Seg} value=${kind} onChange=${(k) => { setKind(k); setFees(null); }} options=${[['stock', 'سهم'], ['etf', 'صندوق سهامی و طلا'], ['fixed', 'صندوق درآمد ثابت']]} /></div>
+    <div class="card-h"><h3><${Icon} n="chart" cls="sm" />معاملهٔ بورس${T('hTrade')}</h3><${Seg} value=${kind} onChange=${(k) => { setKind(k); setFees(null); }} options=${[['stock', 'سهم'], ['etf', 'صندوق سهامی و طلا'], ['fixed', 'صندوق درآمد ثابت']]} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
         <div class="calc-in two" style="max-width:none">
-          <${MoneyField} label="قیمت خرید (هر سهم)" rial=${buy} onRial=${setBuy} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
-          <${MoneyField} label="قیمت فروش (هر سهم)" rial=${sell} onRial=${setSell} s=${s} placeholder="مثلاً ۴٬۸۰۰" />
+          <${MoneyField} label=${L('قیمت خرید (هر سهم)', 'tBuy')} rial=${buy} onRial=${setBuy} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+          <${MoneyField} label=${L('قیمت فروش (هر سهم)', 'tSell')} rial=${sell} onRial=${setSell} s=${s} placeholder="مثلاً ۴٬۸۰۰" />
         </div>
-        <${NumField} label="تعداد" value=${qty} onInput=${setQty} suffix="سهم" digits=${0} placeholder="۱" />
-        <${NumField} label="سود خالصی که می‌خواهی" value=${targetIn} onInput=${setTarget} suffix="٪" hint="قیمت فروشی که بعد از کارمزدها به این سود می‌رسد" />
+        <${NumField} label=${L('تعداد', 'tQty')} value=${qty} onInput=${setQty} suffix="سهم" digits=${0} placeholder="۱" />
+        <${NumField} label=${L('سود خالصی که می‌خواهی', 'tTarget')} value=${targetIn} onInput=${setTarget} suffix="٪" hint="قیمت فروشی که بعد از کارمزدها به این سود می‌رسد" />
         <button class="calc-link" style="align-self:flex-start" onClick=${() => setMore(!more)}>${more ? 'بستن کارمزدها' : `کارمزد خرید ${num(f.buy, 3)}٪ و فروش ${num(f.sell, 3)}٪ — تغییر`}</button>
         ${more && html`<div class="calc-adv">
-          <${NumField} label="کارمزد خرید" value=${f.buy} onInput=${(v) => setFees({ ...f, buy: v ?? 0 })} suffix="٪" />
-          <${NumField} label="کارمزد فروش (با مالیات)" value=${f.sell} onInput=${(v) => setFees({ ...f, sell: v ?? 0 })} suffix="٪" />
+          <${NumField} label=${L('کارمزد خرید', 'tFeeBuy')} value=${f.buy} onInput=${(v) => setFees({ ...f, buy: v ?? 0 })} suffix="٪" />
+          <${NumField} label=${L('کارمزد فروش (با مالیات)', 'tFeeSell')} value=${f.sell} onInput=${(v) => setFees({ ...f, sell: v ?? 0 })} suffix="٪" />
         </div>`}
       </div>
       <div class="calc-out">
@@ -527,14 +527,14 @@ function InstalTool({ st, s }) {
   const [monthsIn, setMonths] = useState(12);
   const r = K.payInstalments({ cash, down, each, months: monthsIn, depositPct: depPct });
   return html`<div class="card calc-card">
-    <div class="card-h"><h3><${Icon} n="debt" cls="sm" />قسطی یا نقدی؟</h3></div>
+    <div class="card-h"><h3><${Icon} n="debt" cls="sm" />قسطی یا نقدی؟${T('hInstal')}</h3></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        <${MoneyField} label="قیمت نقدی" rial=${cash} onRial=${setCash} s=${s} />
-        <${MoneyField} label="پیش‌پرداخت قسطی" rial=${down} onRial=${setDown} s=${s} hint="اگر ندارد، خالی بگذار" />
+        <${MoneyField} label=${L('قیمت نقدی', 'iCash')} rial=${cash} onRial=${setCash} s=${s} />
+        <${MoneyField} label=${L('پیش‌پرداخت قسطی', 'iDown')} rial=${down} onRial=${setDown} s=${s} hint="اگر ندارد، خالی بگذار" />
         <div class="calc-in two" style="max-width:none">
-          <${MoneyField} label="هر قسط" rial=${each} onRial=${setEach} s=${s} />
-          <${NumField} label="تعداد قسط" value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />
+          <${MoneyField} label=${L('هر قسط', 'iEach')} rial=${each} onRial=${setEach} s=${s} />
+          <${NumField} label=${L('تعداد قسط', 'iMonths')} value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />
         </div>
       </div>
       <div class="calc-out">

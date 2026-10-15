@@ -1,5 +1,6 @@
 import { html, useState, useEffect, useMemo, useRef, Tip, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ, money, useRadar } from '../components.js';
 import * as RD from '../../lib/radar.js';
+import * as PR from '../../lib/profile.js';
 import * as I from '../../lib/insights.js';
 import * as BB from '../../lib/bubble.js';
 import { CryptoPicker } from '../pickers.js';
@@ -221,6 +222,17 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     return { lines: RD.preBuy({ value: buy, funded: fund.on && !!fundAcc, held: { gross: pf.gross, sameRef: sum((r) => r.asset.price?.ref && E.quoteId(r.asset.price.ref) === id), sameSector: sec ? sum((r) => tse(r) && radar.stocks?.[tse(r)]?.sector === sec) : 0 },
       rep, bubble: fb, depositPct: I.defaultDepositPct(st), fee: pbRef.provider === 'fipiran' ? 0 : isFund ? 0.5 : 1.5, kind: isFund ? 'fund' : 'stock' }), rep };
   }, [pbRef && E.quoteId(pbRef), val.value, fund.on, fundAmt, fundAcc?.id, radar, st.assets, quotes, s]);
+  // the investment profile's red lines and emergency fund, for any new holding (not only shares and funds)
+  const profNotes = useMemo(() => {
+    if (!isNew || !s.profile || cat.liability) return [];
+    const buy = fund.on && fundAmt > 0 ? fundAmt : val.value;
+    if (!(buy > 0)) return [];
+    const pf = E.portfolio(st.assets, quotes, s);
+    const id = a.mode === 'units' && a.price.source === 'market' && a.price.ref?.key ? E.quoteId(a.price.ref) : null;
+    const sameHeld = id ? pf.rows.filter((r) => !r.cat.liability && r.asset.price?.ref && E.quoteId(r.asset.price.ref) === id).reduce((t, r) => t + Math.max(0, r.value), 0) : 0;
+    const fromCash = fund.on && !!fundAcc && (fundAcc.category === 'bank' || fundAcc.category === 'fixed');
+    return PR.purchaseNotes(s.profile, pf, { category: a.category, value: buy, sameHeld, funded: fund.on && !!fundAcc, spendFromCash: fromCash });
+  }, [isNew, s.profile, a.category, a.price?.ref && E.quoteId(a.price.ref), val.value, fund.on, fundAmt, fundAcc?.id, st.assets, quotes]);
   const [dbad, setDbad] = useState({});
   const dB = (k) => (b) => setDbad((d) => (!!d[k] === b ? d : { ...d, [k]: b }));
   // what's missing or wrong, by field (shown in red on the field itself after a save attempt)
@@ -470,10 +482,10 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       <span class="hint">${fund.on ? (liabCat ? 'مبلغ به آن حساب اضافه می‌شود؛ ارزش خالص تغییری نمی‌کند.' : 'مبلغ از آن حساب کم می‌شود؛ پول تازه یا سود حساب نمی‌شود.') : (liabCat ? 'اگر پول وام به حسابی رفته که در دارا ثبت کرده‌ای، انتخابش کن.' : 'اگر همین حالا با پول یکی از حساب‌هایت خریدی، انتخابش کن تا از آن کم شود.')}</span>
     </div>`}
 
-    ${preBuy?.lines.length > 0 && html`<details class="sec prebuy" open>
+    ${(preBuy?.lines.length > 0 || profNotes.length > 0) && html`<details class="sec prebuy" open>
       <summary class="st"><${Icon} n="info" cls="sm" />پیش از خرید ببین</summary>
-      <ul class="prebuy-l">${preBuy.lines.map((l) => html`<li class=${l.warn ? 'warn' : ''}>${l.t}</li>`)}</ul>
-      <span class="hint">${preBuy.rep ? `از رادار، جلسهٔ ${fmtJ(preBuy.rep.day)}.` : 'با روشن بودن رادار فرصت‌ها، P/E، فاصله از سقف و نقدشوندگی هم اینجا می‌آید.'} فقط برای اطلاع است؛ ثبت را عوض نمی‌کند. در تنظیمات می‌شود خاموشش کرد.</span>
+      <ul class="prebuy-l">${profNotes.map((l) => html`<li class="warn">${l.t}</li>`)}${(preBuy?.lines || []).map((l) => html`<li class=${l.warn ? 'warn' : ''}>${l.t}</li>`)}</ul>
+      <span class="hint">${!preBuy ? 'از پروفایل سرمایه‌گذاری‌ات. ' : preBuy.rep ? `از رادار، جلسهٔ ${fmtJ(preBuy.rep.day)}.` : 'با روشن بودن رادار فرصت‌ها، P/E، فاصله از سقف و نقدشوندگی هم اینجا می‌آید.'} فقط برای اطلاع است؛ ثبت را عوض نمی‌کند. در تنظیمات می‌شود خاموشش کرد.</span>
     </details>`}
 
     <div class="sec"><div class="st"><${Icon} n="target" cls="sm" />جزئیات بیشتر (اختیاری)</div>

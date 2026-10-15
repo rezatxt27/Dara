@@ -5,9 +5,12 @@ import * as CMP from './compare.js';
 import * as AI from './ai.js';
 import * as BB from './bubble.js';
 import * as RD from './radar.js';
+import * as K from './calc.js';
 import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY, fxKeyOf } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
+import { thinPoints } from './chats.js';
+import * as PR from './profile.js';
 
 const unitName = (s) => (s?.currency === 'rial' ? 'ریال' : 'تومان');
 /** Rial → display unit, rounded */
@@ -33,14 +36,15 @@ export function systemPrompt(st, privacy = 'full') {
 قواعد:
 - به فارسی روان، دقیق و کوتاه پاسخ بده (معمولاً کمتر از ۱۸۰ کلمه). از فهرست و پاراگراف کوتاه استفاده کن.
 - هر عددی را فقط از داده‌ها یا خروجی ابزارها بیاور؛ هرگز عدد نساز یا حدس نزن. اگر داده‌ای نیست، صریح بگو.
-- برای هر محاسبه (سناریو، تغییرات، زمان‌بندی، تاریخچه) ابزار مربوط را صدا بزن و خودت حساب نکن.
+- برای هر محاسبه (سناریو، تغییرات، زمان‌بندی، تاریخچه) ابزار مربوط را صدا بزن و خودت حساب نکن. برای قسط وام، قسطی یا نقدی، هدف پس‌انداز، میانگین خرید، کارمزد بورس، سود یا شکستن سپرده و رهن و اجاره، ابزارهای calc_* را صدا بزن.
 - مبالغ را به ${unit} بنویس، با جداکننده هزارگان؛ برای اعداد بزرگ از «میلیون/میلیارد» استفاده کن.
+- برای مقایسهٔ چند گزینه یا چند عدد، یک جدول کوتاه مارک‌داون (حداکثر ۵ ستون) بنویس؛ برای روند، ترکیب یا مقایسهٔ تصویری، show_chart را صدا بزن.
 - توصیه قطعی خرید و فروش نده؛ گزینه‌ها، اثر و ریسک هرکدام را بگو و تصمیم را به کاربر بسپار.
 - دربارهٔ هر سهم یا صندوق، اول get_symbol_report را صدا بزن و فقط با همان عددها حرف بزن؛ منبع و تاریخ را بگو. هرگز نگو «بخر» یا «بفروش»؛ حداکثر بگو «ارزش بررسی دارد» و کنار دلیلش، ریسک‌ها و چیزهایی را که باید بررسی شود بیاور. بازدهی گذشته تضمینی برای آینده نیست.
 - برای تغییر داده‌ها فقط ابزارهای propose_* را صدا بزن؛ تغییر بعد از تأیید کاربر اعمال می‌شود. بعد از پیشنهاد، به کاربر بگو دکمه تأیید را بزند.
 ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» فعال است: مبالغ مطلق در دسترس تو نیست؛ با درصدها پاسخ بده.\n' : ''}
 امروز: ${fmtJ(todayIso())}. واحد نمایش: ${unit}.
-خلاصه فعلی: ${overview}.`;
+خلاصه فعلی: ${overview}.${PR.isSet(s.profile) ? '\n\n' + PR.promptLines(s.profile, pf, privacy) : ''}`;
 }
 
 /** Tools the model can call. ctx: { getState: () => st, privacy, onProposal(p) } */
@@ -56,6 +60,17 @@ async function radarOf(ctx) {
   if (ctx.getRadar) return ctx.getRadar();
   try { return typeof chrome !== 'undefined' && chrome.storage?.local ? (await chrome.storage.local.get('radar')).radar || null : null; } catch { return null; }
 }
+
+/** What the chat shows while each tool runs (every tool has one; a test checks it). */
+export const TOOL_STEPS = {
+  get_overview: 'بررسی خلاصه پرتفوی', list_assets: 'خواندن دارایی‌ها', get_prices: 'خواندن قیمت‌ها', get_gold_bubbles: 'بررسی حباب سکه‌ها',
+  explain_change: 'تحلیل تغییرات', simulate_scenario: 'شبیه‌سازی سناریو', get_schedule: 'بررسی رویدادهای آینده', get_history: 'بررسی تاریخچه',
+  explain_value: 'بررسی ریز محاسبه', compare_performance: 'مقایسه با طلا، دلار و سپرده', break_even: 'محاسبه نقطه سربه‌سر', compare_options: 'مقایسه دو گزینه',
+  plan_new_money: 'تقسیم پول جدید', get_symbol_report: 'خواندن کارنامهٔ نماد', get_radar_today: 'بررسی رادار فرصت‌ها',
+  calc_loan: 'محاسبهٔ هزینهٔ وام', calc_instalments: 'مقایسهٔ قسطی و نقدی', calc_savings_goal: 'محاسبهٔ هدف پس‌انداز', calc_average_buy: 'محاسبهٔ میانگین خرید',
+  calc_stock_trade: 'محاسبهٔ کارمزد معامله', calc_deposit: 'محاسبهٔ سپرده', calc_rent: 'محاسبهٔ رهن و اجاره',
+  show_chart: 'آماده‌کردن نمودار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
+};
 
 export function makeTools(ctx) {
   const P = () => ctx.privacy === 'percent';
@@ -339,6 +354,155 @@ export function makeTools(ctx) {
             const p = (v) => (v === null || v === undefined || !isFinite(v) ? null : pct(v));
             return { signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check, returns_pct: { m1: p(r[0]), m3: p(r[1]), m6: p(r[2]), m12: p(r[3]) } };
           }) };
+      },
+    },
+    {
+      name: 'show_chart',
+      description: 'یک نمودار کوچک زیر جوابت نشان می‌دهد. kind: net_worth (روند ارزش خالص در days روز)، allocation (ترکیب دارایی‌ها)، performance (بازده پرتفوی در برابر طلا، دلار و سپرده در period)، custom (ستون‌هایی از عددهایی که از ابزارهای دیگر گرفته‌ای؛ هرگز عدد نساز). وقتی روند، ترکیب یا مقایسهٔ چند عدد بهتر با تصویر فهمیده می‌شود صدایش بزن؛ عددهای نمودار را دوباره در متن تکرار نکن.',
+      schema: { type: 'object', properties: { kind: { type: 'string', enum: ['net_worth', 'allocation', 'performance', 'custom'] }, days: { type: 'number' }, period: { type: 'string', enum: ['month', 'quarter', 'year'] },
+        title: { type: 'string' }, labels: { type: 'array', items: { type: 'string' } }, values: { type: 'array', items: { type: 'number' } },
+        unit: { type: 'string', enum: ['money', 'pct', 'number'], description: 'برای custom: money (به واحد نمایش)، pct یا number' } }, required: ['kind'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10;
+        const push = (spec) => { ctx.onChart?.({ id: uid('c'), ...spec }); return { shown: true, note: 'نمودار زیر جواب نشان داده شد؛ عددهایش را در متن تکرار نکن.' }; };
+        if (a.kind === 'net_worth') {
+          const days = Math.max(7, Math.min(1500, +a.days || 90));
+          let series = E.seriesFrom(s.snapshots, 'money', days);
+          // percent-only: an index from the first positive day (a net worth at or below zero has no meaningful index)
+          if (P()) { const i0 = series.findIndex((p) => p.value > 0); series = i0 < 0 ? [] : series.slice(i0); }
+          if (series.length < 2) return { error: 'تاریخچه کافی ثبت نشده' };
+          // percent-only privacy: the line is an index (start = 100), never amounts
+          return push({ type: 'area', title: a.title || `ارزش خالص، ${days} روز گذشته`, money: !P(),
+            points: thinPoints(series.map((p) => ({ date: p.date, value: P() ? +(p.value / series[0].value * 100).toFixed(2) : p.value, est: p.est || undefined }))) });
+        }
+        if (a.kind === 'allocation') {
+          const pf = pfOf(); const g = pf.gross || 1;
+          const items = pf.cats.filter((c) => !c.liability && c.value > 0).map((c) => ({ name: c.short || c.name, value: c.value / g, color: CAT[c.id]?.color || 'var(--accent)' }));
+          if (!items.length) return { error: 'دارایی‌ای ثبت نشده' };
+          return push({ type: 'donut', title: a.title || 'ترکیب دارایی‌ها', items });
+        }
+        if (a.kind === 'performance') {
+          const days = { month: 30, quarter: 90, year: 365 }[a.period] || 90;
+          const r = I.performance(s, days, { depositPct: I.defaultDepositPct(s), pf: pfOf() });
+          if (!r || r.ret === null) return { error: 'تاریخچه کافی نیست' };
+          return push({ type: 'bars', unit: 'pct', signed: true, title: a.title || `بازده از ${fmtJ(r.from)}`, items: [{ name: 'دارایی‌های تو', value: r.ret, hl: true }, ...r.bench.map((b) => ({ name: b.name, value: b.ret }))] });
+        }
+        const labels = Array.isArray(a.labels) ? a.labels : [], values = Array.isArray(a.values) ? a.values : [];
+        if (!labels.length || labels.length !== values.length || labels.length > 12 || values.some((v) => !isFinite(+v))) return { error: 'برای custom، labels و values هم‌اندازه (حداکثر ۱۲) و عددی لازم است' };
+        const unit = ['money', 'pct', 'number'].includes(a.unit) ? a.unit : 'number';
+        return push({ type: 'bars', unit, title: a.title || '', items: labels.map((n, i) => ({ name: String(n).slice(0, 40), value: unit === 'money' ? +values[i] * k : unit === 'pct' ? +values[i] / 100 : +values[i] })) });
+      },
+    },
+    // ---- the calculators of «ماشین‌حساب‌ها», with the same tested formulas (amounts in the display unit both ways) ----
+    {
+      name: 'calc_loan',
+      description: 'ماشین‌حساب «هزینه واقعی وام»: قسط ماهانه، کل بازپرداخت و سود، و نرخ واقعی سالانه با شرط‌های بانک (کارمزد اول کار، سپرده مسدودی، پول خوابیده برای امتیاز). برای هر سؤال دربارهٔ قسط یا هزینهٔ وام همین را صدا بزن.',
+      schema: { type: 'object', properties: { amount: { type: 'number', description: 'مبلغ وام به واحد نمایش' }, annual_rate_pct: { type: 'number' }, months: { type: 'number' },
+        fee_pct: { type: 'number', description: 'کسورات اول کار، درصد از وام' }, blocked: { type: 'number', description: 'سپرده مسدودی در طول وام، به واحد نمایش' }, blocked_rate_pct: { type: 'number' },
+        idle: { type: 'number', description: 'پولی که قبل از وام باید بخوابد، به واحد نمایش' }, idle_months: { type: 'number' }, idle_rate_pct: { type: 'number' } }, required: ['amount', 'annual_rate_pct', 'months'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings);
+        const r = K.loanCost({ amount: (+a.amount || 0) * k, ratePct: a.annual_rate_pct, months: a.months, feePct: a.fee_pct || 0, blocked: (+a.blocked || 0) * k, blockedPct: a.blocked_rate_pct || 0,
+          idle: (+a.idle || 0) * k, idleMonths: a.idle_months || 0, idlePct: a.idle_rate_pct || 0, opportunityPct: I.defaultDepositPct(s) });
+        if (!r) return { error: 'مبلغ، نرخ یا مدت نامعتبر است (مدت ۱ تا ۶۰۰ ماه)' };
+        return { unit: unitName(s.settings), monthly_installment: d(r.installment), total_repaid: d(r.total), total_interest: d(r.interest), money_actually_received: r.extras ? d(r.netReceived) : undefined,
+          idle_money_lost_interest: r.idleCost > 0 ? d(r.idleCost) : undefined, real_annual_rate_pct: r.realPct !== null ? +r.realPct.toFixed(2) : null,
+          nothing_received: r.noMoney || undefined, conditions_pay_for_themselves: r.earns || undefined, deposit_rate_for_comparison_pct: I.defaultDepositPct(s),
+          note: 'قسط با روش معمول بانک‌ها (اقساط مساوی). نرخ واقعی از همهٔ پول‌های داده و گرفته در طول وام حساب شده.' };
+      },
+    },
+    {
+      name: 'calc_instalments',
+      description: 'ماشین‌حساب «قسطی یا نقدی؟»: سود واقعی سالانهٔ خرید قسطی، و اینکه اگر پول نقد در سپرده بماند و قسط‌ها از آن داده شود کدام به‌صرفه‌تر است.',
+      schema: { type: 'object', properties: { cash_price: { type: 'number', description: 'به واحد نمایش' }, down_payment: { type: 'number' }, each_installment: { type: 'number' }, months: { type: 'number' }, deposit_rate_pct: { type: 'number' } }, required: ['cash_price', 'each_installment', 'months'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings);
+        const dep = a.deposit_rate_pct > 0 ? a.deposit_rate_pct : I.defaultDepositPct(s);
+        const r = K.payInstalments({ cash: (+a.cash_price || 0) * k, down: (+a.down_payment || 0) * k, each: (+a.each_installment || 0) * k, months: a.months, depositPct: dep });
+        if (!r) return { error: 'ورودی نامعتبر است (پیش‌پرداخت باید از قیمت نقدی کمتر و تعداد قسط ۱ تا ۶۰۰ باشد)' };
+        return { unit: unitName(s.settings), real_annual_rate_pct: r.realPct !== null ? +r.realPct.toFixed(2) : null, total_paid_in_instalments: d(r.total), more_than_cash: d(r.extra), more_than_cash_pct: pct(r.extraPct),
+          deposit_rate_pct: dep, left_at_end_if_cash_kept_in_deposit: d(r.endBalance), cheaper: r.endBalance >= 0 ? 'instalments' : 'cash',
+          note: 'گران شدن کالا در طول قسط‌ها حساب نشده.' };
+      },
+    },
+    {
+      name: 'calc_savings_goal',
+      description: 'ماشین‌حساب «هدف پس‌انداز»: با months می‌گوید ماهی چقدر باید کنار بگذارد؛ با monthly می‌گوید کی به هدف می‌رسد. سود پس‌انداز، تورم (هدف گران‌تر می‌شود) و افزایش سالانهٔ مبلغ را حساب می‌کند.',
+      schema: { type: 'object', properties: { target: { type: 'number', description: 'هدف به پول امروز، به واحد نمایش' }, start: { type: 'number', description: 'پولی که از حالا دارد' },
+        months: { type: 'number' }, monthly: { type: 'number', description: 'مبلغ ماهانه (یکی از months یا monthly)' }, annual_rate_pct: { type: 'number' }, inflation_pct: { type: 'number' }, yearly_raise_pct: { type: 'number' } }, required: ['target'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings);
+        const byMonths = a.months !== undefined && a.months !== null;
+        const r = K.savingsGoal({ target: (+a.target || 0) * k, start: (+a.start || 0) * k, ratePct: a.annual_rate_pct ?? I.defaultDepositPct(s), inflPct: a.inflation_pct || 0, growPct: a.yearly_raise_pct || 0,
+          ...(byMonths ? { months: a.months } : { monthly: (+a.monthly || 0) * k }) });
+        if (!r) return { error: byMonths ? 'هدف یا مدت نامعتبر است (۱ تا ۱۲۰۰ ماه)' : 'هدف یا مبلغ ماهانه نامعتبر است' };
+        if (r.never) return { never_reaches_within_100_years: true, hint: 'مبلغ ماهانه کم است یا تورم از سود بیشتر است؛ افزایش سالانه کمک می‌کند' };
+        return { unit: unitName(s.settings), already_enough: r.already || undefined, monthly_needed_first_year: byMonths ? d(r.monthly) : undefined, months_to_goal: byMonths ? undefined : r.months,
+          goal_in_that_month_with_inflation: d(r.goal), total_put_aside: d(r.put), growth: d(r.growth), note: 'سود و تورم آینده معلوم نیست؛ برآورد است.' };
+      },
+    },
+    {
+      name: 'calc_average_buy',
+      description: 'ماشین‌حساب «میانگین خرید»: اگر از یک دارایی باز هم بخرد، میانگین تازه و قیمت سربه‌سر (با کارمزد) چه می‌شود؛ و برای رسیدن به یک میانگین چند واحد دیگر باید بخرد. اگر دارایی را کاربر دارد، مقدار و قیمت را از list_assets بگیر.',
+      schema: { type: 'object', properties: { have_qty: { type: 'number' }, have_avg: { type: 'number', description: 'میانگین خرید هر واحد، به واحد نمایش' }, buy_qty: { type: 'number' }, buy_price: { type: 'number' },
+        kind: { type: 'string', enum: ['stock', 'etf', 'none'], description: 'نوع کارمزد: سهم، صندوق یا بدون کارمزد' }, target_avg: { type: 'number' } }, required: ['have_qty', 'have_avg'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings); const up = (v) => (v === null || !isFinite(v) ? null : Math.round(v / k * 100) / 100);
+        const f = a.kind === 'none' ? { buy: 0, sell: 0 } : K.TRADE_FEES[a.kind === 'etf' ? 'etf' : 'stock'];
+        const r = K.averageBuy({ have: { qty: a.have_qty, avg: (+a.have_avg || 0) * k }, add: { qty: a.buy_qty, price: (+a.buy_price || 0) * k }, buyFeePct: f.buy, sellFeePct: f.sell, target: a.target_avg ? a.target_avg * k : null });
+        if (!r) return { error: 'مقدار و میانگین فعلی (یا خرید تازه) لازم است' };
+        return { unit: unitName(s.settings), new_average: up(r.avg), change_vs_current_pct: r.change !== null ? pct(r.change) : null, total_qty: +r.qty.toFixed(4), new_purchase_cost_with_fee: r.addCost ? d(r.addCost) : undefined,
+          breakeven_price_with_fees: up(r.breakeven), fees_pct: f,
+          units_to_buy_for_target: r.toTarget === undefined ? undefined : r.toTarget === null ? 'با این قیمت خرید به این میانگین نمی‌رسد' : +r.toTarget.toFixed(2) };
+      },
+    },
+    {
+      name: 'calc_stock_trade',
+      description: 'ماشین‌حساب «معاملهٔ بورس»: کارمزد و مالیات خرید و فروش، قیمت فروش سربه‌سر، سود خالص، و قیمت فروشی که به یک سود خالص دلخواه می‌رسد. کارمزدها تقریبی‌اند.',
+      schema: { type: 'object', properties: { kind: { type: 'string', enum: ['stock', 'etf', 'fixed'], description: 'سهم، صندوق سهامی و طلا، یا صندوق درآمد ثابت' }, buy_price: { type: 'number', description: 'هر سهم، به واحد نمایش' },
+        sell_price: { type: 'number' }, qty: { type: 'number' }, target_net_pct: { type: 'number' } }, required: ['buy_price'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings); const up = (v) => (v === null || !isFinite(v) ? null : Math.round(v / k * 100) / 100);
+        const f = K.TRADE_FEES[a.kind] || K.TRADE_FEES.stock;
+        const r = K.stockTrade({ buy: (+a.buy_price || 0) * k, sell: a.sell_price ? a.sell_price * k : null, qty: a.qty || 1, buyFeePct: f.buy, sellFeePct: f.sell, targetPct: a.target_net_pct ?? null });
+        if (!r) return { error: 'قیمت خرید لازم است' };
+        return { unit: unitName(s.settings), fees_pct: f, paid_with_fee: d(r.paid), breakeven_sell_price: up(r.even), breakeven_rise_pct: pct(r.evenPct),
+          ...(r.profit !== undefined ? { net_profit: d(r.profit), net_return_pct: pct(r.ret), price_move_pct: pct(r.move), total_fees: d(r.buyFee + r.sellFee) } : {}),
+          sell_price_for_target: r.forTarget ? up(r.forTarget) : undefined, note: 'سود نقدی و افزایش سرمایه حساب نشده.' };
+      },
+    },
+    {
+      name: 'calc_deposit',
+      description: 'ماشین‌حساب «سپرده»: بدون break_rate_pct سود ماهانه، سود کل و سود مؤثر؛ با break_rate_pct هزینهٔ شکستن سپرده پیش از سررسید (و با new_rate_pct مقایسه با گذاشتن پول جای دیگر).',
+      schema: { type: 'object', properties: { principal: { type: 'number', description: 'به واحد نمایش' }, annual_rate_pct: { type: 'number' }, months: { type: 'number', description: 'مدت (یا مدت قرارداد)' },
+        held_months: { type: 'number' }, break_rate_pct: { type: 'number' }, new_rate_pct: { type: 'number' }, interest_paid_out: { type: 'boolean', description: 'سود هر ماه به حساب دیگری واریز می‌شده' } }, required: ['principal', 'annual_rate_pct'] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings);
+        if (a.break_rate_pct === undefined || a.break_rate_pct === null) {
+          const r = K.depositYield({ principal: (+a.principal || 0) * k, ratePct: a.annual_rate_pct, months: a.months || 12 });
+          if (!r) return { error: 'مبلغ و نرخ لازم است' };
+          return { unit: unitName(s.settings), monthly_interest: d(r.monthly), total_if_withdrawn_monthly: d(r.simple), total_if_reinvested: d(r.compounded), effective_annual_pct: pct(r.effAnnual), months: r.months };
+        }
+        const r = K.depositBreak({ principal: (+a.principal || 0) * k, ratePct: a.annual_rate_pct, termMonths: a.months || 12, heldMonths: a.held_months || 0, breakPct: a.break_rate_pct, newPct: a.new_rate_pct ?? null, paidOut: a.interest_paid_out !== false });
+        if (!r) return { error: 'ورودی نامعتبر است' };
+        if (r.matured) return { matured: true, note: 'مدت تمام شده؛ شکستن هزینه‌ای ندارد' };
+        return { unit: unitName(s.settings), back_if_broken_today: d(r.back), taken_from_principal: r.penalty ? d(r.penalty) : undefined, interest_lost: r.lost ? d(r.lost) : undefined, months_left: r.remaining,
+          if_kept_more_interest: r.keepInterest !== undefined ? d(r.keepInterest) : undefined, if_kept_at_maturity: r.keepEnd !== undefined ? d(r.keepEnd) : undefined,
+          breaking_and_moving_vs_keeping: r.diff !== undefined ? d(r.diff) : undefined, breakeven_new_rate_pct: r.evenPct !== null && r.evenPct !== undefined && isFinite(r.evenPct) ? +r.evenPct.toFixed(2) : undefined };
+      },
+    },
+    {
+      name: 'calc_rent',
+      description: 'ماشین‌حساب «رهن و اجاره»: تبدیل ودیعه و اجاره به هم با نرخ تبدیل ماهانه (پیش‌فرض ۳٪)، و اینکه ودیعهٔ بیشتر به‌صرفه است یا سپرده.',
+      schema: { type: 'object', properties: { deposit: { type: 'number', description: 'به واحد نمایش' }, rent: { type: 'number' }, monthly_rate_pct: { type: 'number' }, new_deposit: { type: 'number' }, new_rent: { type: 'number' } }, required: [] },
+      run: (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10; const d = (v) => disp(v, s.settings);
+        const rate = a.monthly_rate_pct > 0 ? a.monthly_rate_pct : K.RENT_DEFAULT_PCT;
+        const r = K.rentConvert({ deposit: (+a.deposit || 0) * k, rent: (+a.rent || 0) * k, ratePct: rate, newDeposit: a.new_deposit !== undefined ? a.new_deposit * k : null, newRent: a.new_rent !== undefined && a.new_deposit === undefined ? a.new_rent * k : null });
+        if (!r) return { error: 'ودیعه یا اجاره لازم است' };
+        const v = K.rentVsDeposit({ ratePct: rate, depositPct: I.defaultDepositPct(s) });
+        return { unit: unitName(s.settings), monthly_rate_pct: rate, all_rent: d(r.fullRent), all_deposit: d(r.fullDeposit), ...(r.to ? { new_deposit: d(r.to.deposit), new_rent: d(r.to.rent), beyond_contract: r.to.over || undefined } : {}),
+          for_tenant_more_deposit_saves_yearly_pct: pct(v.rentYield), deposit_yields_yearly_pct: pct(v.depositYield), better_for_tenant: v.more === 'deposit' ? 'more_deposit' : v.more === 'bank' ? 'money_in_bank' : 'same' };
       },
     },
     {

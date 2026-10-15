@@ -1,5 +1,6 @@
 // Mutations used by UI pages. Every write is one atomic, locked read-modify-write on the freshest stored data
 // (store.mutate), so a page and the background worker can't overwrite each other's changes.
+import * as CH from '../lib/chats.js';
 import * as store from '../lib/store.js';
 import * as E from '../lib/engine.js';
 import * as BB from '../lib/bubble.js';
@@ -272,7 +273,10 @@ export const act = {
     return store.update('ai', (ai) => { const connections = (ai.connections || []).filter((c) => c.id !== id); return { ...ai, connections, activeId: ai.activeId === id ? connections[0]?.id || null : ai.activeId }; });
   },
   async setAI(patch) { return store.update('ai', (ai) => ({ ...ai, ...patch })); },
-  async saveChat(messages) { return store.locked(() => store.save({ chat: { messages: messages.slice(-60) } })); },
+  /** One conversation's messages, merged into what is stored (another page or tab may have saved other threads). */
+  async saveThread(id, messages) { return store.update('chat', (c) => CH.withMessages(c, id, messages)); },
+  async deleteThread(id) { return store.update('chat', (c) => CH.remove(c, id)); },
+  async loadChat() { return CH.normalize((await store.load('chat')).chat); },
 
   /** Remove the sample rows the way a delete does (links paused or unlinked, removal logged); the owner's rows stay.
    *  With nothing of the owner's left, the sample's history goes too. */

@@ -323,9 +323,23 @@ export function Markdown({ text }) {
   const digits = (t) => (getDigits() === 'fa' ? t.replace(/(\d),(?=\d{3}(?!\d))/g, '$1٬').replace(/(\d)\.(?=\d)/g, '$1٫') : t);
   // (code spans are left as written)
   const inline = (t) => esc(t).split(/(`[^`]+`)/).map((x, i) => (i % 2 ? `<code>${x.slice(1, -1)}</code>` : digits(x).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'))).join('');
-  const out = []; let list = null;
+  const out = []; let list = null; let table = null;
+  // a pipe table: | a | b | rows; the |---| line under the header is dropped, the first row is the header
+  const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  const flushTable = () => {
+    if (!table) return;
+    const [head, ...body] = table;
+    out.push(`<div class="md-tw"><table class="md-tbl"><thead><tr>${head.map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${body.map((r) => `<tr>${head.map((_, i) => `<td>${inline(r[i] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    table = null;
+  };
   for (const raw of String(text || '').split('\n')) {
     const line = raw.trimEnd();
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      if (list) { out.push(`<ul>${list.join('')}</ul>`); list = null; }
+      if (/^\s*\|[\s:|-]+\|\s*$/.test(line) && line.includes('-')) continue;
+      (table ||= []).push(cells(line)); continue;
+    }
+    flushTable();
     const li = line.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/);
     if (li) { if (!list) { list = []; } list.push(`<li>${inline(li[1])}</li>`); continue; }
     if (list) { out.push(`<ul>${list.join('')}</ul>`); list = null; }
@@ -334,6 +348,7 @@ export function Markdown({ text }) {
     else if (line.trim()) out.push(`<p>${inline(line)}</p>`);
   }
   if (list) out.push(`<ul>${list.join('')}</ul>`);
+  flushTable();
   return html`<div class="md" dangerouslySetInnerHTML=${{ __html: out.join('') }}></div>`;
 }
 

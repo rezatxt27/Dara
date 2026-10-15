@@ -1,17 +1,15 @@
 // Assistant: chat with your portfolio (tool-using AI) + weekly narrative reports.
 import { isoFromDate } from '../../lib/jalali.js';
-import { html, useState, useEffect, useRef, Icon, Money, Markdown, Modal, toast, send, num, fmtJ, hasChrome } from '../components.js';
+import { html, useState, useEffect, useRef, Icon, Money, Markdown, Modal, AreaChart, Donut, toast, send, num, pct, fmtJ, hasChrome } from '../components.js';
+import * as CH from '../../lib/chats.js';
+import { money as fmtMoney } from '../../lib/format.js';
 import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import { uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
 import { ProposalCard } from '../proposals.js';
 
-const STEP = {
-  get_overview: 'بررسی خلاصه پرتفوی', list_assets: 'خواندن دارایی‌ها', get_prices: 'خواندن قیمت‌ها', explain_change: 'تحلیل تغییرات',
-  simulate_scenario: 'شبیه‌سازی سناریو', get_schedule: 'بررسی رویدادهای آینده', get_history: 'بررسی تاریخچه', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
-  explain_value: 'بررسی ریز محاسبه', compare_performance: 'مقایسه با طلا، دلار و سپرده', break_even: 'محاسبه نقطه سربه‌سر', plan_new_money: 'تقسیم پول جدید',
-};
+const STEP = A.TOOL_STEPS;
 const SUGGESTIONS = [
   'امروز ارزش دارایی‌ام چرا تغییر کرد؟',
   'اگر دلار ۳۰٪ گران شود و انس طلا ۱۰٪ بریزد، چه می‌شود؟',
@@ -38,8 +36,43 @@ function Reports({ st, s }) {
   </div>`;
 }
 
+/** A chart the assistant attached to an answer (data computed by the tool, never written by the model). */
+function ChatChart({ c, s }) {
+  const fmtV = (v) => (c.unit === 'money' ? fmtMoney(v, s, { compact: true }) : c.unit === 'pct' ? pct(v, { digits: 1, sign: !!c.signed }) : num(v, Math.abs(v) < 10 ? 2 : 0));
+  return html`<div class="cchart">
+    ${c.title && html`<div class="xs sb ink2" style="margin-bottom:6px">${c.title}</div>`}
+    ${c.type === 'area' && html`<${AreaChart} points=${c.points} height=${150} fmt=${(v) => (c.money ? fmtMoney(v, s, { compact: true }) : `${num(v, 1)} (شروع = ۱۰۰)`)} />`}
+    ${c.type === 'donut' && html`<div class="cchart-donut"><${Donut} data=${c.items.map((x, i) => ({ id: i, value: x.value, color: x.color }))} size=${120} thick=${16} />
+      <div class="col" style="gap:4px">${c.items.map((x) => html`<div class="row small" style="gap:6px"><i class="dot" style=${`background:${x.color}`}></i><span class="grow">${x.name}</span><b class="num">${pct(x.value, { sign: false, digits: 0 })}</b></div>`)}</div></div>`}
+    ${c.type === 'bars' && (() => {
+      const max = Math.max(...c.items.map((x) => Math.abs(x.value)), 1e-9);
+      return html`<div class="cbars">${c.items.map((x) => html`<div class=${'cbar' + (x.hl ? ' hl' : '')}>
+        <span class="n">${x.name}</span>
+        <span class="t"><i class=${x.value < 0 ? 'neg' : ''} style=${`width:${Math.max(2, Math.abs(x.value) / max * 100)}%`}></i></span>
+        <b class=${'num v' + (c.signed ? (x.value < 0 ? ' neg' : ' pos') : '')}><span class=${c.unit === 'money' ? 'priv' : ''}>${fmtV(x.value)}</span></b></div>`)}</div>`;
+    })()}
+  </div>`;
+}
+
+/** Earlier conversations: open one or delete it. */
+function Threads({ chat, onOpen, onDelete, onClose }) {
+  const { threads, current } = CH.normalize(chat);
+  return html`<${Modal} title="گفتگوهای قبلی" onClose=${onClose}>
+    ${threads.length ? html`<div class="list">${threads.map((t) => html`<div class=${'it thr' + (t.id === current ? ' on' : '')} onClick=${() => onOpen(t.id)}>
+      <${Icon} n="message" cls="sm" /><span class="grow" style="min-width:0"><span class="sb thr-t">${t.title}</span><span class="xs muted">${fmtJ(isoFromDate(new Date(t.at)), 'dm')}، ${num(t.messages.length)} پیام</span></span>
+      <button class="btn icon sm ghost danger" title="حذف این گفتگو" onClick=${(e) => { e.stopPropagation(); onDelete(t.id); }}><${Icon} n="trash" cls="sm" /></button></div>`)}</div>`
+      : html`<div class="empty small">هنوز گفتگویی ذخیره نشده.</div>`}
+    <div class="xs muted">${num(CH.MAX_THREADS)} گفتگوی آخر روی همین دستگاه می‌ماند و در پشتیبان نمی‌آید.</div>
+  </${Modal}>`;
+}
+
 export function AssistantPage({ st, s, route }) {
-  const [msgs, setMsgs] = useState(() => st.chat?.messages || []);
+  // the open conversation; every change is saved into its thread (see lib/chats.js)
+  const chatRef = useRef(CH.normalize(st.chat));
+  const [threadId, setThreadId] = useState(() => chatRef.current.current || uid('t'));
+  const threadRef = useRef(threadId); threadRef.current = threadId;
+  const [msgs, setMsgs] = useState(() => chatRef.current.threads.find((t) => t.id === chatRef.current.current)?.messages || []);
+  const [showThreads, setShowThreads] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(null); // {steps:[], conn}
   const stRef = useRef(st); stRef.current = st;
@@ -51,7 +84,32 @@ export function AssistantPage({ st, s, route }) {
   useEffect(() => { if (route.q.tab === 'reports') document.getElementById('reports')?.scrollIntoView({ behavior: 'smooth' }); }, []);
   // always update from the latest list (an approval made while an answer is pending must not be overwritten)
   const msgsRef = useRef(msgs);
-  const persist = (fn) => { const next = typeof fn === 'function' ? fn(msgsRef.current) : fn; msgsRef.current = next; setMsgs(next); act.saveChat(next); };
+  const persist = (fn) => {
+    const next = typeof fn === 'function' ? fn(msgsRef.current) : fn; msgsRef.current = next; setMsgs(next);
+    chatRef.current = CH.withMessages(chatRef.current, threadRef.current, next);
+    act.saveThread(threadRef.current, next).then((c) => { if (c) chatRef.current = c; });
+  };
+  const openThread = (id) => {
+    if (busy) return;
+    const t = chatRef.current.threads.find((x) => x.id === id);
+    threadRef.current = id; setThreadId(id); msgsRef.current = t?.messages || []; setMsgs(msgsRef.current); setShowThreads(false);
+  };
+  const newThread = () => { if (busy) return; const id = uid('t'); threadRef.current = id; setThreadId(id); msgsRef.current = []; setMsgs([]); };
+  const deleteThread = async (id) => {
+    if (id === threadRef.current && busy) return toast('اول جواب این گفتگو بیاید یا متوقفش کن');
+    chatRef.current = (await act.deleteThread(id)) || CH.remove(chatRef.current, id); setShowThreads((x) => (x ? { ...chatRef.current } : x));
+    if (id === threadRef.current) newThread();
+    toast('گفتگو حذف شد');
+  };
+  // the list is read fresh: another page or tab may have saved threads since this one opened
+  const listThreads = async () => { chatRef.current = await act.loadChat(); setShowThreads({ ...chatRef.current }); };
+  const copy = async (m) => { try { await navigator.clipboard.writeText(m.content); toast('جواب کپی شد'); } catch { toast('کپی ممکن نشد'); } };
+  // ask the last question again: its answer is replaced
+  const retry = () => {
+    const list = msgsRef.current; const li = list.map((m) => m.role).lastIndexOf('user');
+    if (li < 0 || busy) return;
+    const q = list[li].content; persist(list.slice(0, li)); ask(q);
+  };
 
   const ask = async (q) => {
     q = (q ?? text).trim();
@@ -62,18 +120,19 @@ export function AssistantPage({ st, s, route }) {
     persist((m) => [...m, userMsg]);
     const base = msgsRef.current;
     const proposals = [];
+    const charts = [];
     const steps = [];
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
     try {
-      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p),
+      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); },
         bubbleStats: async (keys) => { const r = await send('bubbleStats', { keys, days: 90 }); return r?.ok ? r.stats : {}; } });
       // in «only percentages» mode, earlier answers written with full amounts are not sent again
       const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));
       const res = await AI.runAgent({ ai: stRef.current.ai, system: A.systemPrompt(stRef.current, privacy), messages: history, tools, signal: ctl.signal,
         onStep: (st2) => { if (st2.type === 'tool') { steps.push(st2.name); setBusy((b) => ({ ...b, steps: [...steps] })); } if (st2.type === 'conn') setBusy((b) => ({ ...b, conn: st2.conn })); },
         onConnUpdate: (id, patch) => act.patchConnection(id, patch) });
-      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, privacy, by: `${res.conn.name}، ${res.model}` }]);
+      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, charts, privacy, by: `${res.conn.name}، ${res.model}` }]);
     } catch (e) {
       persist((m) => [...m, { id: uid('m'), role: 'assistant', error: true, content: e.message + (e.detail ? `\n\n${String(e.detail).slice(0, 200)}` : ''), at: Date.now() }]);
     }
@@ -94,7 +153,9 @@ export function AssistantPage({ st, s, route }) {
         <div class="row between" style="padding:14px 18px;border-bottom:1px solid var(--line)">
           <div class="row"><span class="ava" style="background:var(--accent-soft);color:var(--accent)"><${Icon} n="sparkles" /></span>
             <div><div class="sb">دستیار دارا</div><div class="xs muted">${active ? html`${active.name}، <span class="ltr latin">${active.model}</span>، ${st.ai.privacy === 'percent' ? 'فقط درصدها ارسال می‌شود' : 'ارسال اطلاعات کامل'}` : 'هنوز به هوش مصنوعی وصل نیست'}</div></div></div>
-          ${msgs.length > 0 && html`<button class="btn sm ghost" onClick=${() => persist([])}><${Icon} n="reset" cls="sm" />گفتگوی تازه</button>`}
+          <div class="row" style="gap:6px">
+            <button class="btn sm ghost" onClick=${listThreads} disabled=${!!busy}><${Icon} n="history" cls="sm" />گفتگوهای قبلی</button>
+            ${msgs.length > 0 && html`<button class="btn sm ghost" onClick=${newThread} disabled=${!!busy}><${Icon} n="plus" cls="sm" />گفتگوی تازه</button>`}</div>
         </div>
         <div class="chat-log" ref=${logRef}>
           ${!active && html`<div class="empty"><div class="ico"><${Icon} n="bot" /></div><div class="sb" style="margin-bottom:6px">دستیار هنوز فعال نیست</div>
@@ -106,7 +167,11 @@ export function AssistantPage({ st, s, route }) {
           ${msgs.map((m) => html`<div class=${'msg ' + (m.role === 'user' ? 'user' : 'bot') + (m.error ? ' err' : '')} key=${m.id}>
             ${m.role === 'user' ? m.content : html`<${Markdown} text=${m.content} />`}
             ${m.steps?.length > 0 && html`<div class="steps">${m.steps.map((x) => html`<span class="pill"><${Icon} n="check" cls="sm" />${STEP[x] || x}</span>`)}</div>`}
+            ${(m.charts || []).map((c) => html`<${ChatChart} c=${c} s=${s} key=${c.id} />`)}
             ${(m.proposals || []).map((p) => html`<${ProposalCard} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}
+            ${m.role === 'assistant' && html`<div class="msg-act">
+              ${!m.error && html`<button class="btn icon sm ghost" title="کپی جواب" onClick=${() => copy(m)}><${Icon} n="copy" cls="sm" /></button>`}
+              ${m === msgs[msgs.length - 1] && !busy && html`<button class="btn sm ghost" title="همین سؤال را دوباره بپرس" onClick=${retry}><${Icon} n="refresh" cls="sm" />دوباره بپرس</button>`}</div>`}
             ${m.error && html`<div class="row" style="margin-top:6px"><a class="btn sm" href="#/settings">بررسی اتصال‌ها</a></div>`}
             ${m.by && html`<div class="by">${m.by}</div>`}
           </div>`)}
@@ -121,6 +186,7 @@ export function AssistantPage({ st, s, route }) {
             : html`<button class="btn primary icon" title="ارسال" disabled=${!active || !text.trim()} onClick=${() => ask()}><${Icon} n="send" /></button>`}
         </div>
       </div>
+      ${showThreads && html`<${Threads} chat=${showThreads} onOpen=${openThread} onDelete=${deleteThread} onClose=${() => setShowThreads(false)} />`}
       <div class="col" style="gap:18px">
         <${Reports} st=${st} s=${s} />
         <div class="card"><div class="card-h"><h3><${Icon} n="scan" cls="sm" />ثبت از صفحه</h3></div>

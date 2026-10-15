@@ -14,6 +14,7 @@ import { AIConnections } from './aiconn.js';
 import * as U from '../../lib/update.js';
 import { CHANGELOG, compareVersions } from '../../lib/changelog.js';
 import { ago } from '../../lib/format.js';
+import { ProfileCard } from '../profile.js';
 
 function download(name, text, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -462,7 +463,10 @@ export function SettingsPage({ st, pf, s }) {
     await store.clearAll(); toast('همه داده‌ها پاک شد'); location.hash = '#/welcome'; location.reload();
   };
   const ver = hasChrome ? chrome.runtime.getManifest().version : 'dev';
+  // #/settings?to=profile (or another card's id) opens the page at that card
+  useEffect(() => { const to = new URLSearchParams(location.hash.split('?')[1] || '').get('to'); if (to) setTimeout(() => document.getElementById(to)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150); }, []);
   return html`<div class="page" style="max-width:900px">
+    <${ProfileCard} s=${s} />
     <div class="card"><div class="card-h"><h3><${Icon} n="eye" cls="sm" />نمایش</h3></div>
       <${Row} t="واحد نمایش مبالغ" d="همه مبالغ داخلی به ریال ذخیره می‌شوند"><${Seg} value=${s.currency} onChange=${(v) => set({ currency: v })} options=${[['toman', 'تومان'], ['rial', 'ریال']]} /></${Row}>
       <${Row} t="ارقام"><${Seg} value=${s.digits} onChange=${(v) => set({ digits: v })} options=${[['fa', '۱۲۳ فارسی'], ['en', '123 لاتین']]} /></${Row}>

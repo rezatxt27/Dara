@@ -19,6 +19,7 @@ import { PriceDetail } from './pages/price.js';
 import { SettingsPage, WelcomePage, clearSample } from './pages/settings.js';
 import { AssistantPage } from './pages/assistant.js';
 import { CapturePage } from './pages/capture.js';
+import { EmergencyCard } from './profile.js';
 import * as U from '../lib/update.js';
 
 const ROUTES = [
@@ -270,6 +271,7 @@ function Overview(ctx) {
     <${Hero} st=${st} pf=${pf} s=${s} />
     <${WhyChanged} st=${st} pf=${pf} s=${s} open=${open} />
     <${Kpis} st=${st} pf=${pf} s=${s} open=${open} />
+    <${EmergencyCard} s=${s} pf=${pf} />
     <div class="grid-ov"><${Allocation} pf=${pf} s=${s} /><${PriceBoard} st=${st} s=${s} openPrice=${ctx.openPrice} /></div>
     <div class="grid-ov"><${Upcoming} st=${st} pf=${pf} s=${s} open=${open} /><${WeeklyCard} st=${st} /></div>
   </div>`;

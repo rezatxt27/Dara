@@ -389,6 +389,30 @@ textarea.input { height: auto; padding: 10px 12px; resize: vertical; min-height:
 .chat-in { border-top: 1px solid var(--line); padding: 12px; display: flex; gap: 8px; align-items: flex-end; background: var(--surface); }
 .chat-in textarea { flex: 1; resize: none; min-height: 44px; max-height: 140px; border-radius: 14px; }
 .sugg { display: flex; flex-wrap: wrap; gap: 6px; }
+.msg-act { display: flex; gap: 4px; margin-top: 4px; justify-content: flex-end; opacity: .7; }
+.msg-act:hover { opacity: 1; }
+.msg-act .btn { height: 26px; font-size: 11.5px; }
+.md-tw { overflow-x: auto; margin: 6px 0; }
+.md-tbl { border-collapse: collapse; font-size: 12.5px; min-width: 60%; }
+.md-tbl th, .md-tbl td { padding: 5px 9px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+.md-tbl th { font-weight: 700; color: var(--ink-2); background: var(--surface-3); }
+.md-tbl tr:last-child td { border-bottom: 0; }
+.cchart { margin-top: 10px; padding: 10px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.cchart-donut { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.cchart-donut > div:last-child { flex: 1; min-width: 140px; }
+.cchart .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.cbars { display: flex; flex-direction: column; gap: 7px; }
+.cbar { display: grid; grid-template-columns: minmax(70px, 34%) 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+.cbar .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.cbar .t { height: 8px; border-radius: 6px; background: var(--surface-3); overflow: hidden; direction: ltr; }
+.cbar .t i { display: block; height: 100%; border-radius: 6px; background: var(--faint); }
+.cbar.hl .t i { background: var(--accent); }
+.cbar .t i.neg { background: var(--neg); }
+.cbar.hl .n { color: var(--ink); font-weight: 700; }
+.cbar .v { min-width: 64px; text-align: left; }
+.thr { cursor: pointer; }
+.thr.on { background: var(--accent-soft); border-radius: 10px; }
+.thr-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sugg .chip { height: auto; padding: 7px 12px; white-space: normal; text-align: right; line-height: 1.5; }
 .steps { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .steps .pill { background: var(--surface); border: 1px solid var(--line); }
@@ -755,3 +779,10 @@ svg.rot { transform: rotate(180deg); }
 .rd-alert-ed { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 14px; }
 .rd-alert-f { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 760px) { .rd-alert-f { grid-template-columns: 1fr; } }
+
+/* «پول اضطراری» on the overview */
+.emg { padding: 14px 18px; }
+.emg-t { height: 8px; border-radius: 6px; background: var(--surface-3); overflow: hidden; margin: 6px 0 4px; direction: ltr; }
+.emg-t i { display: block; height: 100%; border-radius: 6px; background: var(--warn); }
+.emg-t i.ok { background: var(--pos); }
+.tag-risk { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; color: var(--warn); background: var(--warn-bg, rgba(240,170,40,.12)); border-radius: 20px; padding: 2px 8px; }

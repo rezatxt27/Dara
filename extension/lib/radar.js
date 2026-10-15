@@ -367,7 +367,8 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   // every card knows its place in its signal's list (rank 0 = first): the page shows SHOW of them, then «همه را ببین»
   const nth = {}; const at = (sig) => (nth[sig] = (nth[sig] ?? -1) + 1);
   const push = (sig, s, why) => cards.push({ id: `s:${s.ins}`, sig, rank: at(sig), kind: 'stock', sym: s.rec.sym, name: s.rec.name, sub: [marketOf(s.rec.isin), sname(s.rec)].filter(Boolean).join('، '),
-    ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins });
+    ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins,
+    volRel: volMed > 0 && s.m.dvol !== null ? s.m.dvol / volMed : null });
   const b12 = benchLine(radar, 365, '۱۲ ماه'), b3 = benchLine(radar, 91, '۳ ماه');
   // 1) momentum: the top tenth of liquid stocks by 12- and 3-month return (positive), best first
   const top = (key) => {

@@ -6,6 +6,7 @@ import * as RD from '../../lib/radar.js';
 import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
 import { act } from '../actions.js';
+import * as PR from '../../lib/profile.js';
 
 const ORDER = ['negBubble', 'goldBubble', 'fixedBeat', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
 const SIG_D = {
@@ -132,7 +133,7 @@ function Card({ c, radar, s, isNew, marked, onMark, openPrice }) {
   return html`<article class="card rd-card">
     <div class="row between" style="gap:8px;align-items:flex-start">
       <button class="rd-name" onClick=${() => openPrice(c.ref)} title="نمودار و کارنامه">
-        <span class="row" style="gap:6px"><b>${c.sym || c.name}</b>${isNew && html`<span class="pill live">تازه</span>`}</span>
+        <span class="row" style="gap:6px"><b>${c.sym || c.name}</b>${isNew && html`<span class="pill live">تازه</span>`}${PR.tooRisky(s.profile, c) && html`<span class="tag-risk" title="نوسان روزانه یا افت یک سالش برای ریسکی که در پروفایلت گفته‌ای زیاد است؛ فقط برچسب است">با پروفایلت پرریسک</span>`}</span>
         <span class="xs muted ellipsis">${c.sym ? c.name + '، ' : ''}${c.sub}</span></button>
       <button class=${'btn icon sm ghost' + (marked ? ' on' : '')} title=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-label=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-pressed=${marked ? 'true' : 'false'} onClick=${onMark}><${Icon} n=${marked ? 'circleCheck' : 'plus'} cls="sm" /></button>
     </div>

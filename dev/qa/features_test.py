@@ -408,6 +408,31 @@ async def main():
             await o.close(); await pg.close()
         await step('price', t_price())
 
+        # investment profile: questions → saved; starting mix → targets; emergency card on the overview
+        async def t_profile():
+            pg = await newpage('settings?to=profile'); await pg.wait_for_timeout(400)
+            pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
+            card = pg.locator('#profile')
+            await card.locator('.chip:has-text("رشد بلندمدت")').click(); await card.locator('.chip:has-text("بیشتر از ۳ سال")').click(); await card.locator('.chip:has-text("صبر می‌کنم")').click()
+            await card.locator('.field:has-text("خرج ماهانه") input').fill('200,000,000')
+            await card.locator('.toggle[title="رمزارز نمی‌خواهم"]').click(); await pg.wait_for_timeout(200)
+            risk = await card.locator('.card-h .sub').inner_text()
+            await card.locator('button:has-text("ذخیرهٔ پروفایل")').click(); await pg.wait_for_timeout(500)
+            st = await get(pg, 'settings'); p = st.get('profile') or {}
+            check('profile: answers saved (money in Rial), risk «متوسط»', p.get('goal') == 'grow' and p.get('expense') == 2e9 and p.get('noCrypto') is True and 'متوسط' in risk, (p, risk))
+            await card.screenshot(path=f'{SH}/profile-{THEME}.png')
+            await card.locator('button:has-text("بگذارش ترکیب هدف")').click(); await pg.wait_for_timeout(500)
+            t = (await get(pg, 'settings'))['targets']
+            check('profile: the starting mix becomes the target mix (no crypto)', sum(t.values()) == 100 and 'crypto' not in t, t)
+            await pg.close()
+            o = await newpage('overview')
+            emg = o.locator('.emg')
+            txt = (await emg.inner_text()) if await emg.count() else ''
+            check('overview: emergency-fund card from the profile', 'پول اضطراری' in txt and 'ماه' in txt, txt[:120].replace('\n', ' '))
+            if await emg.count(): await emg.screenshot(path=f'{SH}/emergency-{THEME}.png')
+            await o.close()
+        await step('profile', t_profile())
+
         # more currencies: six on the market page, any other added from «ارز دیگر» (and removable); the editor can pick them
         async def t_fx():
             pg = await newpage('market')

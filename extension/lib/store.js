@@ -26,6 +26,8 @@ export const DEFAULT_SETTINGS = {
   updateUrl: '',            // optional public JSON {version, url} announcing the latest release
   radar: true,              // «رادار فرصت‌ها» in the menu and its daily scan
   preBuyCheck: true,        // the checklist above a new stock or fund purchase
+  profile: null,            // «پروفایل سرمایه‌گذاری» (lib/profile.js); null until answered
+  profileHint: true,        // the overview invites to fill it in until dismissed
   lastUpdateCheck: 0,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
 };
 
@@ -39,7 +41,7 @@ export const DEFAULTS = {
   alerts: [],
   history: {},  // quoteId -> {at, points:[[iso, price]]}
   ai: { connections: [], activeId: null, privacy: 'full', fallback: true, weekly: true, trustedSites: [] },
-  chat: { messages: [] },
+  chat: { threads: [], current: null },
   radarUser: { rules: [], marks: [], seenDay: null }, // the owner's radar rules and «پیگیری» list (the scan itself is in «radar», not backed up)
   reports: [],  // weekly narratives [{id, weekOf, createdAt, facts, text, by, model}]
   critique: null, // last AI portfolio review {at, points:[{title, detail, check, level}], by}

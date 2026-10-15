@@ -5,7 +5,7 @@ import * as CMP from './compare.js';
 import * as AI from './ai.js';
 import * as BB from './bubble.js';
 import * as RD from './radar.js';
-import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY } from './catalog.js';
+import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY, fxKeyOf } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 
@@ -260,7 +260,7 @@ export function makeTools(ctx) {
         deposit_rate_pct: { type: 'number' }, cost_a_pct: { type: 'number' }, cost_b_pct: { type: 'number' } }, required: ['amount', 'option_a', 'option_b'] },
       run: async ({ amount, source = 'new', option_a, option_b, months = 12, deposit_rate_pct, cost_a_pct, cost_b_pct } = {}) => {
         const s = st(); const pf = pfOf(); const k = s.settings.currency === 'rial' ? 1 : 10;
-        if (!CMP.choiceById(option_a) || !CMP.choiceById(option_b)) return { error: 'گزینه نامعتبر؛ یکی از keep, deposit, geram18, sekee, sekeb, nim, rob, retail_gerami, usd, eur, usdt, btc, silver' };
+        if (!CMP.choiceById(option_a) || !CMP.choiceById(option_b)) return { error: 'گزینه نامعتبر؛ یکی از ' + CMP.CHOICES.map((c) => c.id).join(', ') };
         if (source !== 'new' && !CMP.sources(s.assets, pf).some((x) => x.id === source)) return { error: 'منبع پول باید یک حساب یا سپرده باشد (نه بدهی یا دارایی قیمت‌دار)؛ از list_assets شناسه را بگیر، یا new بگذار' };
         const keys = [option_a, option_b].map((id) => CMP.choiceById(id).ref).filter((ref) => BB.isCoinRef(ref)).map((ref) => ref.key);
         let avg = {};
@@ -528,7 +528,7 @@ export function newAssetFromCapture(r, { site = '', category, now = Date.now(), 
   } else if ((c.id === 'gold' || c.id === 'gold_online') && /گرم|gram/i.test(unit)) {
     price = { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: 0, factor: 1 };
   } else if (c.id === 'fx') {
-    const key = /یورو|eur/i.test(unit + sym) ? 'price_eur' : /دلار|usd/i.test(unit + sym) ? 'price_dollar_rl' : null;
+    const key = fxKeyOf(`${unit} ${sym} ${r.label || ''}`);
     if (key) price = { source: 'market', ref: { provider: 'tgju', key }, adjustPct: 0, factor: 1 };
   }
   const name = c.id === 'stock' && r.symbol ? sym : r.label;

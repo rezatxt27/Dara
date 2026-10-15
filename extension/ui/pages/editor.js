@@ -64,6 +64,10 @@ function SourcePicker({ st, s, price, setPrice, cat, adv }) {
   const [res, setRes] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
+  const [tq, setTq] = useState('');
+  // currencies first when adding one; a short filter since the list is long
+  const tgjuList = (cat === 'fx' ? [...TGJU.filter((t) => t.group === 'fx'), ...TGJU.filter((t) => t.group !== 'fx')] : TGJU)
+    .filter((t) => !tq.trim() || t.name.includes(tq.trim()) || t.key === ref.key || (t.alias || []).some((a) => a.includes(tq.trim().toLowerCase())));
   const search = async (text = q) => {
     if (!text.trim() && ref.provider === 'tsetmc') return;
     setLoading(true); setErr('');
@@ -76,7 +80,8 @@ function SourcePicker({ st, s, price, setPrice, cat, adv }) {
   return html`<div class="col" style="gap:10px">
     <${Seg} value=${prov} onChange=${(p) => setRef({ provider: p, key: p === 'tgju' ? 'geram18' : p === 'nobitex' ? 'usdt' : '', field: p === 'tsetmc' ? 'close' : p === 'fipiran' ? 'cancelNav' : undefined })}
       options=${[['tgju', 'طلا، سکه و ارز'], ['tsetmc', 'سهام و صندوق بورسی'], ['fipiran', 'صندوق‌های سرمایه‌گذاری'], ['nobitex', 'رمزارز']]} />
-    ${prov === 'tgju' && html`<div class="picker"><div class="scroll">${TGJU.map((t) => {
+    ${prov === 'tgju' && html`<input class="input" placeholder="جست‌وجو: طلا، سکه، یوان، روبل…" value=${tq} onInput=${(e) => setTq(e.target.value)} />`}
+    ${prov === 'tgju' && html`<div class="picker"><div class="scroll">${tgjuList.map((t) => {
       const qv = st.quotes['tgju:' + t.key];
       return html`<div class=${'opt' + (ref.key === t.key ? ' on' : '')} onClick=${() => setRef({ provider: 'tgju', key: t.key })}>
         <span class="grow sb">${t.name} <span class="xs muted">${t.unit}</span></span>

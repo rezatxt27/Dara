@@ -1,5 +1,5 @@
 import { html, useOnce, useState, useEffect, Icon, Money, Delta, Sparkline, Modal, Seg, MoneyField, NumField, send, toast, refLabel, providerName, num, pct, fmtJ } from '../components.js';
-import { TGJU, NOBITEX, NOBITEX_BY_KEY, PROVIDERS, CRYPTO_DEFAULT } from '../../lib/catalog.js';
+import { TGJU, TGJU_BY_KEY, FX, NOBITEX, NOBITEX_BY_KEY, PROVIDERS, CRYPTO_DEFAULT } from '../../lib/catalog.js';
 import { TickerSearch, CryptoPicker } from '../pickers.js';
 import * as E from '../../lib/engine.js';
 import { ago, timeHM, money } from '../../lib/format.js';
@@ -69,6 +69,7 @@ const cleanRef = (r) => Object.fromEntries(Object.entries(r).filter(([, v]) => v
 /** Add symbols, funds or coins to the watchlist (settings.watch). Fetches the price right away. */
 function WatchModal({ st, s, kind, onClose }) {
   const [prov, setProv] = useState(kind === 'crypto' ? 'nobitex' : 'tsetmc');
+  const [fq, setFq] = useState('');
   const [added, setAdded] = useState([]);
   const watch = s.watch || [];
   const held = (ref) => st.assets.some((a) => !a.archived && a.price?.ref && sameRef(a.price.ref, ref));
@@ -80,10 +81,20 @@ function WatchModal({ st, s, kind, onClose }) {
     const q = await send('quote', { ref: r });
     toast(q?.quote ? `«${refLabel(r)}» اضافه شد` : `«${refLabel(r)}» اضافه شد؛ قیمتش در به‌روزرسانی بعدی می‌آید`);
   };
-  return html`<${Modal} title=${kind === 'crypto' ? 'افزودن رمزارز به دیده‌بان' : 'افزودن نماد یا صندوق به دیده‌بان'} onClose=${onClose}
+  const fxList = FX.filter((t) => t.more && (!fq.trim() || t.name.includes(fq.trim()) || (t.alias || []).some((a) => a.includes(fq.trim().toLowerCase()))));
+  return html`<${Modal} title=${kind === 'crypto' ? 'افزودن رمزارز به دیده‌بان' : kind === 'fx' ? 'افزودن ارز به بازار' : 'افزودن نماد یا صندوق به دیده‌بان'} onClose=${onClose}
     footer=${html`<span class="xs muted grow">${added.length ? `${num(added.length)} مورد اضافه شد` : 'روی هر مورد بزن تا به فهرست اضافه شود'}</span><button class="btn primary" onClick=${onClose}>تمام</button>`}>
     ${kind === 'crypto'
       ? html`<${CryptoPicker} st=${st} s=${s} isOn=${isOn} onPick=${add} />`
+      : kind === 'fx' ? html`<input class="input" placeholder="جست‌وجو: یوان، روبل، CAD…" value=${fq} onInput=${(e) => setFq(e.target.value)} autoFocus />
+        <div class="picker"><div class="scroll">${fxList.length ? fxList.map((t) => {
+          const ref = { provider: 'tgju', key: t.key }; const on = isOn(ref); const qv0 = st.quotes['tgju:' + t.key];
+          const qv = qv0 && !qv0.error && Date.now() - (qv0.at || qv0.fetchedAt || 0) < 2 * 86400000 ? qv0 : null; // an old price isn't shown as today's
+          return html`<div class=${'opt' + (on ? ' on' : '')} onClick=${() => !on && add(ref)}>
+            <span class="grow sb">${t.name} <span class="xs muted">${t.unit}</span></span>
+            <span class="small num">${qv?.price ? html`<${Money} v=${qv.price} s=${s} />` : ''}</span>
+            ${on ? html`<${Icon} n="check" cls="sm" />` : html`<${Icon} n="plus" cls="sm" />`}</div>`;
+        }) : html`<div class="opt muted">ارزی با این نام پیدا نشد</div>`}</div></div>`
       : html`<${Seg} value=${prov} onChange=${setProv} options=${[['tsetmc', 'سهام و صندوق‌های بورسی'], ['fipiran', 'صندوق‌های سرمایه‌گذاری (NAV)']]} />
         <${TickerSearch} provider=${prov} s=${s} isOn=${isOn} onPick=${add} />`}
     <div class="xs muted">دیده‌بان فقط قیمت را دنبال می‌کند و به دارایی‌هایت چیزی اضافه نمی‌کند. برای هر مورد می‌توانی هشدار قیمت هم بگذاری.</div>
@@ -95,7 +106,11 @@ export function MarketPage({ st, pf, s, openPrice }) {
   const watch = s.watch || [];
   const unwatch = async (ref) => { await act.watchRemove(ref); toast(`«${refLabel(ref)}» از دیده‌بان حذف شد`); };
   const [alertFor, setAlertFor] = useState(null);
-  const tgjuRefs = TGJU.map((t) => ({ provider: 'tgju', key: t.key }));
+  // currencies: the main six, plus any other one that is held or on the watchlist
+  const heldFx = new Set(st.assets.filter((a) => !a.archived && a.price?.source === 'market' && a.price.ref?.provider === 'tgju').map((a) => a.price.ref.key));
+  const fxRows = FX.filter((t) => !t.more || heldFx.has(t.key) || watch.some((w) => w.provider === 'tgju' && w.key === t.key))
+    .map((t) => ({ t, kind: !t.more ? 'core' : heldFx.has(t.key) ? 'held' : 'watch' }));
+  const tgjuRefs = TGJU.filter((t) => t.group !== 'fx').concat(fxRows.map((r) => r.t)).map((t) => ({ provider: 'tgju', key: t.key }));
   const hist = useHistories(tgjuRefs);
   const held = st.assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source === 'market' && a.price.ref && (a.price.ref.provider === 'tsetmc' || a.price.ref.provider === 'fipiran'));
   const heldRefs = [...new Map(held.map((a) => [E.quoteId(a.price.ref), a.price.ref])).values()];
@@ -146,7 +161,9 @@ export function MarketPage({ st, pf, s, openPrice }) {
       </div>
       <div class="col" style="gap:18px">
         ${groupCard('سکه', 'tgju', TGJU.filter((t) => t.group === 'coin').map((t) => Cell({ ref: { provider: 'tgju', key: t.key }, name: t.name, unit: t.unit })))}
-        ${groupCard('ارز', 'tgju', TGJU.filter((t) => t.group === 'fx').map((t) => Cell({ ref: { provider: 'tgju', key: t.key }, name: t.name, unit: t.unit })))}
+        ${groupCard('ارز', 'tgju', fxRows.map(({ t, kind }) => Cell({ ref: { provider: 'tgju', key: t.key }, name: t.name, unit: t.unit,
+          tag: kind === 'held' ? 'در پرتفوی' : '', onRemove: kind === 'watch' ? () => unwatch({ provider: 'tgju', key: t.key }) : null })),
+          html`<button class="btn sm" onClick=${() => setWatchFor('fx')}><${Icon} n="plus" cls="sm" />ارز دیگر</button>`)}
       </div>
     </div>
 

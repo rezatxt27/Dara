@@ -3,7 +3,7 @@ import { html, useState, useEffect, useMemo, Icon, Money, Ava, toast, num, hasCh
 import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import * as E from '../../lib/engine.js';
-import { CAT } from '../../lib/catalog.js';
+import { CAT, fxKeyOf } from '../../lib/catalog.js';
 import { parseNum, toEnDigits, uid, ago } from '../../lib/format.js';
 import { act, doneToast } from '../actions.js';
 
@@ -23,7 +23,7 @@ function guessCategory(unit, site) {
   const u = String(unit || '');
   if (/گرم|gram/i.test(u)) return /طلا|gold|talayin|milli/i.test(site) ? 'gold_online' : 'gold';
   if (/usdt|btc|eth|ton|sol|trx|doge|xrp/i.test(u)) return 'crypto';
-  if (/دلار|usd|یورو|eur/i.test(u)) return 'fx';
+  if (fxKeyOf(u)) return 'fx';
   if (/واحد|سهم/.test(u)) return 'stock';
   return 'bank';
 }

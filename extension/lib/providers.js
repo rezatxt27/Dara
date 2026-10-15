@@ -50,7 +50,8 @@ function tehranTs(ts) {
 // Live board: https://call1.tgju.org/ajax.json -> { current: { key: {p, d, dp, dt, ts} } }
 // Daily table: https://api.tgju.org/v1/market/indicator/summary-table-data/{key}?length=N
 //   -> { data: [[open, low, high, close, change, changePct, gDate, jDate], ...] } newest first
-export async function tgjuQuotes(keys) {
+/** keys in `boardOnly` are taken from the live board when it has them, and otherwise skipped (no per-key request). */
+export async function tgjuQuotes(keys, boardOnly = new Set()) {
   const out = {}; const errors = {};
   let board = null;
   try { board = (await getJSON('https://call1.tgju.org/ajax.json')).current || null; } catch (e) { errors._board = e.message; }
@@ -61,7 +62,7 @@ export async function tgjuQuotes(keys) {
       const sign = it.dt === 'low' ? -1 : 1;
       out[k] = { price: n(it.p), change: sign * Math.abs(n(it.d) || 0), changePct: sign * Math.abs(n(it.dp) || 0) / 100,
         at: tehranTs(it.ts), asOf: it.ts || '', source: 'tgju', usd: !!TGJU_BY_KEY[k]?.usd };
-    } else missing.push(k);
+    } else if (!boardOnly.has(k)) missing.push(k);
   }
   await Promise.all(missing.map(async (k) => {
     try {
@@ -405,7 +406,7 @@ export async function fetchAll(refs, enabled = {}) {
     for (const [k, v] of Object.entries(res.errors)) if (k !== '_board' && !quotes[`${prov}:${k}`]) errors[`${prov}:${k}`] = v;
   };
   const jobs = [];
-  if (groups.tgju) jobs.push(tgjuQuotes(groups.tgju.map((r) => r.key)).then((r) => merge('tgju', r)));
+  if (groups.tgju) jobs.push(tgjuQuotes(groups.tgju.map((r) => r.key), new Set(groups.tgju.filter((r) => r.boardOnly).map((r) => r.key))).then((r) => merge('tgju', r)));
   if (groups.nobitex) {
     // Catalog coins in one request; coins added from search go separately so one unknown symbol can't fail the rest.
     const known = groups.nobitex.filter((r) => NOBITEX_BY_KEY[r.key]).map((r) => r.key);

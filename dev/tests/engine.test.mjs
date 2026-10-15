@@ -5,6 +5,7 @@ import * as P from '../../extension/lib/providers.js';
 import * as A from '../../extension/lib/assistant.js';
 import * as J from '../../extension/lib/jalali.js';
 import { numToWordsFa, parseNum } from '../../extension/lib/format.js';
+import * as C from '../../extension/lib/catalog.js';
 
 const iso = J.todayIso();
 const close = (a, b, eps = 1) => assert.ok(Math.abs(a - b) <= eps, `${a} ≉ ${b}`);
@@ -1012,4 +1013,31 @@ test('review 1.5 (round 2): payouts, maturity stub, interest vs price, deleted a
   // f) a year nobody means isn't a date (and doesn't throw)
   assert.equal(J.parseJ('3500/01/01'), null);
   assert.equal(J.parseJ('0001/01/01'), null);
+});
+
+test('extra currencies: taken from the board, never fetched one by one unless used', async () => {
+  const calls = [];
+  P.setFetch(async (url) => {
+    calls.push(url);
+    if (url.includes('ajax.json')) return new Response(JSON.stringify({ current: { price_cny: { p: '400,600', d: '9,900', dp: '2.5', dt: 'high', ts: '2026-10-15 12:33:56' } } }));
+    return new Response(JSON.stringify({ data: [['1', '1', '1', '1,883,100', '0', '0%', '2026/10/14', '']] }));
+  });
+  const { quotes, errors } = await P.fetchAll([{ provider: 'tgju', key: 'price_cad' }, { provider: 'tgju', key: 'price_cny', boardOnly: true }, { provider: 'tgju', key: 'price_rub', boardOnly: true }, { provider: 'tgju', key: 'price_cad', boardOnly: true }]);
+  assert.equal(quotes['tgju:price_cny'].price, 400600);
+  assert.equal(quotes['tgju:price_cad'].price, 1883100, 'a used currency missing from the board is fetched alone');
+  assert.ok(!quotes['tgju:price_rub'] && !errors['tgju:price_rub'], 'an unused extra is skipped quietly');
+  assert.ok(!calls.some((u) => u.includes('price_rub')));
+});
+
+test('which currency a name or unit means', () => {
+  const k = (t) => C.fxKeyOf(t);
+  assert.equal(k('دلار'), 'price_dollar_rl'); assert.equal(k('دلار کانادا'), 'price_cad'); assert.equal(k('دلار هنگ‌کنگ'), 'price_hkd');
+  assert.equal(k('یوان'), 'price_cny'); assert.equal(k('CNY'), 'price_cny'); assert.equal(k('دینار کویت'), 'price_kwd');
+  assert.equal(k('usdt'), null); assert.equal(k('ریال'), null); assert.equal(k('درامد ثابت'), null); assert.equal(k('country'), null);
+});
+
+test('currency words only as whole words', () => {
+  const k = (t) => C.fxKeyOf(t);
+  for (const t of ['طلب از علیرضا', 'صرافی دیوان', 'صندوق فرانکلین', 'دلارام', 'AMD shares', 'try again']) assert.equal(k(t), null, t);
+  assert.equal(k('۱۰۰دلار'), 'price_dollar_rl'); assert.equal(k('لیره ترکیه'), 'price_try');
 });

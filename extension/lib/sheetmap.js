@@ -2,7 +2,7 @@
 // guessing what each column holds (from its title and its values), letting the owner fix the guess, and then turning
 // the rows into Dara assets through the same importer the standard template uses. Pure; money is Rial after import.
 import { parseNum, toEnDigits } from './format.js';
-import { CAT, CATEGORIES } from './catalog.js';
+import { CAT, CATEGORIES, fxKeyOf } from './catalog.js';
 import { importRows } from './importer.js';
 import { unitPriceOf } from './engine.js';
 
@@ -64,7 +64,7 @@ export function categoryFrom(text) {
   if (any(t, ['نقره', 'پلاتین', 'پالادیوم', 'silver', 'platinum']) || / مس /.test(t)) return 'metal';
   if (any(t, ['سکه', 'طلا', 'النگو', 'جواهر', 'زیورآلات', 'زیور آلات', 'گردنبند', 'انگشتر', 'دستبند', 'gold', 'coin', 'jewel'])) return 'gold';
   if (any(t, ['بیت کوین', 'بیتکوین', 'اتریوم', 'تتر', 'رمز', 'کریپتو', 'btc', 'eth', 'usdt', 'crypto', 'bitcoin', 'tether', 'سولانا', 'تون ', 'ton '])) return 'crypto';
-  if (any(t, ['دلار', 'یورو', 'درهم', 'پوند', 'لیر', 'ارز ', 'ارزی', 'اسکناس', 'usd', 'eur', 'aed', 'gbp', 'dollar', 'euro', 'currency', 'fx'])) return 'fx';
+  if (any(t, ['دلار', 'یورو', 'درهم', 'پوند', 'لیر', 'یوان ', 'روبل ', 'فرانک ', 'روپیه ', 'رینگیت ', 'دینار ', 'منات ', 'ارز ', 'ارزی', 'اسکناس', 'usd', 'eur', 'aed', 'gbp', 'cny', 'yuan', 'dollar', 'euro', 'currency', 'fx'])) return 'fx';
   if (any(t, ['سپرده', 'درآمد ثابت', 'deposit', 'fixed income', 'bond', 'اوراق'])) return 'fixed';
   if (any(t, ['سهام خصوصی', 'استارتاپ', 'private', 'startup'])) return 'private';
   if (any(t, ['سهام', 'سهم', 'بورس', 'صندوق', 'نماد', 'stock', 'share', 'equity', 'etf', 'fund'])) return 'stock';
@@ -117,8 +117,8 @@ function quoteRef(name) {
   if (/بهار آزادی/.test(s)) return 'tgju:sekeb'; if (/سکه امامی|تمام سکه|سکه تمام/.test(s)) return 'tgju:sekee';
   if (/طلا|gold/.test(s) && /18|گرم/.test(s) && !/صندوق|fund/.test(s)) return 'tgju:geram18';
   if (/مثقال/.test(s)) return 'tgju:mesghal';
-  if (/دلار|usd|dollar/.test(s)) return 'tgju:price_dollar_rl'; if (/یورو|eur/.test(s)) return 'tgju:price_eur';
   if (/تتر|usdt|tether/.test(s)) return 'nobitex:usdt';
+  const fx = fxKeyOf(s); if (fx) return 'tgju:' + fx;
   return null;
 }
 /** «(میلیون تومان)», «هزار ریال», «(K)» in a money column's title: every cell is that many times bigger */

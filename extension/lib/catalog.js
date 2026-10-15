@@ -41,11 +41,40 @@ export const TGJU = [
   { key: 'nim', name: 'نیم سکه', unit: 'هر عدد', group: 'coin' },
   { key: 'rob', name: 'ربع سکه', unit: 'هر عدد', group: 'coin' },
   { key: 'retail_gerami', name: 'سکه گرمی', unit: 'هر عدد', group: 'coin' },
-  { key: 'price_dollar_rl', name: 'دلار آمریکا', unit: 'هر دلار', group: 'fx' },
-  { key: 'price_eur', name: 'یورو', unit: 'هر یورو', group: 'fx' },
-  { key: 'price_gbp', name: 'پوند انگلیس', unit: 'هر پوند', group: 'fx' },
-  { key: 'price_aed', name: 'درهم امارات', unit: 'هر درهم', group: 'fx' },
-  { key: 'price_try', name: 'لیر ترکیه', unit: 'هر لیر', group: 'fx' },
+  // currencies: the first six are always on the market page; `more` ones show once held or watched (the price board
+  // brings them all in one request, so pickers still show today's price). `alias`: words a name or unit may use.
+  { key: 'price_dollar_rl', name: 'دلار آمریکا', unit: 'هر دلار', group: 'fx', alias: ['دلار', 'usd', 'dollar'] },
+  { key: 'price_eur', name: 'یورو', unit: 'هر یورو', group: 'fx', alias: ['یورو', 'eur', 'euro'] },
+  { key: 'price_gbp', name: 'پوند انگلیس', unit: 'هر پوند', group: 'fx', alias: ['پوند', 'gbp'] },
+  { key: 'price_aed', name: 'درهم امارات', unit: 'هر درهم', group: 'fx', alias: ['درهم', 'aed', 'dirham'] },
+  { key: 'price_try', name: 'لیر ترکیه', unit: 'هر لیر', group: 'fx', alias: ['لیر', 'لیره', 'لیرا', 'lira'] },
+  { key: 'price_cny', name: 'یوان چین', unit: 'هر یوان', group: 'fx', alias: ['یوان', 'رنمینبی', 'cny', 'rmb', 'yuan'] },
+  { key: 'price_cad', name: 'دلار کانادا', unit: 'هر دلار کانادا', group: 'fx', more: true, alias: ['دلار کانادا', 'cad'] },
+  { key: 'price_aud', name: 'دلار استرالیا', unit: 'هر دلار استرالیا', group: 'fx', more: true, alias: ['دلار استرالیا', 'aud'] },
+  { key: 'price_nzd', name: 'دلار نیوزیلند', unit: 'هر دلار نیوزیلند', group: 'fx', more: true, alias: ['دلار نیوزیلند', 'nzd'] },
+  { key: 'price_hkd', name: 'دلار هنگ‌کنگ', unit: 'هر دلار هنگ‌کنگ', group: 'fx', more: true, alias: ['دلار هنگ‌کنگ', 'دلار هنگ کنگ', 'hkd'] },
+  { key: 'price_sgd', name: 'دلار سنگاپور', unit: 'هر دلار سنگاپور', group: 'fx', more: true, alias: ['دلار سنگاپور', 'sgd'] },
+  { key: 'price_chf', name: 'فرانک سوئیس', unit: 'هر فرانک', group: 'fx', more: true, alias: ['فرانک', 'chf'] },
+  { key: 'price_sek', name: 'کرون سوئد', unit: 'هر کرون سوئد', group: 'fx', more: true, alias: ['کرون سوئد', 'sek'] },
+  { key: 'price_nok', name: 'کرون نروژ', unit: 'هر کرون نروژ', group: 'fx', more: true, alias: ['کرون نروژ'] },
+  { key: 'price_dkk', name: 'کرون دانمارک', unit: 'هر کرون دانمارک', group: 'fx', more: true, alias: ['کرون دانمارک', 'dkk'] },
+  { key: 'price_rub', name: 'روبل روسیه', unit: 'هر روبل', group: 'fx', more: true, alias: ['روبل', 'ruble'] },
+  { key: 'price_inr', name: 'روپیه هند', unit: 'هر روپیه هند', group: 'fx', more: true, alias: ['روپیه هند', 'روپیه', 'inr', 'rupee'] },
+  { key: 'price_pkr', name: 'روپیه پاکستان', unit: 'هر روپیه پاکستان', group: 'fx', more: true, alias: ['روپیه پاکستان', 'pkr'] },
+  { key: 'price_krw', name: 'وون کره جنوبی', unit: 'هر وون', group: 'fx', more: true, alias: ['وون کره', 'krw'] },
+  { key: 'price_myr', name: 'رینگیت مالزی', unit: 'هر رینگیت', group: 'fx', more: true, alias: ['رینگیت', 'myr', 'ringgit'] },
+  { key: 'price_thb', name: 'بات تایلند', unit: 'هر بات', group: 'fx', more: true, alias: ['بات تایلند', 'thb', 'baht'] },
+  { key: 'price_sar', name: 'ریال عربستان', unit: 'هر ریال عربستان', group: 'fx', more: true, alias: ['ریال عربستان', 'ریال سعودی'] },
+  { key: 'price_qar', name: 'ریال قطر', unit: 'هر ریال قطر', group: 'fx', more: true, alias: ['ریال قطر', 'qar'] },
+  { key: 'price_omr', name: 'ریال عمان', unit: 'هر ریال عمان', group: 'fx', more: true, alias: ['ریال عمان', 'omr'] },
+  { key: 'price_kwd', name: 'دینار کویت', unit: 'هر دینار کویت', group: 'fx', more: true, alias: ['دینار کویت', 'kwd'] },
+  { key: 'price_bhd', name: 'دینار بحرین', unit: 'هر دینار بحرین', group: 'fx', more: true, alias: ['دینار بحرین', 'bhd'] },
+  { key: 'price_iqd', name: 'دینار عراق', unit: 'هر دینار عراق', group: 'fx', more: true, alias: ['دینار عراق', 'دینار', 'iqd'] },
+  { key: 'price_afn', name: 'افغانی', unit: 'هر افغانی', group: 'fx', more: true, alias: ['افغانی', 'afn'] },
+  { key: 'price_amd', name: 'درام ارمنستان', unit: 'هر درام', group: 'fx', more: true, alias: ['درام ارمنستان'] },
+  { key: 'price_gel', name: 'لاری گرجستان', unit: 'هر لاری', group: 'fx', more: true, alias: ['لاری گرجستان'] },
+  { key: 'price_azn', name: 'منات آذربایجان', unit: 'هر منات آذربایجان', group: 'fx', more: true, alias: ['منات آذربایجان', 'azn'] },
+  { key: 'price_tmt', name: 'منات ترکمنستان', unit: 'هر منات ترکمنستان', group: 'fx', more: true, alias: ['منات ترکمنستان', 'tmt'] },
   { key: 'silver_999', name: 'نقره ۹۹۹', unit: 'هر گرم', group: 'metal' },
   { key: 'silver_925', name: 'نقره ۹۲۵', unit: 'هر گرم', group: 'metal' },
   { key: 'base_global_copper', name: 'مس جهانی', unit: 'هر تن (دلار)', group: 'metal', usd: true },
@@ -55,6 +84,19 @@ export const TGJU = [
   { key: 'ons', name: 'انس جهانی طلا', unit: 'هر اونس (دلار)', group: 'global', usd: true },
 ];
 export const TGJU_BY_KEY = Object.fromEntries(TGJU.map((t) => [t.key, t]));
+/** Currencies, and the tgju key a name or unit refers to («دلار کانادا» → CAD, a bare «دلار» → USD). Longer names are
+ *  tried first so the generic word never wins over the specific one. Every alias matches only as a whole word («لیر» is
+ *  not in «علیرضا», «یوان» not in «دیوان»); Latin codes that are also ordinary words or tickers (try, amd…) are left out. */
+export const FX = TGJU.filter((t) => t.group === 'fx');
+const FX_ALIASES = FX.flatMap((t) => (t.alias || []).map((a) => ({ a: a.toLowerCase(), key: t.key }))).sort((x, y) => y.a.length - x.a.length);
+export function fxKeyOf(text) {
+  const s = String(text || '').toLowerCase().replace(/‌/g, ' ').replace(/ي/g, 'ی').replace(/ك/g, 'ک');
+  for (const { a, key } of FX_ALIASES) {
+    const L = /^[a-z]+$/.test(a) ? 'a-z' : '\u0621-\u064a\u067e\u0686\u0698\u06a9\u06af\u06cc' /* Persian letters, not digits */;
+    if (new RegExp(`(^|[^${L}])${a.replace(/\u200c/g, ' ')}([^${L}]|$)`).test(s)) return key;
+  }
+  return null;
+}
 
 /** Crypto catalog. Price chain: Nobitex (Rial) → tgju USD × dollar → CoinGecko USD × dollar.
  *  key = Nobitex symbol, tgju = tgju slug, cg = CoinGecko id. Anything else can be added from search. */

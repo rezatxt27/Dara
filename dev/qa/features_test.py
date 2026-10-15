@@ -408,6 +408,25 @@ async def main():
             await o.close(); await pg.close()
         await step('price', t_price())
 
+        # more currencies: six on the market page, any other added from «ارز دیگر» (and removable); the editor can pick them
+        async def t_fx():
+            pg = await newpage('market')
+            card = pg.locator('.card:has(h3:text-is("ارز"))')
+            rows = await card.locator('.list .it').count()
+            check('market: six main currencies, yuan among them', rows == 6 and await card.locator('.it:has-text("یوان چین")').count() == 1, rows)
+            await card.locator('button:has-text("ارز دیگر")').click(); await pg.wait_for_timeout(300)
+            await pg.fill('.modal input.input', 'روبل'); await pg.wait_for_timeout(200)
+            opts = await pg.locator('.modal .picker .opt').count()
+            await pg.click('.modal .picker .opt:has-text("روبل روسیه")'); await pg.wait_for_timeout(500)
+            await pg.screenshot(path=f'{SH}/fx-add-{THEME}.png')
+            await pg.click('.modal .btn.primary:has-text("تمام")'); await pg.wait_for_timeout(600)
+            check('market: a searched currency is added to the card', opts == 1 and await card.locator('.it:has-text("روبل روسیه")').count() == 1, opts)
+            await card.screenshot(path=f'{SH}/fx-card-{THEME}.png')
+            await card.locator('.it:has-text("روبل روسیه") button[title="حذف از دیده‌بان"]').click(); await pg.wait_for_timeout(600)
+            check('market: an added currency can be removed', await card.locator('.it:has-text("روبل روسیه")').count() == 0)
+            await pg.close()
+        await step('fx', t_fx())
+
         # 1.12 review: unit must be confirmed when only guessed; sample data can be cleared; arrow keys in Seg; jumps
         async def t_qc():
             pg = await newpage('settings')

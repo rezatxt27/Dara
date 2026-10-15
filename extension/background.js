@@ -209,7 +209,9 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     }
 
     // 2) Fetch quotes
-    const refs = E.collectRefs(assets, st.alerts, [...CORE_REFS, ...TGJU.map((t) => ({ provider: 'tgju', key: t.key })), ...(settings.watch || [])]);
+    // the extra currencies ride along on the price board (one request for all); fetched one by one only when used
+    const refs = [...E.collectRefs(assets, st.alerts, [...CORE_REFS, ...TGJU.filter((t) => !t.more).map((t) => ({ provider: 'tgju', key: t.key })), ...(settings.watch || [])]),
+      ...TGJU.filter((t) => t.more).map((t) => ({ provider: 'tgju', key: t.key, boardOnly: true }))];
     // NAVs of exchange-traded funds, for their bubble. Optional: a symbol with no NAV (a plain share) is noted and
     // skipped for a week; its error is never shown or stored.
     const navs = E.navRefs(assets, settings.watch || [], st.alerts, st.meta.navMiss || {});

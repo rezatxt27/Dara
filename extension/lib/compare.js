@@ -18,6 +18,8 @@ export const CHOICES = [
   { id: 'retail_gerami', kind: 'market', name: 'سکه گرمی', ref: { provider: 'tgju', key: 'retail_gerami' }, unit: 'سکه', category: 'gold', cost: 6 },
   { id: 'usd', kind: 'market', name: 'دلار', ref: { provider: 'tgju', key: 'price_dollar_rl' }, unit: 'دلار', category: 'fx', cost: 2 },
   { id: 'eur', kind: 'market', name: 'یورو', ref: { provider: 'tgju', key: 'price_eur' }, unit: 'یورو', category: 'fx', cost: 2.5 },
+  { id: 'aed', kind: 'market', name: 'درهم امارات', ref: { provider: 'tgju', key: 'price_aed' }, unit: 'درهم', category: 'fx', cost: 3 },
+  { id: 'cny', kind: 'market', name: 'یوان چین', ref: { provider: 'tgju', key: 'price_cny' }, unit: 'یوان', category: 'fx', cost: 3 },
   { id: 'usdt', kind: 'market', name: 'تتر', ref: { provider: 'nobitex', key: 'usdt' }, unit: 'تتر', category: 'crypto', cost: 1 },
   { id: 'btc', kind: 'market', name: 'بیت‌کوین', ref: { provider: 'nobitex', key: 'btc' }, unit: 'بیت‌کوین', category: 'crypto', cost: 1 },
   { id: 'silver', kind: 'market', name: 'نقره ۹۹۹', ref: { provider: 'tgju', key: 'silver_999' }, unit: 'گرم', category: 'metal', cost: 4 },

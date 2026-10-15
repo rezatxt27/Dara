@@ -1,6 +1,6 @@
 // Smart import from spreadsheet CSV (e.g. a Google Sheets export) + CSV export.
 import { uid, parseNum } from './format.js';
-import { CAT, CATEGORIES, METAL_PRESETS } from './catalog.js';
+import { CAT, CATEGORIES, METAL_PRESETS, fxKeyOf } from './catalog.js';
 
 /** CSV (or another delimiter: a tab when cells are copied out of Excel, «;» from some European exports). */
 export function parseCSV(text, delim = ',') {
@@ -88,12 +88,8 @@ const GOLD_UNIT = { geram18: 'گرم', geram24: 'گرم', mesghal: 'مثقال' 
 
 function detectFx(name, holder, unit) {
   const s = norm(name + ' ' + holder + ' ' + unit);
-  if (has(s, 'دلار', 'usd')) return { provider: 'tgju', key: 'price_dollar_rl' };
-  if (has(s, 'یورو', 'eur')) return { provider: 'tgju', key: 'price_eur' };
-  if (has(s, 'پوند', 'gbp')) return { provider: 'tgju', key: 'price_gbp' };
-  if (has(s, 'درهم', 'aed')) return { provider: 'tgju', key: 'price_aed' };
-  if (has(s, 'لیر', 'try')) return { provider: 'tgju', key: 'price_try' };
-  return null;
+  const key = fxKeyOf(s);
+  return key ? { provider: 'tgju', key } : null;
 }
 
 // a ticker or word on its own, not inside another («tether» holds «eth»)

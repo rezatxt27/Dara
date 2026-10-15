@@ -18,6 +18,12 @@ const SIG_D = {
   fixedBeat: 'صندوق‌های درآمد ثابت با سابقهٔ یک‌ساله که از سپرده بیشتر داده‌اند.',
   topFund: 'بیشترین بازدهی ۱۲ ماه در هر نوع صندوق (با سابقهٔ دست‌کم یک سال).',
 };
+// the nine signals in three groups, so the page reads as a summary first
+const GROUPS = [
+  { k: 'trend', t: 'روند و حجم', d: 'نمادهایی که در ماه‌های اخیر جزو پربازده‌ترین‌ها بوده‌اند یا امروز غیرعادی معامله شده‌اند', sigs: ['momentum12', 'momentum3', 'volume'] },
+  { k: 'value', t: 'ارزان یا پایین', d: 'P/E پایین نسبت به گروه، نزدیک کف سال، یا صندوق زیر ارزش دارایی‌هایش', sigs: ['cheap', 'nearLow', 'negBubble'] },
+  { k: 'funds', t: 'صندوق‌ها', d: 'طلای کم‌حباب، درآمد ثابت بهتر از سپرده، و پربازده‌ترین صندوق هر نوع', sigs: ['goldBubble', 'fixedBeat', 'topFund'] },
+];
 const PRESETS = [
   { name: 'صندوق طلا با حباب زیر ۱٪', kind: 'fund', ftype: 5, conds: [{ f: 'bubble', op: '<=', v: 1 }] },
   { name: 'سهم با P/E زیر ۵', kind: 'stock', conds: [{ f: 'pe', op: '<=', v: 5 }, { f: 'pe', op: '>=', v: 0.1 }] },
@@ -31,6 +37,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   const user = st.radarUser;
   const [tab, setTab] = useState(route?.q?.tab || 'today');
   const [only, setOnly] = useState('all');
+  const [onlyNew, setOnlyNew] = useState(false);
   const [run, setRun] = useState(null); // { pending, total } while gathering
   const [editRule, setEditRule] = useState(null);
   const fmt = (v) => money(v, s, { compact: true });
@@ -87,15 +94,16 @@ export function RadarPage({ st, s, openPrice, route }) {
     <div style="margin-top:12px"><button class="btn primary" disabled=${run?.busy} onClick=${force}><${Icon} n="radar" cls="sm" />بررسی بازار</button></div></div></div></div>`;
 
   return html`<div class="page">${head}
-    ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
+    ${tab === 'today' && html`<${Summary} radar=${radar} st=${st} cards=${built.cards} isNew=${isNew} depositPct=${depositPct} onlyNew=${onlyNew} setOnlyNew=${setOnlyNew} />
+      <div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}
+        <button class=${'chip' + (onlyNew ? ' on' : '')} onClick=${() => setOnlyNew(!onlyNew)}>فقط تازه‌ها</button></div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
-      ${ORDER.map((sig) => {
-        const list = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
+      ${GROUPS.map((g) => {
+        const list = built.cards.filter((c) => g.sigs.includes(c.sig) && (only === 'all' || c.kind === only) && (!onlyNew || isNew(c)));
         if (!list.length) return null;
-        return html`<section class="rd-sec"><div class="rd-sec-h"><h4>${RD.SIGNALS[sig].t}</h4><span class="xs muted">${SIG_D[sig]}</span></div>
-          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div></section>`;
+        return html`<${Group} key=${g.k} g=${g} list=${list} radar=${radar} s=${s} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} />`;
       })}
-      ${!built.cards.filter((c) => only === 'all' || c.kind === only).length && html`<div class="card"><div class="empty small">امروز چیزی از این قاعده‌ها رد نشد.</div></div>`}`}
+      ${!built.cards.filter((c) => (only === 'all' || c.kind === only) && (!onlyNew || isNew(c))).length && html`<div class="card"><div class="empty small">${onlyNew ? 'از جلسهٔ قبل مورد تازه‌ای نیامده.' : 'امروز چیزی از این قاعده‌ها رد نشد.'}</div></div>`}`}
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} openPrice=${openPrice} onEdit=${setEditRule} />`}
     ${tab === 'marks' && html`<${Marks} radar=${radar} user=${user} s=${s} openPrice=${openPrice} />`}
     ${editRule && html`<${RuleModal} rule=${editRule} sectors=${radar.sectors || {}} onClose=${() => setEditRule(null)} />`}
@@ -292,4 +300,74 @@ function Mine({ radar, st, s, cards, depositPct, openPrice }) {
     </div>`)}
     ${items.length > 6 && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(items.length)})`}</button>`}
     </div></section>`;
+}
+
+/** The one number that says why a card is here, short enough for a single row. */
+function keyNum(c) {
+  const m = c.m || {};
+  switch (c.sig) {
+    case 'momentum12': return `۱۲ ماه ${pctTxt(m.ret365)}`;
+    case 'momentum3': return `۳ ماه ${pctTxt(m.ret91)}`;
+    case 'volume': return `حجم ${num(m.volRatio, 1)} برابر معمول`;
+    case 'cheap': return `P/E ${num(m.pe, 1)} (گروه ${num(m.sectorPE, 1)})`;
+    case 'nearLow': return `${pctTxt(m.fromLow).replace('+', '')} بالای کف سال`;
+    case 'negBubble': case 'goldBubble': return `حباب ${pctTxt(m.bubble, 1)}`;
+    default: return `۱۲ ماه ${pctTxt(m.y1)}`;
+  }
+}
+
+/** «خلاصهٔ امروز»: a few lines first — the owner's holdings, what's new, and the market's mood. */
+function Summary({ radar, st, cards, isNew, depositPct, onlyNew, setOnlyNew }) {
+  const mine = useMemo(() => RD.mine(radar, RD.holdRefs(st.assets, E.isLiability), { depositPct, cards }), [radar, st.assets, cards]);
+  const warned = mine.filter((x) => x.flags.some((f) => f.warn));
+  const fresh = cards.filter(isNew);
+  const breadth = useMemo(() => {
+    let up = 0, down = 0;
+    for (const r of Object.values(radar.stocks || {})) { const t = r.today; if (!(t?.py > 0) || !(t.close > 0) || t.day !== radar.day) continue; if (t.close > t.py) up++; else if (t.close < t.py) down++; }
+    return up + down >= 50 ? { up, down } : null;
+  }, [radar]);
+  const lines = [];
+  if (warned.length) {
+    const x = warned[0]; const f = x.flags.find((y) => y.warn);
+    lines.push(html`<li><${Icon} n="alert" cls="sm" /><span><b>${num(warned.length)} نکته دربارهٔ دارایی‌های خودت</b>؛ مثلاً «${x.sym || x.name}» ${f.t}</span></li>`);
+  } else if (mine.length) lines.push(html`<li><${Icon} n="circleCheck" cls="sm" /><span>دارایی‌های خودت امروز نکتهٔ خاصی ندارند</span></li>`);
+  if (fresh.length) lines.push(html`<li><${Icon} n="sparkles" cls="sm" /><span><b>${num(fresh.length)} مورد تازه</b> از جلسهٔ قبل</span>
+    <button class="btn sm ghost" onClick=${() => setOnlyNew(!onlyNew)}>${onlyNew ? 'نمایش همه' : 'فقط همین‌ها'}</button></li>`);
+  if (breadth) {
+    const p = breadth.up / (breadth.up + breadth.down);
+    lines.push(html`<li><${Icon} n="chart" cls="sm" /><span>بازار در این جلسه: <b>${num(Math.round(p * 100))}٪</b> نمادها مثبت و ${num(100 - Math.round(p * 100))}٪ منفی بستند</span></li>`);
+  }
+  if (!lines.length) return null;
+  return html`<div class="card rd-sum"><h4>خلاصهٔ امروز</h4><ul>${lines}</ul></div>`;
+}
+
+/** One group of signals, folded into one row per symbol; a row opens to the full card. */
+function Group({ g, list, radar, s, isNew, marked, mark, openPrice }) {
+  const anyNew = list.some(isNew);
+  const [open, setOpen] = useState(anyNew);
+  const [exp, setExp] = useState(null);
+  const sigs = g.sigs.filter((x) => list.some((c) => c.sig === x));
+  return html`<section class="card rd-grp">
+    <button class="rd-grp-h" aria-expanded=${open ? 'true' : 'false'} onClick=${() => setOpen(!open)}>
+      <span class="grow"><b>${g.t}</b> <span class="muted">· ${num(list.length)} مورد</span>${anyNew && html` <span class="pill live">تازه دارد</span>`}<span class="xs muted rd-grp-d">${g.d}</span></span>
+      <${Icon} n="chevronDown" cls=${'sm' + (open ? ' rot' : '')} /></button>
+    ${open && sigs.map((sig) => html`<div class="rd-sub"><div class="xs sb muted rd-sub-h">${RD.SIGNALS[sig].t}</div>
+      ${list.filter((c) => c.sig === sig).map((c) => {
+        const id = RD.cardKey(c); const on = exp === id;
+        const rec = c.kind === 'stock' ? radar.stocks?.[c.ins] : null;
+        const v = rec ? RD.spark(rec, RD.dayNum(radar.day), 32) : [];
+        const warn = c.check.some((t) => /گران‌تر|سودده نیست|معاملاتش کم|رشد زیادی/.test(t));
+        return html`<div class=${'rd-row' + (on ? ' open' : '')}>
+          <button class="rd-row-h" aria-expanded=${on ? 'true' : 'false'} onClick=${() => setExp(on ? null : id)}>
+            <span class="rd-row-n"><span class="row" style="gap:6px"><b>${c.sym || c.name}</b>${isNew(c) && html`<span class="pill live">تازه</span>`}${marked.has(c.id) && html`<span class="pill auto">پیگیری</span>`}</span>
+              <span class="xs muted ellipsis">${c.sym ? c.name : c.sub}</span></span>
+            <span class="rd-row-k num">${keyNum(c)}</span>
+            ${warn ? html`<span class="pill stale" title="در جزئیات، نکته‌ای برای بررسی هست"><${Icon} n="alert" cls="xs" />نکته</span>` : html`<span></span>`}
+            <span></span>
+            ${v.length > 1 ? html`<span aria-hidden="true"><${Sparkline} values=${v} w=${72} h=${24} fill=${false} color=${v[v.length - 1] >= v[0] ? 'var(--pos)' : 'var(--neg)'} /></span>` : html`<span></span>`}
+            <${Icon} n="chevronDown" cls=${'sm muted' + (on ? ' rot' : '')} /></button>
+          ${on && html`<div class="rd-row-b"><${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} /></div>`}
+        </div>`;
+      })}</div>`)}
+  </section>`;
 }

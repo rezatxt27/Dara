@@ -734,3 +734,29 @@ select.input.imp-sheet { width: auto; max-width: 45%; height: 32px; font-size: 1
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .rd-rets { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; margin-top: -2px; }
 .rd-rets b { font-weight: 700; } .rd-rets .pos { color: var(--pos); } .rd-rets .neg { color: var(--neg); }
+
+/* radar preview: summary first, groups of one-line rows */
+.rd-sum { padding: 14px 16px; margin: 0; }
+.rd-sum h4 { margin: 0 0 8px; font-size: 14.5px; }
+.rd-sum ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.rd-sum li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+.rd-sum li > svg { color: var(--accent); flex: none; }
+.rd-sum li .btn { margin-inline-start: auto; }
+.rd-grp { padding: 0; margin: 0; overflow: hidden; }
+.rd-grp-h { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px; width: 100%; padding: 14px 16px; }
+.rd-grp-h:hover { background: var(--surface-2); }
+.rd-grp-h:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rd-grp-d { display: block; margin-top: 2px; }
+svg.rot { transform: rotate(180deg); }
+.rd-sub { padding: 0 16px 6px; }
+.rd-sub-h { padding: 8px 0 4px; border-top: 1px solid var(--line); }
+.rd-row { border-radius: 10px; }
+.rd-row.open { background: var(--surface-2); }
+.rd-row-h { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: minmax(0, 220px) auto auto 1fr 72px 16px; gap: 12px; align-items: center; width: 100%; padding: 8px 8px; border-radius: 10px; }
+.rd-row-h:hover { background: var(--surface-2); }
+.rd-row-h:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.rd-row-n { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rd-row-k { font-weight: 700; font-size: 13px; white-space: nowrap; }
+.rd-row-b { padding: 0 8px 10px; }
+.rd-row-b .rd-card { box-shadow: none; }
+@media (max-width: 640px) { .rd-row-h { grid-template-columns: minmax(0, 1fr) auto 16px; } .rd-row-h > :nth-child(3), .rd-row-h > :nth-child(4), .rd-row-h > :nth-child(5) { display: none; } }

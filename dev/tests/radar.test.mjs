@@ -429,3 +429,101 @@ test('holdings in the radar: one entry per symbol, warnings as facts, the cards 
   // debts aren't holdings
   assert.equal(RD.holdRefs([units('q', 'tsetmc', 'HOT')], () => true).length, 0);
 });
+
+test('risk and earnings yield: worst fall from a peak, daily swing, profit as a share of price — in the card', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const rec = R.stocks.S5;
+  // a peak of 150 then a fall to 90 inside the year: worst fall −40%
+  rec.p = rec.p.map((v, i) => (i === 200 ? 150 : i > 200 && i < 260 ? 90 : v));
+  const m = RD.stockMetrics(rec, D0, {}, R.sess);
+  close(m.dd1y, 90 / 150 - 1, 1e-6);
+  assert.ok(m.dvol > 0);
+  close(m.ey, 1 / rec.pe);
+  // a realistic wobble on HOT (its year's two ends untouched), so it has a daily swing to speak of
+  R.stocks.HOT.p = R.stocks.HOT.p.map((v, i, a) => (i > 0 && i < a.length - 1 ? v * (1 + 0.02 * ((i * 7) % 5 - 2) / 2) : v));
+  const b = RD.buildCards(R, { depositPct: 30 });
+  const hot = b.cards.find((c) => c.id === 's:HOT');
+  // a perfectly smooth price has no swing worth a line
+  assert.ok(!b.cards.find((c) => c.id === 's:S29')?.check.some((t) => t.includes('نوسان روزانه')));
+  assert.ok(hot.check.some((t) => t.includes('سود برآوردی سالانهٔ هر سهم معادل') && t.includes('سپرده ۳۰٪')), hot.check);
+  assert.ok(hot.check.some((t) => t.includes('نوسان روزانه')), hot.check);
+});
+
+test('benchmarks: index and dollar over the same period; a line on momentum cards and in the report', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const rows = (f) => Array.from({ length: 400 }, (_, k) => ({ date: RD.isoOf(D0 - 399 + k), close: f(k) }));
+  R.bench = { index: RD.benchSeries(rows((k) => 100 + k * 0.25), D0), usd: RD.benchSeries(rows(() => 50), D0) };
+  const b = RD.benchRet(R, 365);
+  close(b.index, (100 + 399 * 0.25) / (100 + 34 * 0.25) - 1, 1e-9); close(b.usd, 0);
+  const hot = RD.buildCards(R).cards.find((c) => c.id === 's:HOT' && c.sig === 'momentum12');
+  assert.ok(hot.why[1].startsWith('در همین ۱۲ ماه: شاخص کل'), hot.why);
+  const rep = RD.report(R, { ins: 'HOT' });
+  close(rep.bench.y1.index, b.index);
+  // no bench (or too short): nothing said
+  const N = market(); assert.equal(RD.benchLine(N, 365, '۱۲ ماه'), '');
+  N.bench = { index: RD.benchSeries(rows((k) => 100 + k).slice(-20), D0) };
+  assert.equal(RD.benchRet(N, 365).index, null);
+});
+
+test('«همه را ببین»: every qualifying card with its rank; the first SHOW are the shown ones; momentum3 skips only the shown 12-month ones', () => {
+  const R = market();
+  for (let i = 0; i < 80; i++) { const s = JSON.parse(JSON.stringify(R.stocks.S20)); s.sym = 'X' + i; R.stocks['X' + i] = s; }
+  const b = RD.buildCards(R);
+  const m12 = b.cards.filter((c) => c.sig === 'momentum12');
+  assert.ok(m12.length > RD.SHOW);
+  assert.deepEqual(m12.map((c) => c.rank), m12.map((_, i) => i));
+  assert.equal(b.count.momentum12, m12.length);
+  assert.equal(RD.shown(b.cards).filter((c) => c.sig === 'momentum12').length, RD.SHOW);
+  const first = new Set(m12.slice(0, RD.SHOW).map((c) => c.id));
+  assert.ok(!b.cards.some((c) => c.sig === 'momentum3' && first.has(c.id)));
+});
+
+test('alerts on followed items: above, below and a fall since marked; each fires once; stocks still gathering wait', () => {
+  const R = market(); const p = RD.priceOf(R, 's:HOT');
+  const marks = [{ id: 's:HOT', sym: 'HOT', day: DAY0, price: p, alert: { above: p * 0.9, below: null, fall: 15 } },
+    // marked 300 days ago: the adjusted series says how much it fell since (about −30%)
+    { id: 's:LOW', sym: 'LOW', day: D(-300), price: 100, alert: { above: null, below: RD.priceOf(R, 's:LOW') * 1.1, fall: 15 } },
+    { id: 's:S1', sym: 'S1', day: DAY0, price: 1, alert: { above: 1e12 } }];
+  const r1 = RD.checkMarkAlerts(R, marks);
+  assert.deepEqual(r1.fired.map((f) => `${f.id}|${f.k}`).sort(), ['s:HOT|above', 's:LOW|below', 's:LOW|fall']);
+  assert.equal(RD.checkMarkAlerts(R, r1.marks).fired.length, 0); // once
+  R.stocks.S1.need = 270; R.stocks.S1.d = []; // gathering: not judged
+  assert.equal(RD.checkMarkAlerts(R, [{ id: 's:S1', alert: { above: 1 } }]).fired.length, 0);
+});
+
+test('the radar\'s track record: kept once per session, first cards only; a month later, the average against the index', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const rows = Array.from({ length: 400 }, (_, k) => ({ date: RD.isoOf(D0 - 399 + k), close: 100 + k }));
+  R.bench = { index: RD.benchSeries(rows, D0) };
+  // pretend these first cards were shown every day for the past 100 days
+  const b = RD.buildCards(R);
+  for (let k = 100; k >= 31; k--) { R.day = RD.isoOf(D0 - k); RD.recordTrack(R, b.cards); }
+  R.day = DAY0; RD.recordTrack(R, b.cards); RD.recordTrack(R, b.cards);
+  assert.equal(Object.keys(R.track).length, 71);
+  assert.ok(Object.values(R.track[DAY0]).every((l) => l.length <= RD.SHOW));
+  // a stock that stays on the list counts once per 30-day window, so 3 stocks over 70 days are 9 samples at most —
+  // too few to say anything yet
+  const t = RD.trackStats(R, 'momentum12');
+  const shownIds = new Set(RD.shown(b.cards).filter((c) => c.sig === 'momentum12').map((c) => c.id));
+  assert.equal(t.stocks, shownIds.size);
+  assert.ok(t.n <= shownIds.size * 3, t);
+  assert.equal(t.avg, null);
+  // with enough different stocks over time it speaks, against the index of the same months
+  const T = market(); T.bench = R.bench; T.track = {};
+  const ids = Object.keys(T.stocks).filter((k) => /^S/.test(k));
+  for (let k = 200; k >= 31; k -= 3) T.track[RD.isoOf(D0 - k)] = { momentum12: ids.slice((k % 10), (k % 10) + 10).map((x) => [`s:${x}`, 1]) };
+  const t2 = RD.trackStats(T, 'momentum12');
+  assert.ok(t2.n >= 20 && t2.stocks >= 8 && t2.avg !== null && t2.index > 0, t2);
+  assert.equal(RD.trackStats(R, 'goldBubble').avg, null);
+});
+
+test('price alert levels follow a capital increase since the mark; topFund is never folded', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const rec = R.stocks.S3; const p0 = RD.priceOf(R, 's:S3');
+  const mark = { id: 's:S3', sym: 'S3', day: D(-10), price: rec.p[rec.d.indexOf(D0 - 10)], alert: { below: p0 * 0.9 } };
+  // a 100% capital increase today: the raw price halves, every earlier close is scaled by ½
+  rec.p = rec.p.map((v, i) => (i < rec.p.length - 1 ? v / 2 : (v / 2) * 1.05));
+  assert.equal(RD.checkMarkAlerts(R, [mark]).fired.length, 0); // it rose ~5%, it didn't fall under the level
+  const tf = RD.buildCards(R).cards.filter((c) => c.sig === 'topFund');
+  assert.ok(tf.every(RD.isFirst));
+});

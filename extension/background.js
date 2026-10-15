@@ -491,6 +491,24 @@ async function runRadar({ force = false, batch = 40 } = {}) {
         } catch { /* names are optional */ }
       }
     } catch (e) { radar.error = e.message; }
+    // the total index and the dollar over the year, once a session — to say how a return compares
+    const ixLast = radar.bench?.index?.d?.[radar.bench.index.d.length - 1] || 0;
+    const ixLag = radar.day && ixLast < RD.dayNum(radar.day) && Date.now() - (radar.benchAt || 0) > 2 * 3600e3;
+    const benchDue = force || Date.now() - (radar.benchAt || 0) > 2 * 3600e3; // never more often than every 2 hours
+    if (radar.day && benchDue && (radar.benchFor !== radar.day || ixLag || force)) {
+      let gotIndex = false;
+      const D = RD.dayNum(radar.day); const bench = { ...(radar.bench || {}) };
+      if (tse) try {
+        const j = await P.getJSON('https://cdn.tsetmc.com/api/Index/GetIndexB2History/32097828799138957', { timeout: 30000 });
+        const rows = (j?.indexB2 || []).map((x) => { const e = String(x.dEven); return { date: `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`, close: +x.xNivInuClMresIbs }; });
+        if (rows.length) { bench.index = RD.benchSeries(rows, D); gotIndex = true; }
+      } catch { /* comparisons are optional */ }
+      if (settings.providers?.tgju !== false) try { bench.usd = RD.benchSeries(await P.tgjuHistory('price_dollar_rl', 400), D); } catch { /* optional */ }
+      radar.benchAt = Date.now();
+      if (bench.index?.d?.length || bench.usd?.d?.length) { radar.bench = bench; changed = true; }
+      // tried again later when the index (the main comparison) didn't come
+      if (gotIndex || !tse) radar.benchFor = radar.day;
+    }
     // 2) funds: a few times a day (Fipiran publishes NAVs once a day, usually a day behind)
     if (fip && (force || Date.now() - (radar.fundsAt || 0) > 3 * 3600e3)) {
       try { radar.funds = (await P.fipiranFunds(10 * 60e3)).map(RD.slimFund); radar.fundsAt = Date.now(); changed = true; }
@@ -510,11 +528,14 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     }
     // 4) which cards are new today (per signal), and the owner's rules
     const pending = Object.values(radar.stocks).filter((r) => r.need > 0).length;
+    let cards = null;
     const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
     if (changed && radar.day) {
       const depositPct = I.defaultDepositPct({ settings, assets });
-      const cards = RD.buildCards(radar, { depositPct }).cards;
+      cards = RD.buildCards(radar, { depositPct }).cards;
       const ids = [...new Set(cards.map(RD.cardKey))];
+      // the radar's own track record: what it showed on each complete scan, to say later how it did
+      if (!pending) RD.recordTrack(radar, cards);
       const prev = radar.results || {};
       // «تازه» compares with the last COMPLETE day (a day whose prices were still being gathered lacks most stocks)
       const before = prev.day === radar.day ? prev.before || [] : prev.complete !== false ? prev.ids || [] : prev.before || [];
@@ -542,10 +563,28 @@ async function runRadar({ force = false, batch = 40 } = {}) {
       }
       if (notes.length && settings.notify?.radar !== false) notify('dara-radar', 'رادار فرصت‌ها: مورد تازه', notes.join('\n'));
       if (mineNote) notify('dara-radar-mine', 'رادار: دربارهٔ دارایی‌های تو', mineNote);
+      // alerts the owner set on followed items (closing prices of the session)
+      const { fired, marks } = RD.checkMarkAlerts(radar, radarUser.marks || []);
+      if (fired.length) {
+        // only the alerts that went off, and only if the owner hasn't changed them since this run read them
+        const was = new Map((radarUser.marks || []).map((m) => [m.id, JSON.stringify(m.alert || null)]));
+        await store.update('radarUser', (u) => ({ ...u, marks: u.marks.map((m) => {
+          const hit = fired.filter((f) => f.id === m.id);
+          if (!hit.length || JSON.stringify(m.alert || null) !== was.get(m.id)) return m;
+          const f = { ...(m.fired || {}) }; for (const h of hit) f[h.k] = radar.day;
+          return { ...m, fired: f };
+        }) }));
+        if (settings.notify?.alerts !== false) {
+          const txt = fired.slice(0, 4).map((f) => `«${f.sym}» ${f.k === 'above' ? `به ${money(f.now, settings)} رسید (بالاتر از حدی که گذاشتی)` : f.k === 'below' ? `به ${money(f.now, settings)} رسید (پایین‌تر از حدی که گذاشتی)` : `${pct(f.ch)} از روزی که نشانش زدی`}`).join('\n');
+          notify('dara-radar-alert', 'رادار: هشدار پیگیری', txt);
+        }
+      }
     }
     // a small summary for the menu badge (the scan itself is too large to load on every page)
     const res = radar.results || {};
-    const newCount = res.before?.length ? new Set((res.ids || []).filter((x) => !res.before.includes(x)).map((x) => x.split('|')[1])).size : 0;
+    // the menu's count: new among the cards shown first (not the long «همه را ببین» lists)
+    const firstIds = new Set(RD.shown(cards || RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }) }).cards).map(RD.cardKey));
+    const newCount = res.before?.length ? new Set((res.ids || []).filter((x) => firstIds.has(x) && !res.before.includes(x)).map((x) => x.split('|')[1])).size : 0;
     await store.update('meta', (m) => ({ ...m, radar: { day: radar.day, newCount, pending, at: Date.now() } }));
     // the store is several MB: written only when something changed (closes kept to 8 significant digits)
     if (changed || radar.error !== prevError) {

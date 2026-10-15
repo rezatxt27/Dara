@@ -228,12 +228,18 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
   const from = sd.length >= 10 ? sd[0] : D - 27, per = sd.length >= 10 ? sd.length : 20;
   const avgVal = h.length ? h.filter((x) => x[0] >= from && x[0] <= D).reduce((a, x) => a + x[2], 0) / per : (rec.today?.val || 0) / per;
   const mPE = sectorPE[rec.sector];
+  // risk: the worst fall from a previous peak within the year, and how much it usually moves in a day (last ~120 sessions)
+  let peak = 0, dd = 0; for (const v of yr) { if (v > peak) peak = v; else if (peak > 0) dd = Math.min(dd, v / peak - 1); }
+  const rr = []; for (let i = Math.max(1, n - 120); i < n; i++) if (rec.d[i] >= D - 200 && rec.p[i - 1] > 0 && rec.p[i] !== rec.p[i - 1]) rr.push(Math.log(rec.p[i] / rec.p[i - 1]));
+  const mu = rr.length ? rr.reduce((a, b) => a + b, 0) / rr.length : 0;
+  const dvol = rr.length >= 30 ? Math.sqrt(rr.reduce((a, b) => a + (b - mu) ** 2, 0) / (rr.length - 1)) : null;
   return {
     close, ret7: ret(7), ret30: ret(30), ret91: ret(91), ret182: ret(182), ret365: ret(365),
     hi52: hi, lo52: lo, fullYear, fromHigh: hi > 0 ? close / hi - 1 : null, fromLow: lo > 0 ? close / lo - 1 : null,
     volToday, volRatio: volToday > 0 && avgVol > 0 && prev.length >= 10 ? volToday / avgVol : null, avgVal, liquid: avgVal >= LIQ,
     traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
     peRel: isFinite(rec.pe) && rec.pe > 0 && mPE > 0 ? rec.pe / mPE : null, dayChange: rec.today?.py > 0 ? rec.today.close / rec.today.py - 1 : null,
+    dd1y: fullYear && yr.length > 20 ? dd : null, dvol, ey: isFinite(rec.pe) && rec.pe > 0 && rec.eps > 0 ? 1 / rec.pe : null,
   };
 }
 /** Median P/E of each sector over its stocks with a positive, sane P/E (a sector needs MIN_SECTOR of them). */
@@ -243,6 +249,32 @@ export function sectorMedians(stocks) {
   const out = {};
   for (const [k, l] of Object.entries(by)) if (l.length >= MIN_SECTOR) out[k] = median(l);
   return out;
+}
+
+/* ------------------------------------- benchmarks ------------------------------------- */
+/** radar.bench: { index: {d, p}, usd: {d, p} } — the total index and the dollar, daily, as day numbers and values. */
+function benchAt(b, t) { if (!b?.d?.length) return null; let lo = 0, hi = b.d.length - 1, a = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (b.d[m] <= t) { a = m; lo = m + 1; } else hi = m - 1; } return a >= 0 ? b.p[a] : null; }
+/** The index's and the dollar's change over the `days` before the radar's session: { index, usd } (fractions or null). */
+export function benchRet(radar, days, D = radar?.day ? dayNum(radar.day) : null) {
+  const out = { index: null, usd: null };
+  if (!D) return out;
+  for (const k of ['index', 'usd']) {
+    const b = radar.bench?.[k]; if (!b?.d?.length || b.d[0] > D - days + 5 || b.d[b.d.length - 1] < D - 7) continue;
+    const a = benchAt(b, D - days), z = benchAt(b, D);
+    if (a > 0 && z > 0) out[k] = z / a - 1;
+  }
+  return out;
+}
+/** «در همین ۱۲ ماه: شاخص کل +۶۰٪، دلار +۴۰٪» — or '' when neither is known. */
+export function benchLine(radar, days, label) {
+  const b = benchRet(radar, days);
+  const parts = [b.index !== null && `شاخص کل ${fa(P(b.index))}`, b.usd !== null && `دلار ${fa(P(b.usd))}`].filter(Boolean);
+  return parts.length ? `در همین ${label}: ${parts.join('، ')}` : '';
+}
+/** Fold a raw daily series ([{date, close}]) into the compact {d, p} form, keeping about 13 months. */
+export function benchSeries(rows, D) {
+  const l = (rows || []).filter((r) => r.close > 0 && r.date).map((r) => [dayNum(r.date), r.close]).filter(([d]) => !D || d >= D - 420).sort((a, b) => a[0] - b[0]);
+  return { d: l.map((x) => x[0]), p: l.map((x) => x[1]) };
 }
 
 /* ---------------------------------------- funds ---------------------------------------- */
@@ -283,11 +315,21 @@ export const SIGNALS = {
 };
 
 /** What to check about a stock, whatever brought it up: the other side of the coin, in plain words. */
-function stockChecks(m, money) {
+function stockChecks(m, money, { depositPct = null, volMed = null } = {}) {
   const c = [];
   if (m.pe === null || m.eps <= 0) c.push('سودده نیست یا P/E ندارد؛ ارزش‌گذاری‌اش به آینده بستگی دارد');
   else if (m.sectorPE) c.push(`P/E ${fa(N(m.pe))} در برابر میانهٔ گروه ${fa(N(m.sectorPE))}${m.peRel > 1.3 ? '؛ گران‌تر از هم‌گروه‌ها' : m.peRel < 0.8 ? '؛ ارزان‌تر از هم‌گروه‌ها' : ''}`);
   else c.push(`P/E ${fa(N(m.pe))}`);
+  // the P/E in plain words: what a year of the company's profit is, as a share of the price — against a deposit
+  if (m.ey !== null && depositPct) c.push(`سود برآوردی سالانهٔ هر سهم معادل ${fa(P0(m.ey, m.ey < 0.1 ? 1 : 0))} قیمت آن است (همه‌اش نقدی پرداخت نمی‌شود)؛ سود سپرده ${fa(depositPct)}٪`);
+  // risk, plainly: how far it fell at worst this year, and how much it moves in a day against the market's middle
+  const risk = [];
+  if (m.dd1y !== null && m.dd1y <= -0.05) risk.push(`در بدترین مقطع سال گذشته ${fa(P0(m.dd1y))} از اوج قبلی‌اش پایین آمد`);
+  if (m.dvol !== null && m.dvol >= 0.001) {
+    const r = volMed > 0 ? m.dvol / volMed : null;
+    risk.push(`نوسان روزانه حدود ${fa(P0(m.dvol, 1))}${r !== null && (r >= 1.3 || r <= 0.75) ? `؛ ${r >= 1.3 ? `${fa(N(r))} برابر` : 'کمتر از'} میانهٔ بازار` : ''}`);
+  }
+  if (risk.length) c.push(risk.join('؛ '));
   if (m.fromHigh !== null && m.fullYear) c.push(m.fromHigh > -0.03 ? 'نزدیک بالاترین قیمت سال است' : `${fa(P0(m.fromHigh))} پایین‌تر از بالاترین قیمت سال`);
   if (m.ret365 !== null && m.ret365 > 1) c.push('رشد زیادی کرده؛ بخشی از خبرهای خوب ممکن است در قیمت لحاظ شده باشد');
   if (!m.liquid) c.push(`معاملاتش کم است (میانگین روزانه ${money(m.avgVal)})؛ خرید و فروش ممکن است سخت باشد`);
@@ -311,7 +353,8 @@ const fundRef = (f) => (f.traded && f.insCode ? { provider: 'tsetmc', key: f.ins
  * Build today's cards. opts: { depositPct, money(rial) → text, max per signal }. Returns { day, cards, counts, ready }.
  * Every card: { id, sig, kind, sym, name, sub, ref, why: [text], check: [text], m }.
  */
-export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.round(v)), max = 6 } = {}) {
+export const SHOW = 6; // cards shown per signal before «همه را ببین»
+export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.round(v)), max = Infinity } = {}) {
   const day = radar.day; if (!day) return { day: null, cards: [], ready: 0, total: 0 };
   const D = dayNum(day);
   const sectors = sectorMedians(radar.stocks);
@@ -319,9 +362,13 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const ready = stocks.filter((s) => !s.rec.need).length;
   const cards = [];
   const sname = (rec) => radar.sectors?.[rec.sector] || '';
-  const push = (sig, s, why) => cards.push({ id: `s:${s.ins}`, sig, kind: 'stock', sym: s.rec.sym, name: s.rec.name, sub: [marketOf(s.rec.isin), sname(s.rec)].filter(Boolean).join('، '),
-    ref: stockRef(s.ins, s.rec), why, check: stockChecks(s.m, money), m: s.m, ins: s.ins });
   const live = stocks.filter((s) => !s.rec.need && s.m.traded);
+  const volMed = median(live.filter((s) => s.m.liquid && s.m.dvol !== null).map((s) => s.m.dvol));
+  // every card knows its place in its signal's list (rank 0 = first): the page shows SHOW of them, then «همه را ببین»
+  const nth = {}; const at = (sig) => (nth[sig] = (nth[sig] ?? -1) + 1);
+  const push = (sig, s, why) => cards.push({ id: `s:${s.ins}`, sig, rank: at(sig), kind: 'stock', sym: s.rec.sym, name: s.rec.name, sub: [marketOf(s.rec.isin), sname(s.rec)].filter(Boolean).join('، '),
+    ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins });
+  const b12 = benchLine(radar, 365, '۱۲ ماه'), b3 = benchLine(radar, 91, '۳ ماه');
   // 1) momentum: the top tenth of liquid stocks by 12- and 3-month return (positive), best first
   const top = (key) => {
     const l = live.filter((s) => s.m.liquid && s.m[key] !== null);
@@ -330,8 +377,9 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     return sorted.slice(0, Math.max(1, Math.floor(l.length / 10))).filter((s) => s.m[key] > 0).map((s) => ({ s, rank: sorted.indexOf(s) + 1, of: l.length }));
   };
   const used = new Set();
-  for (const { s, rank, of } of top('ret365').slice(0, max)) { used.add(s.ins); push('momentum12', s, [`بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`]); }
-  for (const { s, rank, of } of top('ret91').filter((x) => !used.has(x.s.ins)).slice(0, max)) { used.add(s.ins); push('momentum3', s, [`بازدهی ۳ ماه ${fa(P(s.m.ret91))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`]); }
+  // (a stock among the first 12-month cards isn't repeated among the first 3-month ones)
+  top('ret365').slice(0, max).forEach(({ s, rank, of }, i) => { if (i < SHOW) used.add(s.ins); push('momentum12', s, [`بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`, b12]); });
+  for (const { s, rank, of } of top('ret91').filter((x) => !used.has(x.s.ins)).slice(0, max)) push('momentum3', s, [`بازدهی ۳ ماه ${fa(P(s.m.ret91))}؛ رتبهٔ ${fa(rank)} از ${fa(of)} نماد پرمعامله`, b3]);
   // 2) unusual volume today (at least 3× its usual, and real money)
   live.filter((s) => s.m.volRatio >= 3 && s.rec.today?.val >= LIQ).sort((a, b) => b.m.volRatio - a.m.volRatio).slice(0, max)
     .forEach((s) => push('volume', s, [`حجم امروز ${fa(N(s.m.volRatio))} برابر حجم معمول (میانهٔ ۲۰ روز معاملهٔ قبلی)`, `ارزش معاملات امروز ${money(s.rec.today.val)}؛ تغییر قیمت امروز ${fa(P(s.m.dayChange, 1))}`]));
@@ -347,8 +395,8 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
 
   // funds
   const funds = (radar.funds || []).map((f) => ({ f, m: fundMetrics(f, radar, D) }));
-  const fpush = (sig, x, why) => cards.push({ id: `f:${x.f.key}`, sig, kind: 'fund', sym: x.f.symbol || '', name: x.f.name, sub: [FUND_KIND[x.f.fundType] || x.f.type, x.f.traded ? 'قابل معامله' : 'صدور و ابطالی'].filter(Boolean).join('، '),
-    ref: fundRef(x.f), why, check: fundChecks(x.f, x.m, money), m: x.m, key: x.f.key });
+  const fpush = (sig, x, why) => cards.push({ id: `f:${x.f.key}`, sig, rank: at(sig), kind: 'fund', sym: x.f.symbol || '', name: x.f.name, sub: [FUND_KIND[x.f.fundType] || x.f.type, x.f.traded ? 'قابل معامله' : 'صدور و ابطالی'].filter(Boolean).join('، '),
+    ref: fundRef(x.f), why: why.filter(Boolean), check: fundChecks(x.f, x.m, money), m: x.m, key: x.f.key });
   funds.filter((x) => x.m.bubble !== null && x.m.bubble <= -0.01 && x.m.tradable).sort((a, b) => a.m.bubble - b.m.bubble).slice(0, max)
     .forEach((x) => fpush('negBubble', x, [`قیمت پایانی ${fa(P0(x.m.bubble, 1))} کمتر از NAV ابطال همان روز (${fa(x.m.navDay.slice(5).replace('-', '/'))})`, 'یعنی آن روز هر واحد ارزان‌تر از ارزش دارایی‌هایش معامله شد؛ قیمت امروز را خودت ببین']));
   const gold = funds.filter((x) => x.m.gold && x.m.bubble !== null && x.m.tradable).sort((a, b) => a.m.bubble - b.m.bubble);
@@ -356,13 +404,19 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   if (gold.length >= 3) gold.slice(0, 3).forEach((x, i) => { if (!(x.m.bubble <= -0.01)) fpush('goldBubble', x, [`حباب ${fa(P(x.m.bubble, 1))}؛ ${i === 0 ? 'کمترین' : `رتبهٔ ${fa(i + 1)}`} از ${fa(gold.length)} صندوق طلای پرمعامله`, 'بیشتر دارایی این صندوق‌ها طلا و گواهی سکه است؛ حباب کمتر یعنی بهای کمتری بالای ارزش دارایی‌ها']); });
   const depEff = Math.pow(1 + depositPct / 100 / 12, 12) - 1;
   funds.filter((x) => x.f.fundType === 4 && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, max)
-    .forEach((x) => fpush('fixedBeat', x, [`بازدهی ۱۲ ماه ${fa(P(x.m.y1, 1))} در برابر ${fa(P(depEff, 1))} سپرده ${fa(depositPct)}٪ با سود ماهانه`]));
+    .forEach((x) => fpush('fixedBeat', x, [`بازدهی ۱۲ ماه ${fa(P(x.m.y1, 1))} در برابر ${fa(P(depEff, 1))} سپرده ${fa(depositPct)}٪ با سود ماهانه`, b12]));
   for (const t of [6, 7, 5, 23, 21, 22]) {
     funds.filter((x) => x.f.fundType === t && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 2)
-      .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`]));
+      .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`, b12]));
   }
-  return { day, cards, ready, total: stocks.length, funds: funds.length };
+  const count = {}; for (const c of cards) count[c.sig] = (count[c.sig] || 0) + 1;
+  return { day, cards, count, ready, total: stocks.length, funds: funds.length };
 }
+// short lists by design (three gold funds; two per fund type) are never folded
+const NOCAP = new Set(['topFund', 'goldBubble']);
+/** Shown before «همه را ببین»: the first SHOW of each signal. */
+export const isFirst = (c) => NOCAP.has(c.sig) || !(c.rank >= SHOW);
+export const shown = (cards) => cards.filter(isFirst);
 
 /* ---------------------------------------- rules ---------------------------------------- */
 // The owner's own filters: up to a few conditions, all must hold. Percent fields are entered and stored as percent.
@@ -426,13 +480,14 @@ export function changeSince(radar, id, day, priceThen) {
   if (rec && day && rec.d.length && rec.d[0] <= dayNum(day)) { const c0 = closeOn(rec, dayNum(day)); if (c0 > 0) return now / c0 - 1; }
   return priceThen > 0 ? now / priceThen - 1 : null;
 }
+const benches = (radar) => ({ m1: benchRet(radar, 30), m3: benchRet(radar, 91), m6: benchRet(radar, 182), y1: benchRet(radar, 365) });
 /** A stock's or fund's report card from the radar store, by TSETMC insCode or fund key. */
 export function report(radar, { ins = null, fundKey = null, fundName = '' } = {}) {
   if (!radar?.day) return null;
   const D = dayNum(radar.day);
   if (ins && radar.stocks?.[ins]) {
     const rec = radar.stocks[ins]; const m = stockMetrics(rec, D, sectorMedians(radar.stocks), radar.sess);
-    return { kind: 'stock', day: radar.day, sym: rec.sym, name: rec.name, sector: radar.sectors?.[rec.sector] || '', market: marketOf(rec.isin), m, partial: !!rec.need };
+    return { kind: 'stock', day: radar.day, sym: rec.sym, name: rec.name, sector: radar.sectors?.[rec.sector] || '', market: marketOf(rec.isin), m, partial: !!rec.need, bench: benches(radar) };
   }
   const f = (fundKey && fundOf(radar, fundKey, fundName)) || (ins && (radar.funds || []).find((x) => x.insCode === ins)) || null;
   if (!f) return null;
@@ -440,7 +495,7 @@ export function report(radar, { ins = null, fundKey = null, fundName = '' } = {}
   const peers = (radar.funds || []).filter((x) => x.fundType === f.fundType && isFinite(x.ret?.y1) && x.since && D - dayNum(x.since) >= 365);
   const better = peers.filter((x) => x.ret.y1 > (f.ret?.y1 ?? -Infinity)).length;
   return { kind: 'fund', day: radar.day, sym: f.symbol, name: f.name, type: FUND_KIND[f.fundType] || f.type, m, mix: f.mix, nav: f.cancelNav, navDay: m.navDay, size: f.size,
-    rank: isFinite(f.ret?.y1) && peers.length && m.ageDays >= 365 ? { pos: better + 1, of: peers.length } : null };
+    rank: isFinite(f.ret?.y1) && peers.length && m.ageDays >= 365 ? { pos: better + 1, of: peers.length } : null, bench: benches(radar) };
 }
 /** The fund a saved key points at. Older refs to one class of an umbrella fund hold only its registration number: then
  *  the saved name picks the class (as providers.findFund does for prices). */
@@ -652,4 +707,70 @@ export function newWarnings(prev, items, D) {
   for (const w of all) seen[w.key] = D;
   for (const k of Object.keys(seen)) if (seen[k] < D - 60) delete seen[k];
   return { fresh, state: { seen, last: all.map((w) => w.key), ids: items.filter((x) => !x.missing).map((x) => x.id) } };
+}
+
+/* ------------------------------- alerts on followed items ------------------------------- */
+/**
+ * «پیگیری» alerts, checked against the session's closing prices: a mark may carry alert { above, below, fall } — prices
+ * in Rial, `fall` in percent from the price when it was marked — and `fired` { above|below|fall: day } once each went
+ * off (an alert fires once; editing it re-arms it). Returns { fired: [{ id, sym, t }], marks } (marks updated).
+ */
+export function checkMarkAlerts(radar, marks = []) {
+  const fired = [];
+  if (!radar?.day) return { fired, marks };
+  const out = marks.map((m) => {
+    let a = m.alert; if (!a) return m;
+    if (m.id.startsWith('s:') && radar.stocks?.[m.id.slice(2)]?.need > 0) return m; // its prices are still being gathered
+    const now = priceOf(radar, m.id); if (!(now > 0)) return m;
+    const f = { ...(m.fired || {}) }; const sym = m.sym || m.name;
+    // a stock's levels were typed against its price then; a capital increase or dividend since moved the whole price
+    // scale — move the levels with it (the adjusted close of the mark day ÷ the price recorded then)
+    const rec = m.id.startsWith('s:') ? radar.stocks?.[m.id.slice(2)] : null;
+    let k = 1;
+    if (rec && m.day && m.price > 0 && rec.d.length && rec.d[0] <= dayNum(m.day)) { const c0 = closeOn(rec, dayNum(m.day)); if (c0 > 0) k = c0 / m.price; }
+    a = { ...a, above: a.above > 0 ? a.above * k : a.above, below: a.below > 0 ? a.below * k : a.below };
+    if (a.above > 0 && !f.above && now >= a.above) { f.above = radar.day; fired.push({ id: m.id, sym, k: 'above', now }); }
+    if (a.below > 0 && !f.below && now <= a.below) { f.below = radar.day; fired.push({ id: m.id, sym, k: 'below', now }); }
+    if (a.fall > 0 && !f.fall) { const ch = changeSince(radar, m.id, m.day, m.price); if (ch !== null && ch <= -a.fall / 100) { f.fall = radar.day; fired.push({ id: m.id, sym, k: 'fall', ch }); } }
+    return Object.keys(f).length !== Object.keys(m.fired || {}).length ? { ...m, fired: f } : m;
+  });
+  return { fired, marks: out };
+}
+
+/* ------------------------------- the radar's own track record ------------------------------- */
+// Each complete scan's first cards per signal are kept with their price, so the radar can later say plainly how what it
+// showed actually did a month on — against the index over the same month.
+export const TRACK_DAYS = 400;
+export function recordTrack(radar, cards) {
+  if (!radar?.day) return radar;
+  const t = radar.track ||= {};
+  if (t[radar.day]) return radar;
+  const day = {};
+  for (const c of shown(cards)) { const p = priceOf(radar, c.id); if (p > 0) (day[c.sig] ||= []).push([c.id, +p.toPrecision(8)]); }
+  t[radar.day] = day;
+  const D = dayNum(radar.day);
+  for (const k of Object.keys(t)) if (dayNum(k) < D - TRACK_DAYS) delete t[k];
+  return radar;
+}
+/** How a signal's stock cards did over the following 30 days, on average, against the index: { since, n, avg, index }. */
+export function trackStats(radar, sig, horizon = 30) {
+  const t = radar?.track || {}; const days = Object.keys(t).sort();
+  const out = { since: days[0] || null, n: 0, avg: null, index: null };
+  if (!radar?.day) return out;
+  const D = dayNum(radar.day); const r = [], ix = []; const last = {}; const ids = new Set();
+  for (const day of days) {
+    const d0 = dayNum(day); if (d0 > D - horizon) break;
+    const bi = benchAt(radar.bench?.index, d0), bz = benchAt(radar.bench?.index, d0 + horizon);
+    for (const [id] of t[day][sig] || []) {
+      if (!id.startsWith('s:')) continue;
+      const rec = radar.stocks?.[id.slice(2)]; if (!rec?.d?.length || rec.d[0] > d0) continue;
+      // a stock that stays on the list counts once per window (its first day there), not once per session
+      if (last[id] !== undefined && d0 - last[id] < horizon) continue;
+      const a = closeOn(rec, d0), z = closeOn(rec, d0 + horizon);
+      if (a > 0 && z > 0) { last[id] = d0; ids.add(id); r.push(z / a - 1); if (bi > 0 && bz > 0) ix.push(bz / bi - 1); }
+    }
+  }
+  if (r.length < 20 || ids.size < 8) return { ...out, n: r.length, stocks: ids.size };
+  const mean = (l) => l.reduce((a, b) => a + b, 0) / l.length;
+  return { ...out, n: r.length, stocks: ids.size, avg: mean(r), index: ix.length ? mean(ix) : null };
 }

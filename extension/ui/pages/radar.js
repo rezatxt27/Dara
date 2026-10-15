@@ -1,6 +1,7 @@
 // «رادار فرصت‌ها»: what in the stock market and among funds is worth a look today — each card says why it showed up and
 // what to check before deciding. Not advice: fixed rules, plain numbers, the other side always shown. Logic: lib/radar.js.
-import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Modal, NumField, AskBtn, Sparkline, YearBar, toast, send, num, fmtJ, money, useRadar } from '../components.js';
+import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Modal, NumField, MoneyField, AskBtn, Tip, Sparkline, YearBar, toast, send, num, fmtJ, money, useRadar } from '../components.js';
+import { ago } from '../../lib/format.js';
 import * as RD from '../../lib/radar.js';
 import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
@@ -18,6 +19,25 @@ const SIG_D = {
   fixedBeat: 'صندوق‌های درآمد ثابت با سابقهٔ یک‌ساله که از سپرده بیشتر داده‌اند.',
   topFund: 'بیشترین بازدهی ۱۲ ماه در هر نوع صندوق (با سابقهٔ دست‌کم یک سال).',
 };
+// the ⓘ beside each section: what it takes to get in, and where it can mislead
+const SIG_TIP = {
+  momentum12: 'از بین نمادهای پرمعامله، ۱۰٪ که بیشترین بازدهی ۱۲ ماه (تعدیل‌شده) را داشته‌اند. روند قوی گاهی ادامه پیدا می‌کند، ولی سهمی که چند برابر شده ممکن است خبرهای خوبش را قبلاً در قیمت گرفته باشد؛ P/E و فاصله از سقف را کنارش ببین.',
+  momentum3: 'همان روند قوی در ۳ ماه اخیر، برای نمادهایی که در فهرست اول ۱۲ ماه نیامده‌اند. حرکت‌های کوتاه‌مدت پرنوسان‌ترند و زودتر برمی‌گردند.',
+  volume: 'نمادهایی که امروز دست‌کم ۳ برابر میانهٔ ۲۰ روز معاملهٔ قبلی‌شان معامله شده‌اند و ارزش معاملاتشان قابل‌توجه است. دلیلش می‌تواند خبر، عرضهٔ سنگین یا خرید یک‌باره باشد؛ جهت قیمت امروز را هم ببین.',
+  cheap: 'نمادهای پرمعامله و سودده‌ای که P/E آن‌ها حداکثر ۶۰٪ میانهٔ هم‌گروه‌هاست. P/E از سود برآوردی سایت بورس است؛ اگر سود یک‌باره یا رو به کاهش باشد، ارزانی فقط ظاهری است.',
+  nearLow: 'تا ۱۰٪ بالای کمترین قیمت یک سال، دست‌کم ۱۵٪ زیر بالاترین قیمت، و هنوز سودده. افت ممکن است دلیل داشته باشد؛ «نزدیک کف» به‌تنهایی یعنی ارزان نیست.',
+  negBubble: 'صندوق‌های قابل معامله‌ای که قیمت پایانی‌شان کمتر از ارزش دارایی‌ها (NAV ابطال همان روز) بوده. فاصله معمولاً کم است و زود بسته می‌شود.',
+  goldBubble: 'سه صندوق طلای پرمعامله با کمترین حباب، یعنی کمترین فاصلهٔ قیمت از ارزش دارایی‌ها در روز NAV. حباب هر روز عوض می‌شود.',
+  fixedBeat: 'صندوق‌های درآمد ثابت با دست‌کم یک سال سابقه و اندازهٔ قابل‌توجه که بازدهی ۱۲ ماهشان از سپرده با سود ماهانه بیشتر بوده. بازدهی این صندوق‌ها معمولاً پایدارتر است، ولی تضمینی نیست.',
+  topFund: 'دو صندوق با بیشترین بازدهی ۱۲ ماه در هر نوع (سهامی، مختلط، کالایی، شاخصی، بخشی، اهرمی). صندوق‌های اهرمی و بخشی پرریسک‌ترند.',
+};
+/** «کارنامهٔ رادار» for a section: how its stock cards did a month later, against the index — once there's enough of it. */
+function trackText(radar, sig) {
+  const t = RD.trackStats(radar, sig);
+  if (sig !== 'momentum12' && sig !== 'momentum3' && sig !== 'volume' && sig !== 'cheap' && sig !== 'nearLow') return t.since ? `کارنامهٔ این بخش از ${fmtJ(t.since)} ثبت می‌شود.` : '';
+  if (t.avg === null) return t.since ? `کارنامهٔ رادار: از ${fmtJ(t.since)} ثبت می‌شود؛ وقتی کارت‌های کافی یک ماه از عمرشان گذشت، اینجا می‌آید که یک ماه بعد به‌طور میانگین چه کردند.` : '';
+  return `کارنامهٔ رادار: کارت‌های این بخش (${num(t.n)} مورد، ${num(t.stocks)} نماد، از ${fmtJ(t.since)}) یک ماه بعد به‌طور میانگین ${pctTxt(t.avg, 1)} تغییر کردند${t.index !== null ? `؛ شاخص کل در همان مدت ${pctTxt(t.index, 1)}` : ''}. گذشته است و تضمینی برای آینده نیست.`;
+}
 const PRESETS = [
   { name: 'صندوق طلا با حباب زیر ۱٪', kind: 'fund', ftype: 5, conds: [{ f: 'bubble', op: '<=', v: 1 }] },
   { name: 'سهم با P/E زیر ۵', kind: 'stock', conds: [{ f: 'pe', op: '<=', v: 5 }, { f: 'pe', op: '>=', v: 0.1 }] },
@@ -31,6 +51,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   const user = st.radarUser;
   const [tab, setTab] = useState(route?.q?.tab || 'today');
   const [only, setOnly] = useState('all');
+  const [showAll, setShowAll] = useState({});
   const [run, setRun] = useState(null); // { pending, total } while gathering
   const [editRule, setEditRule] = useState(null);
   const fmt = (v) => money(v, s, { compact: true });
@@ -65,7 +86,7 @@ export function RadarPage({ st, s, openPrice, route }) {
 
   const head = html`<div class="card rd-top">
     <div class="row between wrap" style="gap:10px">
-      <div><div class="row" style="gap:8px"><h3 style="margin:0"><${Icon} n="radar" cls="sm" />رادار فرصت‌ها</h3>${day && html`<span class="sub">جلسهٔ ${fmtJ(day)}</span>`}</div>
+      <div><div class="row wrap" style="gap:8px"><h3 style="margin:0"><${Icon} n="radar" cls="sm" />رادار فرصت‌ها</h3>${day && html`<span class="sub">جلسهٔ ${fmtJ(day)}</span>`}${radar?.fundsAt > 0 && html`<span class="sub" title="فیپیران NAV صندوق‌ها را روزی یک بار و معمولاً با یک روز فاصله منتشر می‌کند">· صندوق‌ها ${ago(radar.fundsAt)}</span>`}</div>
         <div class="xs muted" style="margin-top:4px">هر روز بعد از بسته شدن بازار، کل بورس و فرابورس و همهٔ صندوق‌ها با قاعده‌های ثابت گشته می‌شوند.</div></div>
       <div class="row" style="gap:6px">
         <${Seg} value=${tab} onChange=${setTab} options=${[['today', 'امروز'], ['rules', `قاعده‌های من${user.rules.length ? ` (${num(user.rules.length)})` : ''}`], ['marks', `پیگیری${user.marks.length ? ` (${num(user.marks.length)})` : ''}`]]} />
@@ -90,10 +111,13 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
       ${ORDER.map((sig) => {
-        const list = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
-        if (!list.length) return null;
-        return html`<section class="rd-sec"><div class="rd-sec-h"><h4>${RD.SIGNALS[sig].t}</h4><span class="xs muted">${SIG_D[sig]}</span></div>
-          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div></section>`;
+        const all = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
+        if (!all.length) return null;
+        const list = showAll[sig] ? all : all.filter(RD.isFirst);
+        const more = all.length - list.length;
+        return html`<section class="rd-sec"><div class="rd-sec-h"><h4>${RD.SIGNALS[sig].t}</h4><${Tip} title=${RD.SIGNALS[sig].t} text=${((tt) => html`${SIG_TIP[sig]}${tt && html`<div class="xs muted" style="margin-top:8px">${tt}</div>`}`)(trackText(radar, sig))} /><span class="xs muted">${SIG_D[sig]}</span></div>
+          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div>
+          ${(more > 0 || (showAll[sig] && all.some((c) => !RD.isFirst(c)))) && html`<button class="btn sm ghost rd-more" aria-expanded=${showAll[sig] ? 'true' : 'false'} onClick=${() => setShowAll({ ...showAll, [sig]: !showAll[sig] })}>${showAll[sig] ? 'کمتر' : `همه را ببین (${num(all.length)})`}<${Icon} n="chevronDown" cls=${'sm' + (showAll[sig] ? ' rot' : '')} /></button>`}</section>`;
       })}
       ${!built.cards.filter((c) => only === 'all' || c.kind === only).length && html`<div class="card"><div class="empty small">امروز چیزی از این قاعده‌ها رد نشد.</div></div>`}`}
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} openPrice=${openPrice} onEdit=${setEditRule} />`}
@@ -178,15 +202,24 @@ function RuleModal({ rule, sectors, onClose }) {
 }
 
 function Marks({ radar, user, s, openPrice }) {
+  const [edit, setEdit] = useState(null);
   if (!user.marks.length) return html`<div class="card"><div class="empty small" style="padding:20px">روی ➕ هر کارت بزن تا اینجا ببینی از آن روز به بعد چه کرده.</div></div>`;
   return html`<div class="card"><div class="card-h"><h3><${Icon} n="target" cls="sm" />پیگیری</h3><span class="sub">تغییر قیمت از روزی که نشانش کردی</span></div>
     <div class="list">${user.marks.map((m) => {
       const ch = RD.changeSince(radar, m.id, m.day, m.price);
-      return html`<div class="it"><button class="rd-name grow" onClick=${() => m.ref && openPrice(m.ref)}><b>${m.sym || m.name}</b><span class="xs muted">${m.sym ? m.name + '، ' : ''}نشان‌شده ${m.day ? fmtJ(m.day) : ''}</span></button>
+      const bi = m.day ? RD.benchRet(radar, RD.dayNum(radar.day) - RD.dayNum(m.day)) : null;
+      const a = m.alert || {}; const has = a.above > 0 || a.below > 0 || a.fall > 0;
+      const fired = Object.keys(m.fired || {}).length > 0;
+      return html`<div class="rd-mark"><div class="it">
+        <button class="rd-name grow" onClick=${() => m.ref && openPrice(m.ref)}><b>${m.sym || m.name}</b><span class="xs muted">${m.sym ? m.name + '، ' : ''}نشان‌شده ${m.day ? fmtJ(m.day) : ''}${bi?.index !== null && bi?.index !== undefined && m.day !== radar.day ? `؛ شاخص کل در همین مدت ${pctTxt(bi.index, 1)}` : ''}</span></button>
         <span class=${'small num ' + (ch > 0 ? 'pos' : ch < 0 ? 'neg' : '')}>${ch === null ? '—' : pctTxt(ch, 1)}</span>
-        <button class="btn icon sm ghost" aria-label=${'برداشتن ' + (m.sym || m.name)} title="برداشتن" onClick=${() => act.toggleRadarMark(m)}><${Icon} n="x" cls="sm" /></button></div>`;
+        <button class=${'btn icon sm ghost' + (has ? ' on' : '')} title=${has ? 'هشدار قیمت (روشن)' : 'هشدار قیمت'} aria-label=${'هشدار قیمت برای ' + (m.sym || m.name)} aria-expanded=${edit === m.id ? 'true' : 'false'} onClick=${() => setEdit(edit === m.id ? null : m.id)}><${Icon} n="bell" cls=${has ? 'sm' : 'sm faint'} /></button>
+        <button class="btn icon sm ghost" aria-label=${'برداشتن ' + (m.sym || m.name)} title="برداشتن" onClick=${() => act.toggleRadarMark(m)}><${Icon} n="x" cls="sm" /></button></div>
+        ${has && edit !== m.id && html`<div class="xs muted rd-alert-sum">${alertText(m, s)}${fired ? html` <span class="pill live">رسید</span>` : ''}</div>`}
+        ${edit === m.id && html`<${AlertEdit} m=${m} s=${s} price=${RD.priceOf(radar, m.id)} onDone=${() => setEdit(null)} />`}
+      </div>`;
     })}</div>
-    <div class="xs muted" style="margin-top:8px">قیمت سهام تعدیل‌شده است؛ برای صندوق‌های غیربورسی NAV ابطال.</div></div>`;
+    <div class="xs muted" style="margin-top:8px">قیمت سهام تعدیل‌شده است؛ برای صندوق‌های غیربورسی NAV ابطال. هشدارها با قیمت پایانی هر جلسه سنجیده می‌شوند.</div></div>`;
 }
 
 /** A stock's year in a small line, where today's price sits between its low and high, and its returns; a fund's returns. */
@@ -292,4 +325,33 @@ function Mine({ radar, st, s, cards, depositPct, openPrice }) {
     </div>`)}
     ${items.length > 6 && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(items.length)})`}</button>`}
     </div></section>`;
+}
+
+const alertText = (m, s) => {
+  const a = m.alert || {}; const f = m.fired || {};
+  return [a.above > 0 && `بالاتر از ${money(a.above, s)}${f.above ? ' ✓' : ''}`, a.below > 0 && `پایین‌تر از ${money(a.below, s)}${f.below ? ' ✓' : ''}`,
+    a.fall > 0 && `${num(a.fall)}٪ افت از روز نشان‌گذاری${f.fall ? ' ✓' : ''}`].filter(Boolean).join(' · ') || '';
+};
+/** Set or clear a followed item's price alerts. Saving re-arms them (an alert goes off once). */
+function AlertEdit({ m, s, price, onDone }) {
+  const [a, setA] = useState({ above: m.alert?.above || null, below: m.alert?.below || null, fall: m.alert?.fall || null });
+  const save = async (clear = false) => {
+    const alert = clear ? null : { above: a.above > 0 ? a.above : null, below: a.below > 0 ? a.below : null, fall: a.fall > 0 ? a.fall : null };
+    const on = alert && (alert.above || alert.below || alert.fall);
+    await act.setRadarUser((u) => ({ marks: u.marks.map((x) => (x.id === m.id ? { ...x, alert: on ? alert : null, fired: {} } : x)) }));
+    toast(on ? 'هشدار ذخیره شد' : 'هشدار برداشته شد'); onDone();
+  };
+  const bad = a.above > 0 && a.below > 0 && a.below >= a.above;
+  return html`<div class="rd-alert-ed">
+    ${price > 0 && html`<div class="xs muted">قیمت پایانی آخرین جلسه: ${money(price, s)}</div>`}
+    <div class="rd-alert-f">
+      <${MoneyField} label="اگر رسید به بالاتر از" rial=${a.above} onRial=${(v) => setA({ ...a, above: v })} s=${s} />
+      <${MoneyField} label="اگر رسید به پایین‌تر از" rial=${a.below} onRial=${(v) => setA({ ...a, below: v })} s=${s} err=${bad ? 'باید کمتر از حد بالا باشد' : ''} />
+      <${NumField} label="اگر از روز نشان‌گذاری افت کرد" value=${a.fall} onInput=${(v) => setA({ ...a, fall: v })} suffix="٪" digits=${0} placeholder="مثلاً ۱۰" />
+    </div>
+    <div class="row" style="gap:6px"><button class="btn sm primary" disabled=${bad} onClick=${() => save(false)}>ذخیره</button>
+      ${(m.alert) && html`<button class="btn sm ghost" onClick=${() => save(true)}>برداشتن هشدار</button>`}
+      <span class="grow"></span><button class="btn sm ghost" onClick=${onDone}>انصراف</button></div>
+    <div class="xs muted">هر هشدار یک بار خبرت می‌کند؛ با ذخیرهٔ دوباره، از نو فعال می‌شود. اعلانش با «هشدارهای قیمت و حباب» در تنظیمات است.</div>
+  </div>`;
 }

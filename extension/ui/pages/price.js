@@ -3,6 +3,7 @@
 // and shortcuts into the tools with this price already chosen.
 import { html, useState, useEffect, useMemo, Icon, Money, Delta, Seg, Drawer, AreaChart, AskBtn, num, pct, fmtJ, money, send, refLabel, providerName, useRadar } from '../components.js';
 import * as RD from '../../lib/radar.js';
+import * as I from '../../lib/insights.js';
 import { T as H } from '../tips.js';
 import * as E from '../../lib/engine.js';
 import * as BB from '../../lib/bubble.js';
@@ -119,7 +120,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         ${marks.length > 0 && html`<div class="xs muted"><span class="pd-dot buy"></span> خرید <span class="pd-dot sell"></span> فروش، روی نمودار</div>`}
       </div>`}
 
-      ${(rep || info) && html`<${Report} rep=${rep} info=${info} price=${price} s=${s} />`}
+      ${(rep || info) && html`<${Report} rep=${rep} info=${info} price=${price} s=${s} depositPct=${I.defaultDepositPct(st)} />`}
 
       ${coin && !coin.stale && html`<div class="pd-card">
         <div class="sb small">حباب سکه</div>
@@ -152,14 +153,20 @@ export function PriceDetail({ st, s, refOf, onClose }) {
 
 /** «کارنامه»: a stock's valuation and returns, or a fund's returns, rank among its kind, size and mix — every number
  *  with its source and day. Facts only; nothing here says buy or sell. */
-function Report({ rep, info, price, s }) {
+function Report({ rep, info, price, s, depositPct = 25 }) {
   const P = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? html`<span class="faint">—</span>` : html`<${Delta} p=${x} showAbs=${false} digits=${d} />`);
   const line = (t, v) => html`<div class="pd-line"><span>${t}</span><span>${v}</span></div>`;
+  // the same periods for the total index and the dollar, under the symbol's own returns
+  const B = rep?.bench; const PER = [['۱ ماه', 'm1'], ['۳ ماه', 'm3'], ['۶ ماه', 'm6'], ['۱۲ ماه', 'y1']];
+  const benchRows = B && ['index', 'usd'].some((k) => PER.some(([, p]) => B[p]?.[k] !== null && B[p]?.[k] !== undefined)) && html`<div class="pd-bench">
+    ${[['index', 'شاخص کل'], ['usd', 'دلار']].map(([k, t]) => PER.some(([, p]) => B[p]?.[k] !== null) && html`<div class="pd-bench-r"><span class="xs muted">${t}</span>${PER.map(([, p]) => html`<span class="xs">${P(B[p]?.[k])}</span>`)}</div>`)}
+    <div class="xs faint">در همان بازه‌ها، برای مقایسه</div></div>`;
   if (rep?.kind === 'fund') {
     const m = rep.m;
     return html`<div class="pd-card"><div class="sb small row" style="gap:6px"><${Icon} n="file" cls="sm" />کارنامهٔ صندوق</div>
       ${line('نوع', rep.type || '—')}
       <div class="pd-periods">${[['۱ ماه', m.m1], ['۳ ماه', m.m3], ['۶ ماه', m.m6], ['۱۲ ماه', m.y1]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><span class="small">${P(v, 1)}</span></div>`)}</div>
+      ${benchRows}
       ${rep.rank && line('رتبه در صندوق‌های هم‌نوع (۱۲ ماه)', `${num(rep.rank.pos)} از ${num(rep.rank.of)}`)}
       ${line('اندازهٔ صندوق', html`<${Money} v=${rep.size} s=${s} compact />`)}
       ${rep.mix && isFinite(rep.mix.stock) && line('ترکیب', `${num(rep.mix.stock, 0)}٪ سهام، ${num((rep.mix.bond || 0) + (rep.mix.deposit || 0), 0)}٪ اوراق و سپرده، ${num((rep.mix.cash || 0) + (rep.mix.other || 0), 0)}٪ سایر`)}
@@ -172,7 +179,11 @@ function Report({ rep, info, price, s }) {
     return html`<div class="pd-card"><div class="sb small row" style="gap:6px"><${Icon} n="file" cls="sm" />کارنامهٔ نماد</div>
       ${line('P/E', html`<span class="num">${m.pe !== null ? num(m.pe, 1) : '—'}${m.sectorPE ? html` <span class="xs muted">میانهٔ گروه ${num(m.sectorPE, 1)}</span>` : ''}</span>`)}
       ${line('EPS برآوردی', isFinite(m.eps) ? `${num(m.eps)} ریال` : '—')}
-      <div class="pd-periods">${[['۱ ماه', m.ret30], ['۳ ماه', m.ret91], ['۱۲ ماه', m.ret365]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><span class="small">${P(v)}</span></div>`)}</div>
+      <div class="pd-periods">${[['۱ ماه', m.ret30], ['۳ ماه', m.ret91], ['۶ ماه', m.ret182], ['۱۲ ماه', m.ret365]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><span class="small">${P(v)}</span></div>`)}</div>
+      ${benchRows}
+      ${m.ey !== null && line('سود سالانهٔ شرکت به نسبت قیمت', html`<span class="num">${pct(m.ey, { sign: false, digits: 1 })} <span class="xs muted">سپرده ${num(depositPct)}٪</span></span>`)}
+      ${m.dd1y !== null && line('بدترین افت در یک سال گذشته', html`<span class="ltr num">${pct(m.dd1y, { digits: 0 })}</span>`)}
+      ${m.dvol >= 0.001 && line('نوسان روزانهٔ معمول', html`<span class="num">${pct(m.dvol, { sign: false, digits: 1 })}</span>`)}
       ${m.fromHigh !== null && line(m.fullYear ? 'فاصله از بالاترین و کمترین سال' : 'فاصله از بالاترین و کمترین (سابقهٔ کمتر از یک سال)', html`<span class="ltr num">${pct(m.fromHigh, { digits: 0 })} / ${pct(m.fromLow, { digits: 0 })}</span>`)}
       ${line('میانگین ارزش معاملات روزانه', html`<${Money} v=${m.avgVal} s=${s} compact />`)}
       ${(rep.sector || rep.market) && line('گروه و بازار', [rep.sector, rep.market].filter(Boolean).join('، '))}

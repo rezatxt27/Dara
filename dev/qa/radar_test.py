@@ -20,25 +20,31 @@ async def step(name, coro):
 # ---------- a synthetic market (closes for a year, Rial) ----------
 DAY = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
 D0 = (datetime.date.fromisoformat(DAY) - datetime.date(1970, 1, 1)).days
-def stock(sym, name, growth, pe=10, eps=100, sector='27', val=2e10, last_vol=1e6, low=False):
+def stock(sym, name, growth, pe=10, eps=100, sector='27', val=2e10, last_vol=1e6, low=False, noisy=False):
     d, p = [], []
     for k in range(365, -1, -1):
         d.append(D0 - k)
-        p.append(round(100 * (1 + 0.5 * k / 365) if low else 100 * (1 + growth) ** ((365 - k) / 365), 4))
+        base = 100 * (1 + 0.5 * k / 365) if low else 100 * (1 + growth) ** ((365 - k) / 365)
+        # a realistic day-to-day wobble (none at the year's two ends, so the returns stay exact)
+        wob = 1 - (0.02 * ((k * 7) % 5) / 4 if noisy and 0 < k < 365 else 0)  # only dips: today stays the year's high
+        p.append(round(base * wob, 4))
     h = [[D0 - k, 1e6, val] for k in range(20, 0, -1)] + [[D0, last_vol, val]]
     return {'sym': sym, 'name': name, 'isin': 'IRO1' + sym, 'sector': sector, 'eps': eps, 'pe': pe, 'd': d, 'p': p, 'h': h, 'need': 0,
             'today': {'day': DAY, 'close': p[-1], 'py': p[-2], 'vol': last_vol, 'val': val}}
 stocks = {f'S{i}': stock(f'نماد{i}', f'شرکت نمونه {i}', i / 100, pe=8 + i % 5) for i in range(30)}
-stocks.update({'HOT': stock('داغ', 'شرکت رشد تند', 2.0, pe=40), 'VOL': stock('حجیم', 'شرکت پرحجم', 0.05, last_vol=5e6),
+stocks.update({'HOT': stock('داغ', 'شرکت رشد تند', 2.0, pe=40, noisy=True), 'VOL': stock('حجیم', 'شرکت پرحجم', 0.05, last_vol=5e6),
                'CHEAP': stock('ارزان', 'شرکت کم‌قیمت', 0.05, pe=3), 'LOW': stock('کف', 'شرکت در کف', 0, low=True, pe=8),
                'PEND': {**stock('درراه', 'شرکت تازه', 0.1), 'need': 270, 'd': [], 'p': []}})
+# more ordinary stocks so the 12-month list is long enough for «همه را ببین»
+stocks.update({f'M{i}': stock(f'میانه{i}', f'شرکت میانه {i}', 0.4 + i / 100, pe=9 + i % 4) for i in range(60)})
 def fund(key, name, t, y1, m3=5, m1=2, nav=100, ins='', sym='', since='2020-01-01', size=5e12):
     return {'key': key, 'name': name, 'symbol': sym, 'fundType': t, 'type': '', 'cancelNav': nav, 'date': DAY, 'size': size, 'since': since, 'traded': bool(ins), 'insCode': ins,
             'ret': {'y1': y1, 'm6': y1 / 2, 'm3': m3, 'm1': m1, 'w1': 0.5}, 'mix': {'stock': 10, 'bond': 60, 'deposit': 25, 'cash': 5, 'other': 0}}
 funds = [fund('g1', 'صندوق طلای الف', 5, 60, ins='E1', sym='طلاالف'), fund('g2', 'صندوق طلای ب', 5, 55, ins='E2', sym='طلاب'), fund('g3', 'صندوق طلای پ', 5, 52, ins='E3', sym='طلاپ'),
          fund('d1', 'درآمد ثابت برتر', 4, 36), fund('d2', 'درآمد ثابت معمولی', 4, 22), fund('s1', 'سهامی نمونه', 6, 80, ins='E4', sym='سهمی')]
 etf = {k: {'sym': s, 'name': s, 'close': c, 'val': 5e9, 'day': DAY, 'hist': {DAY: c}} for k, s, c in [('E1', 'طلاالف', 97), ('E2', 'طلاب', 100.5), ('E3', 'طلاپ', 101.2), ('E4', 'سهمی', 103)]}
-radar = {'v': 1, 'day': DAY, 'at': 1, 'stocks': stocks, 'etf': etf, 'funds': funds, 'fundsAt': 9e12, 'sectorsAt': 9e12, 'sectors': {'27': 'فلزات اساسی'},
+bench_rows = lambda f: {'d': [D0 - 399 + k for k in range(400)], 'p': [f(k) for k in range(400)]}
+radar = {'v': 1, 'bench': {'index': bench_rows(lambda k: 1000 + k), 'usd': bench_rows(lambda k: 500 + k / 4)}, 'day': DAY, 'at': 1, 'stocks': stocks, 'etf': etf, 'funds': funds, 'fundsAt': 9e12, 'sectorsAt': 9e12, 'sectors': {'27': 'فلزات اساسی'},
          'results': {'day': DAY, 'ids': [], 'before': ['s:S29', 's:S28']}, 'ruleHits': {}, 'error': None}
 
 async def main():
@@ -169,6 +175,35 @@ async def main():
             check('search: nothing found says so', 'پیدا نشد' in await pg.locator('#rd-sres').inner_text())
             await box.fill(''); await pg.wait_for_timeout(200)
             await pg.screenshot(path=f'{SH}/radar-mine-{THEME}.png', full_page=True)
+            # six additions: show-all, tips, benchmarks, risk & earnings yield, alerts, freshness
+            sec = pg.locator('.rd-sec:has(h4:text-is("روند قوی، ۱۲ ماه"))')
+            n0 = await sec.locator('.rd-card').count()
+            more = sec.locator('.rd-more')
+            mtxt = await more.inner_text() if await more.count() else ''
+            check('«همه را ببین (n)» under a long section', n0 == 6 and 'همه را ببین' in mtxt, (n0, mtxt))
+            await more.click(); await pg.wait_for_timeout(400)
+            n1 = await sec.locator('.rd-card').count()
+            check('it opens the whole list', n1 > 6 and str(n1) in mtxt.translate(FA), (n1, mtxt))
+            await more.click(); await pg.wait_for_timeout(300)
+            check('every section has its ⓘ', await pg.locator('.rd-sec-h .tipbtn').count() >= 6)
+            hot = await pg.locator('.rd-card:has-text("شرکت رشد تند")').first.inner_text()
+            check('momentum card: index and dollar over the same 12 months', 'در همین ۱۲ ماه: شاخص کل' in hot and 'دلار' in hot, hot[:300].replace('\n', ' | '))
+            check('card: earnings yield against the deposit, and risk in plain words', 'سود برآوردی سالانهٔ هر سهم' in hot and 'نوسان روزانه' in hot, hot[:400].replace('\n', ' | '))
+            check('header: how fresh the funds are', 'صندوق‌ها' in ' '.join(await pg.locator('.rd-top .sub').all_inner_texts()))
+            await pg.locator('.rd-card:has-text("شرکت رشد تند") .rd-name').first.click(); await pg.wait_for_timeout(900)
+            rep = await pg.locator('.drawer .pd-card:has-text("کارنامهٔ نماد")').inner_text()
+            check('report card: index and dollar rows, worst fall, daily swing, earnings yield', all(t in rep for t in ['شاخص کل', 'دلار', 'بدترین افت', 'نوسان روزانه', 'سود سالانهٔ شرکت']), rep[:300].replace('\n', ' | '))
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(400)
+            if await pg.locator('.drawer').count(): await pg.locator('.drawer [aria-label="بستن"]').first.click(); await pg.wait_for_timeout(300)
+            await pg.click('.seg button:has-text("پیگیری")'); await pg.wait_for_timeout(400)
+            await pg.locator('.rd-mark button[aria-label^="هشدار قیمت"]').first.click(); await pg.wait_for_timeout(300)
+            await pg.locator('.rd-alert-ed input').nth(2).fill('10'); await pg.wait_for_timeout(200)
+            await pg.click('.rd-alert-ed button:has-text("ذخیره")'); await pg.wait_for_timeout(600)
+            mk = (await get(pg, 'radarUser'))['marks'][0]
+            check('a followed item gets a price alert', mk.get('alert', {}).get('fall') == 10 and mk.get('fired') == {}, mk.get('alert'))
+            mt = (await pg.locator('.rd-mark').first.inner_text()).translate(FA)
+            check('…and the follow list says so', '10٪ افت' in mt, mt.replace('\n', ' | '))
+            await pg.screenshot(path=f'{SH}/radar-marks-{THEME}.png', full_page=True)
             await pg.close()
         await step('new', t_new())
 

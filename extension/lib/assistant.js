@@ -310,14 +310,17 @@ export function makeTools(ctx) {
         if (!rep) return { error: `«${query}» در اسکن بازار پیدا نشد. فقط سهام بورس و فرابورس و صندوق‌های فیپیران پوشش داده می‌شوند.` };
         const p = (x, d = 1) => (x === null || x === undefined || !isFinite(x) ? null : +(x * 100).toFixed(d));
         const m = rep.m;
+        const bm = (k) => rep.bench?.[k] ? { total_index: p(rep.bench[k].index), dollar: p(rep.bench[k].usd) } : null;
+        const benchmarks_pct = { m1: bm('m1'), m3: bm('m3'), m6: bm('m6'), y1: bm('y1') };
         if (rep.kind === 'stock') {
           return { kind: 'سهم', symbol: rep.sym, name: rep.name, source: 'بورس تهران (TSETMC)', session_day: fmtJ(rep.day), prices_adjusted_for_capital_increase_and_dividends: true, history_incomplete: rep.partial,
-            pe: m.pe, sector_median_pe: m.sectorPE, eps_rial: isFinite(m.eps) ? m.eps : null, return_pct: { m1: p(m.ret30), m3: p(m.ret91), y1: p(m.ret365) },
+            pe: m.pe, sector_median_pe: m.sectorPE, eps_rial: isFinite(m.eps) ? m.eps : null, return_pct: { m1: p(m.ret30), m3: p(m.ret91), m6: p(m.ret182), y1: p(m.ret365) }, benchmarks_pct,
+            worst_fall_in_year_pct: p(m.dd1y), daily_volatility_pct: p(m.dvol, 2), earnings_yield_pct: p(m.ey),
             from_year_high_pct: m.fullYear ? p(m.fromHigh) : null, from_year_low_pct: m.fullYear ? p(m.fromLow) : null, avg_daily_value: disp(m.avgVal, st().settings), unit: unitName(st().settings),
             volume_vs_usual: m.volRatio !== null ? +m.volRatio.toFixed(1) : null, sector: rep.sector, market: rep.market };
         }
         return { kind: 'صندوق', symbol: rep.sym, name: rep.name, type: rep.type, source: 'فیپیران', nav_day: rep.navDay ? fmtJ(rep.navDay) : null,
-          return_pct: { m1: p(m.m1), m3: p(m.m3), m6: p(m.m6), y1: p(m.y1) }, rank_in_type_by_y1: rep.rank ? `${rep.rank.pos} از ${rep.rank.of}` : null,
+          return_pct: { m1: p(m.m1), m3: p(m.m3), m6: p(m.m6), y1: p(m.y1) }, rank_in_type_by_y1: rep.rank ? `${rep.rank.pos} از ${rep.rank.of}` : null, benchmarks_pct,
           age_days: m.ageDays, size: disp(rep.size, st().settings), unit: unitName(st().settings), mix_pct: rep.mix, bubble_pct_same_day: p(m.bubble) };
       },
     },
@@ -331,7 +334,7 @@ export function makeTools(ctx) {
         const s = st().settings;
         const b = RD.buildCards(radar, { depositPct: I.defaultDepositPct(st()), money: (v) => `${disp(v, s)?.toLocaleString('en-US')} ${unitName(s)}` });
         return { session_day: fmtJ(b.day), note: 'این‌ها پیشنهاد خرید نیستند؛ فقط از قاعده‌های ثابت رد شده‌اند.',
-          cards: b.cards.filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => {
+          cards: RD.shown(b.cards).filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => {
             const r = c.kind === 'stock' ? [c.m.ret30, c.m.ret91, c.m.ret182, c.m.ret365] : [c.m.m1, c.m.m3, c.m.m6, c.m.y1];
             const p = (v) => (v === null || v === undefined || !isFinite(v) ? null : pct(v));
             return { signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check, returns_pct: { m1: p(r[0]), m3: p(r[1]), m6: p(r[2]), m12: p(r[3]) } };

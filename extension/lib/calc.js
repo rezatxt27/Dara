@@ -235,3 +235,98 @@ export function depositBreak({ principal, ratePct, termMonths, heldMonths, break
   }
   return out;
 }
+
+/* --------------------------------------------------- saving for a goal --------------------------------------------------- */
+/**
+ * A savings goal: `target` in today's money, `start` already put aside, saved at `ratePct` a year (compounded monthly,
+ * e.g. a deposit's rate), with prices rising `inflPct` a year (the target grows with them) and the monthly saving raised
+ * `growPct` each year (e.g. with a salary).
+ *  with `months`: the monthly saving needed (in the first year).  with `monthly`: how many months it takes (null when it
+ *  never gets there within 100 years).
+ */
+export function savingsGoal({ target, start = 0, monthly = null, months, ratePct = 0, inflPct = 0, growPct = 0 } = {}) {
+  const T = +target, S = Math.max(0, +start || 0), i = Math.max(0, +ratePct || 0) / 1200, inf = Math.max(0, +inflPct || 0) / 100, gr = Math.max(0, +growPct || 0) / 100;
+  if (!(T > 0)) return null;
+  const goalAt = (n) => T * Math.pow(1 + inf, n / 12);                   // the target in money of month n
+  // value after n months of S and of «1 a month» (raised each year): the plan is linear in the monthly amount
+  const run = (n) => { let a = S, b = 0, put = 0; for (let k = 1; k <= n; k++) { const m = Math.pow(1 + gr, Math.floor((k - 1) / 12)); a *= 1 + i; b = b * (1 + i) + m; put += m; } return { a, b, put }; };
+  // months given (even empty) = «how much a month?»; an empty or unrealistic count has no answer
+  if (months !== undefined) {
+    if (months === null || months === '' || !(+months >= 1) || +months > 1200) return null;
+    const n = Math.round(+months), G = goalAt(n), r = run(n);
+    const need = (G - r.a) / r.b, m = Math.max(0, need);
+    return { mode: 'monthly', months: n, monthly: m, goal: G, reached: r.a + m * r.b, put: S + m * r.put, growth: r.a + m * r.b - S - m * r.put, already: need <= 0 };
+  }
+  const M = +monthly;
+  if (!(M >= 0) || (M === 0 && !(S > 0))) return null;
+  if (S >= T) return { mode: 'months', months: 0, monthly: M, goal: T, reached: S, put: S, growth: 0, already: true };
+  let a = S, b = 0, put = 0;
+  for (let n = 1; n <= 1200; n++) {
+    const g = Math.pow(1 + gr, Math.floor((n - 1) / 12)); a *= 1 + i; b = b * (1 + i) + g; put += g;
+    const v = a + M * b;
+    if (v >= goalAt(n)) return { mode: 'months', months: n, monthly: M, goal: goalAt(n), reached: v, put: S + M * put, growth: v - S - M * put };
+  }
+  return { mode: 'months', months: null, monthly: M, goal: null, never: true };
+}
+
+/* --------------------------------------------------- average purchase price --------------------------------------------------- */
+/**
+ * Average price after buying more. have: { qty, avg } (what is held and its average), add: { qty, price }. feePct on both
+ * sides (buy, sell) gives the price the whole position breaks even at. target: an average to reach — how many to buy at
+ * add.price (null when that price can't bring the average there).
+ */
+export function averageBuy({ have = {}, add = {}, buyFeePct = 0, sellFeePct = 0, target = null } = {}) {
+  const q0 = Math.max(0, +have.qty || 0), a0 = +have.avg || 0, q1 = Math.max(0, +add.qty || 0), p1 = +add.price || 0;
+  if (!(q0 > 0 && a0 > 0) && !(q1 > 0 && p1 > 0)) return null;
+  if (q0 > 0 && !(a0 > 0)) return null;                                   // held units with no known average: no honest answer
+  const qty = q0 + q1, cost = q0 * a0 + q1 * p1, avg = qty > 0 ? cost / qty : null;
+  const fb = clampPct(buyFeePct, 0) / 100, fs = clampPct(sellFeePct, 0) / 100;
+  const out = { qty, cost, avg, before: q0 > 0 ? a0 : null, change: q0 > 0 && a0 > 0 && avg ? avg / a0 - 1 : null, addCost: q1 * p1 * (1 + fb),
+    breakeven: avg && fs < 1 ? (avg * (1 + fb)) / (1 - fs) : null };
+  const t = +target;
+  if (t > 0 && q0 > 0 && a0 > 0 && p1 > 0) {
+    // q0·a0 + x·p1 = (q0 + x)·t  →  x = q0·(a0 − t) / (t − p1); only between the buy price and today's average
+    out.toTarget = Math.abs(t - a0) < 1e-9 * a0 ? 0 : (p1 < t && t < a0) || (p1 > t && t > a0) ? (q0 * (a0 - t)) / (t - p1) : null;
+  }
+  return out;
+}
+
+/* --------------------------------------------------- one stock-market trade --------------------------------------------------- */
+// Approximate costs in the Tehran exchange (brokerage, exchange and regulator fees; the 0.5% sale tax is in the sell side
+// of shares). Brokers differ slightly: the page lets the owner change them.
+export const TRADE_FEES = { stock: { buy: 0.3712, sell: 0.88 }, etf: { buy: 0.116, sell: 0.1875 }, fixed: { buy: 0.0725, sell: 0.0725 } };
+/** Buy at `buy`, sell at `sell` (per share), `qty` shares: costs, net result and the sell price that breaks even. */
+export function stockTrade({ buy, sell = null, qty = 1, buyFeePct, sellFeePct, targetPct = null } = {}) {
+  const b = +buy, q = Math.max(0, +qty || 0), fb = clampPct(buyFeePct, 0) / 100, fs = clampPct(sellFeePct, 0) / 100;
+  if (!(b > 0) || !(q > 0) || fs >= 1) return null;
+  const paid = b * q * (1 + fb);
+  const even = (b * (1 + fb)) / (1 - fs);
+  const out = { paid, buyFee: b * q * fb, even, evenPct: even / b - 1 };
+  if (+sell > 0) {
+    const got = +sell * q * (1 - fs);
+    Object.assign(out, { got, sellFee: +sell * q * fs, profit: got - paid, ret: got / paid - 1, move: +sell / b - 1 });
+  }
+  if (targetPct !== null && targetPct !== '' && isFinite(+targetPct) && +targetPct > -100) out.forTarget = (b * (1 + fb) * (1 + +targetPct / 100)) / (1 - fs);
+  return out;
+}
+
+/* --------------------------------------------------- pay in instalments or cash --------------------------------------------------- */
+/**
+ * Something costs `cash` today, or `down` now plus `months` instalments of `each`. realPct: the yearly rate the
+ * instalments really charge. With depositPct: keeping the cash (less the down payment) in a deposit and paying each
+ * instalment from it — endBalance > 0 means the instalments come out cheaper than paying cash; < 0, cash was cheaper.
+ */
+export function payInstalments({ cash, down = 0, each, months, depositPct = null } = {}) {
+  const C = +cash, D = Math.max(0, +down || 0), A = +each, n = Math.round(+months);
+  if (!(C > 0) || !(A > 0) || !(n >= 1 && n <= 600) || D >= C) return null;
+  const financed = C - D, total = D + A * n;
+  const flows = [[0, financed]]; for (let k = 1; k <= n; k++) flows.push([k, -A]);
+  const m = Math.abs(total - C) < 1e-9 * C ? 0 : irrMonthly(flows);       // negative when the instalments add up to less than cash
+  const out = { financed, total, extra: total - C, extraPct: total / C - 1, realPct: m === null ? null : m * 1200, effAnnual: m === null ? null : Math.pow(1 + m, 12) - 1, months: n };
+  if (depositPct !== null && depositPct !== undefined && +depositPct >= 0) {
+    let bal = financed; const r = +depositPct / 1200;
+    for (let k = 1; k <= n; k++) bal = bal * (1 + r) - A;
+    out.endBalance = bal;
+  }
+  return out;
+}

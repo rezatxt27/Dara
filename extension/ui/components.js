@@ -218,11 +218,11 @@ export function NumField({ label, value, onInput, suffix, hint, placeholder, dig
 }
 
 /** Money input in the user's display unit (toman/rial); stores Rial. Shows the amount in words. */
-export function MoneyField({ label, rial, onRial, s, hint, autoFocus, err, prev = null }) {
+export function MoneyField({ label, rial, onRial, s, hint, autoFocus, err, prev = null, placeholder = 'مثلاً ۲۰۰ میلیون' }) {
   const k = s?.currency === 'rial' ? 1 : 10;
   const unit = s?.currency === 'rial' ? 'ریال' : 'تومان';
   return html`<${NumField} label=${label} value=${rial === null || rial === undefined || rial === '' ? '' : Math.round(rial / k)} onInput=${(v) => onRial(v === null ? null : v * k)}
-    placeholder=${'مثلاً ۲۰۰ میلیون'} suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} unit=${s?.currency === 'rial' ? 'rial' : 'toman'} />`;
+    placeholder=${placeholder} suffix=${unit} hint=${hint} digits=${0} autoFocus=${autoFocus} err=${err} words wordsUnit=${unit} prev=${prev ? prev / k : null} unit=${s?.currency === 'rial' ? 'rial' : 'toman'} />`;
 }
 
 const WD = ['ش', 'ی', 'د', 'س', 'چ', 'پ', 'ج'];

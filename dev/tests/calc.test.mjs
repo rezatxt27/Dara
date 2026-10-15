@@ -148,3 +148,65 @@ test('review: breaking a deposit whose interest stays on it; whole months only; 
   const cash = K.depositBreak({ principal: 1e9, ratePct: 24, termMonths: 12, heldMonths: 5, breakPct: 10, newPct: 0 });
   assert.ok(cash.diff < 0, 'cash (0%) can be compared too');
 });
+
+test('savings goal: the monthly amount for a deadline, the months for an amount; inflation and a yearly raise', () => {
+  const r = K.savingsGoal({ target: 5e10, start: 1e10, months: 24, ratePct: 24 });
+  // the plan reaches the target exactly
+  assert.ok(Math.abs(r.reached - 5e10) < 1);
+  assert.ok(Math.abs(r.put + r.growth - r.reached) < 1);
+  // no interest: (target − start) / months
+  assert.ok(Math.abs(K.savingsGoal({ target: 1200, start: 0, months: 12 }).monthly - 100) < 1e-9);
+  const m = K.savingsGoal({ target: 1200, monthly: 100 });
+  assert.equal(m.months, 12);
+  // inflation above the return: a fixed amount never gets there; raising it each year does
+  assert.equal(K.savingsGoal({ target: 5e10, start: 1e10, monthly: 1e9, ratePct: 24, inflPct: 30 }).never, true);
+  assert.ok(K.savingsGoal({ target: 5e10, start: 1e10, monthly: 1e9, ratePct: 24, inflPct: 30, growPct: 30 }).months > 0);
+  // already there
+  assert.equal(K.savingsGoal({ target: 100, start: 200, monthly: 0 }).already, true);
+  assert.equal(K.savingsGoal({ target: 100, start: 200, months: 6 }).already, true);
+  assert.equal(K.savingsGoal({ target: 0, months: 6 }), null);
+});
+
+test('average purchase: the new average, break-even with costs, and how many to buy for a target average', () => {
+  const r = K.averageBuy({ have: { qty: 100, avg: 5000 }, add: { qty: 200, price: 4000 } });
+  assert.ok(Math.abs(r.avg - 13000 / 3) < 1e-9);
+  assert.ok(Math.abs(r.change - (13000 / 3 / 5000 - 1)) < 1e-12);
+  const f = K.averageBuy({ have: { qty: 100, avg: 5000 }, add: { qty: 200, price: 4000 }, buyFeePct: 1, sellFeePct: 1, target: 4500 });
+  assert.ok(Math.abs(f.breakeven - (13000 / 3) * 1.01 / 0.99) < 1e-6);
+  assert.ok(Math.abs(f.toTarget - 100) < 1e-9); // 100·5000 + x·4000 = (100 + x)·4500 → x = 100
+  // a target outside the reachable range
+  assert.equal(K.averageBuy({ have: { qty: 100, avg: 5000 }, add: { qty: 1, price: 4000 }, target: 3000 }).toTarget, null);
+  assert.equal(K.averageBuy({}), null);
+});
+
+test('a stock trade: costs on both sides, net profit, break-even and the price for a target', () => {
+  const r = K.stockTrade({ buy: 4000, sell: 4600, qty: 1000, buyFeePct: 0.3712, sellFeePct: 0.88, targetPct: 20 });
+  assert.ok(Math.abs(r.paid - 4000 * 1000 * 1.003712) < 1e-6);
+  assert.ok(Math.abs(r.got - 4600 * 1000 * (1 - 0.0088)) < 1e-6);
+  assert.ok(Math.abs(r.profit - (r.got - r.paid)) < 1e-6);
+  assert.ok(Math.abs(r.even * (1 - 0.0088) - 4000 * 1.003712) < 1e-9);
+  assert.ok(Math.abs(r.forTarget * (1 - 0.0088) - 4000 * 1.003712 * 1.2) < 1e-9);
+  assert.equal(K.stockTrade({ buy: 0 }), null);
+});
+
+test('instalments or cash: the real yearly rate, and keeping the cash in a deposit to pay them', () => {
+  const r = K.payInstalments({ cash: 8e8, each: 8e7, months: 12, depositPct: 28 });
+  assert.equal(r.total, 9.6e8); assert.equal(r.extra, 1.6e8);
+  assert.ok(r.realPct > 34 && r.realPct < 36, r.realPct); // an annuity of 80 on 800 for 12 months ≈ 2.92% a month
+  assert.ok(r.endBalance < 0); // a 28% deposit doesn't cover a ~35% loan
+  const cheap = K.payInstalments({ cash: 8e8, each: 7e7, months: 12, depositPct: 28 });
+  assert.ok(cheap.endBalance > 0);
+  // no extra cost: 0%
+  assert.equal(K.payInstalments({ cash: 1200, each: 100, months: 12 }).realPct, 0);
+  assert.equal(K.payInstalments({ cash: 100, down: 100, each: 10, months: 2 }), null);
+});
+
+test('calculators: edge cases from review', () => {
+  assert.equal(K.savingsGoal({ target: 1e9, start: 1e8, ratePct: 25, months: null }), null);
+  assert.equal(K.savingsGoal({ target: 1e9, months: 1e9 }), null);
+  assert.equal(K.averageBuy({ have: { qty: 100, avg: null }, add: { qty: 100, price: 4000 } }), null);
+  assert.equal(K.averageBuy({ have: { qty: 100, avg: 5000 }, add: { qty: 0, price: 4000 }, target: 5000 }).toTarget, 0);
+  assert.equal(K.stockTrade({ buy: 1000, targetPct: -150 }).forTarget, undefined);
+  const r = K.payInstalments({ cash: 1e8, each: 8e6, months: 12 });
+  assert.ok(r.extra < 0 && r.realPct < 0);
+});

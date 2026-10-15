@@ -4,6 +4,8 @@ import { L } from '../tips.js';
 import * as I from '../../lib/insights.js';
 import { todayIso, daysBetween } from '../../lib/jalali.js';
 import * as K from '../../lib/calc.js';
+import * as E from '../../lib/engine.js';
+import * as S from '../../lib/pricestats.js';
 import { BreakEven } from './analysis.js';
 
 const TOOLS = [
@@ -13,6 +15,10 @@ const TOOLS = [
   { id: 'loan', icon: 'debt', t: 'هزینه واقعی وام', d: 'قسط ماهانه، و نرخ واقعی با کارمزد، سپرده مسدودی یا پول خوابیده' },
   { id: 'deposit', icon: 'bank', t: 'سپرده', d: 'سود ماهانه و سود مؤثر، و اینکه شکستن سپرده چقدر هزینه دارد' },
   { id: 'breakeven', icon: 'target', t: 'نقطه سربه‌سر', d: 'قیمت چقدر باید بالا برود تا از سپرده جلو بزند' },
+  { id: 'goal', icon: 'calendar', t: 'هدف پس‌انداز', d: 'ماهی چقدر کنار بگذاری تا به هدفت برسی — یا با این مبلغ کی می‌رسی' },
+  { id: 'average', icon: 'layers', t: 'میانگین خرید', d: 'اگر باز هم بخری میانگینت چند می‌شود، و قیمت باید کجا برسد تا سربه‌سر شوی' },
+  { id: 'trade', icon: 'chart', t: 'معاملهٔ بورس', d: 'کارمزد و مالیات خرید و فروش، سود خالص، و قیمت سربه‌سر' },
+  { id: 'instal', icon: 'debt', t: 'قسطی یا نقدی؟', d: 'سود واقعی خرید قسطی، و اینکه نقد دادن بهتر است یا پول در سپرده بماند' },
 ];
 const GROUPS = [['gold', 'طلا'], ['coin', 'سکه'], ['fx', 'ارز'], ['crypto', 'رمزارز'], ['metal', 'نقره']];
 const qtyDigits = (it, q) => (it.id === 'btc' ? 6 : q < 10 ? 2 : q < 100 ? 1 : 0);
@@ -34,6 +40,10 @@ export function CalcPage({ st, s, open, route }) {
     ${tool.id === 'loan' && html`<${LoanTool} st=${st} s=${s} />`}
     ${tool.id === 'deposit' && html`<${DepositTool} st=${st} s=${s} />`}
     ${tool.id === 'breakeven' && html`<${BreakEven} st=${st} s=${s} initial=${route.q.pick} />`}
+    ${tool.id === 'goal' && html`<${GoalTool} st=${st} s=${s} />`}
+    ${tool.id === 'average' && html`<${AverageTool} st=${st} s=${s} />`}
+    ${tool.id === 'trade' && html`<${TradeTool} st=${st} s=${s} />`}
+    ${tool.id === 'instal' && html`<${InstalTool} st=${st} s=${s} />`}
   </div>`;
 }
 
@@ -343,5 +353,188 @@ function DepositTool({ st, s }) {
       </div>
     </div>
     <div class="xs muted calc-foot">${mode === 'break' ? 'روش رایج بانک‌ها: سود ماه‌های گذشته با نرخ کمتر دوباره حساب می‌شود و سودی که بیشتر گرفته‌ای از اصل پول کم می‌شود. قاعده هر بانک ممکن است کمی فرق کند.' : 'سود ماهانه با نرخ سالانه ÷ ۱۲ حساب شده؛ سپرده‌های روزشمار هم تقریباً همین را می‌دهند.'}</div>
+  </div>`;
+}
+
+/* ------------------------------------------- a savings goal ------------------------------------------- */
+const monthsText = (n) => (n < 12 ? `${num(n)} ماه` : `${num(Math.floor(n / 12))} سال${n % 12 ? ` و ${num(n % 12)} ماه` : ''}`);
+function GoalTool({ st, s }) {
+  const depPct = I.defaultDepositPct(st);
+  const [target, setTarget] = useState(null);
+  const [start, setStart] = useState(null);
+  const [mode, setMode] = useState('monthly');
+  const [monthsIn, setMonths] = useState(24);
+  const [monthly, setMonthly] = useState(null);
+  const [rateIn, setRate] = useState(depPct);
+  const [inflIn, setInfl] = useState(null);
+  const [growIn, setGrow] = useState(null);
+  const net = useMemo(() => E.portfolio(st.assets, st.quotes, s).net, [st.assets, st.quotes]);
+  const r = K.savingsGoal({ target, start, ratePct: pctIn(rateIn) || 0, inflPct: pctIn(inflIn) || 0, growPct: pctIn(growIn) || 0, ...(mode === 'monthly' ? { months: monthsIn } : { monthly }) });
+  return html`<div class="card calc-card">
+    <div class="card-h"><h3><${Icon} n="calendar" cls="sm" />هدف پس‌انداز</h3><${Seg} value=${mode} onChange=${setMode} options=${[['monthly', 'ماهی چقدر؟'], ['months', 'کی می‌رسم؟']]} /></div>
+    <div class="calc-split">
+      <div class="col" style="gap:12px">
+        <${MoneyField} label="هدف (به پول امروز)" rial=${target} onRial=${setTarget} s=${s} />
+        <div class="col" style="gap:4px"><${MoneyField} label="از حالا داری" rial=${start} onRial=${setStart} s=${s} />
+          ${net > 0 && html`<button class="calc-link" style="align-self:flex-start" onClick=${() => setStart(Math.round(net))}>ارزش خالص فعلی‌ات را بگذار</button>`}</div>
+        ${mode === 'monthly' ? html`<${NumField} label="در چند ماه" value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />`
+          : html`<${MoneyField} label="هر ماه کنار می‌گذاری" rial=${monthly} onRial=${setMonthly} s=${s} />`}
+        <div class="calc-in two" style="max-width:none">
+          <${NumField} label="سود سالانهٔ پس‌انداز" value=${rateIn} onInput=${setRate} suffix="٪" hint=${`پیش‌فرض: سود سپرده (${num(depPct, 1)}٪)`} />
+          <${NumField} label="تورم سالانه" value=${inflIn} onInput=${setInfl} suffix="٪" hint="هدف هر سال این‌قدر گران‌تر می‌شود؛ خالی = بدون تورم" />
+        </div>
+        <${NumField} label="افزایش سالانهٔ مبلغ پس‌انداز" value=${growIn} onInput=${setGrow} suffix="٪" hint="مثلاً هم‌پای افزایش حقوق؛ خالی = ثابت" />
+      </div>
+      <div class="calc-out">
+        ${!r ? html`<div class="empty small">${mode === 'monthly' ? (+monthsIn > 1200 ? 'مدت حداکثر ۱۲۰۰ ماه (۱۰۰ سال).' : 'هدف و مدت را بنویس.') : 'هدف و مبلغ ماهانه را بنویس.'}</div>`
+        : r.never ? html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>با این مبلغ ثابت، در ۱۰۰ سال هم به هدف نمی‌رسی${(pctIn(inflIn) || 0) > (pctIn(rateIn) || 0) ? '؛ تورم از سود پس‌انداز بیشتر است و هدف تندتر از پس‌انداز بزرگ می‌شود' : ''}. مبلغ ماهانه را بیشتر کن، یا «افزایش سالانه» بگذار.</div></div>`
+        : r.already ? html`<div class="callout"><${Icon} n="circleCheck" cls="sm" /><div>با همین پولی که داری${mode === 'monthly' ? ' و سودش' : ''} به هدف می‌رسی؛ پس‌انداز ماهانه لازم نیست.</div></div>`
+        : html`
+          <span class="small muted">${mode === 'monthly' ? `هر ماه${(pctIn(growIn) || 0) > 0 ? ' (سال اول)' : ''}` : 'می‌رسی در'}</span>
+          <span class="calc-big">${mode === 'monthly' ? html`<${Money} v=${r.monthly} s=${s} />` : monthsText(r.months)}</span>
+          <${Row} t="هدف در آن روز" sub=${(pctIn(inflIn) || 0) > 0 ? 'با تورم' : ''}><${Money} v=${r.goal} s=${s} /></${Row}>
+          <${Row} t="کل پولی که کنار می‌گذاری" sub="با پول فعلی"><${Money} v=${r.put} s=${s} /></${Row}>
+          <${Row} t="سودی که روی آن می‌آید"><${Money} v=${r.growth} s=${s} /></${Row}>`}
+      </div>
+    </div>
+    <div class="xs muted calc-foot">سود ماهانه دوباره پس‌انداز می‌شود. سود و تورم آینده معلوم نیستند؛ این یک برآورد است، نه قول.</div>
+  </div>`;
+}
+
+/* ------------------------------------------- average purchase price ------------------------------------------- */
+const FEE_KINDS = [['stock', 'سهم'], ['etf', 'صندوق'], ['none', 'بدون کارمزد']];
+const feesOf = (k) => (k === 'none' ? { buy: 0, sell: 0 } : K.TRADE_FEES[k === 'etf' ? 'etf' : 'stock']);
+function AverageTool({ st, s }) {
+  const held = useMemo(() => {
+    const seen = new Map();
+    for (const a of st.assets || []) if (!a.archived && a.mode === 'units' && a.price?.source === 'market' && a.price.ref && +a.quantity > 0 && !E.isLiability(a)) {
+      const id = E.quoteId(a.price.ref); if (seen.has(id)) continue;
+      const p = S.position(st.assets, st.quotes, s, a.price.ref); if (p?.qty > 0) seen.set(id, { id, name: a.name, pos: p, ref: a.price.ref });
+    }
+    return [...seen.values()];
+  }, [st.assets, st.quotes]);
+  const [pick, setPick] = useState('');
+  const [qty0, setQty0] = useState(null);
+  const [avg0, setAvg0] = useState(null);
+  const [qty1, setQty1] = useState(null);
+  const [p1, setP1] = useState(null);
+  const [kind, setKind] = useState('stock');
+  const [target, setTarget] = useState(null);
+  const choose = (id) => {
+    setPick(id); const h = held.find((x) => x.id === id); if (!h) return;
+    setQty0(+h.pos.qty.toFixed(4)); setAvg0(h.pos.avg ? Math.round(h.pos.avg) : null);
+    // today's price per unit of the position (dollar quotes converted, the asset's adjustment applied)
+    if (h.pos.value > 0 && h.pos.qty > 0) setP1(Math.round(h.pos.value / h.pos.qty));
+  };
+  const f = feesOf(kind);
+  const r = K.averageBuy({ have: { qty: qty0, avg: avg0 }, add: { qty: qty1, price: p1 }, buyFeePct: f.buy, sellFeePct: f.sell, target });
+  const h = held.find((x) => x.id === pick);
+  return html`<div class="card calc-card">
+    <div class="card-h"><h3><${Icon} n="layers" cls="sm" />میانگین خرید</h3><${Seg} value=${kind} onChange=${setKind} options=${FEE_KINDS} /></div>
+    <div class="calc-split">
+      <div class="col" style="gap:12px">
+        ${held.length > 0 && html`<div class="field"><label>از دارایی‌هایم</label><select value=${pick} onChange=${(e) => choose(e.target.value)}>
+          <option value="">— انتخاب کن یا دستی بنویس —</option>${held.map((x) => html`<option value=${x.id}>${x.name}</option>`)}</select>
+          ${h && !h.pos.avg && html`<div class="xs warn">قیمت خرید این دارایی ثبت نشده؛ میانگین فعلی را خودت بنویس.</div>`}</div>`}
+        <div class="calc-in two" style="max-width:none">
+          <${NumField} label="الان داری" value=${qty0} onInput=${setQty0} suffix=${h?.pos.unit || 'واحد'} />
+          <${MoneyField} label="میانگین خرید فعلی (هر واحد)" rial=${avg0} onRial=${setAvg0} s=${s} placeholder="مثلاً ۴٬۵۰۰" />
+        </div>
+        <div class="calc-in two" style="max-width:none">
+          <${NumField} label="می‌خواهی بخری" value=${qty1} onInput=${setQty1} suffix=${h?.pos.unit || 'واحد'} />
+          <${MoneyField} label="به قیمت (هر واحد)" rial=${p1} onRial=${setP1} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+        </div>
+        <${MoneyField} label="یا: می‌خواهم میانگینم برسد به" rial=${target} onRial=${setTarget} s=${s} placeholder="مثلاً ۴٬۲۰۰" hint="چند واحد دیگر به همان قیمت باید بخری؟" />
+      </div>
+      <div class="calc-out">
+        ${!r ? html`<div class="empty small">${+qty0 > 0 && !(+avg0 > 0) ? 'میانگین خرید فعلی را هم بنویس.' : 'مقدار و میانگین فعلی، یا خرید تازه را بنویس.'}</div>` : html`
+          <span class="small muted">میانگین تازه</span>
+          <span class="calc-big"><${Money} v=${r.avg} s=${s} /></span>
+          ${r.change !== null && html`<${Row} t="نسبت به میانگین فعلی">${pct(r.change, { digits: 1 })}</${Row}>`}
+          <${Row} t="کل مقدار">${num(r.qty, r.qty < 10 ? 3 : 0)}</${Row}>
+          ${r.addCost > 0 && html`<${Row} t="پول خرید تازه" sub=${kind !== 'none' ? 'با کارمزد' : ''}><${Money} v=${r.addCost} s=${s} /></${Row}>`}
+          ${r.breakeven && html`<div class="calc-total"><span>قیمت سربه‌سر کل${kind !== 'none' ? ' (با کارمزد خرید و فروش)' : ''}</span><b class="num"><${Money} v=${r.breakeven} s=${s} /></b></div>`}
+          ${+target > 0 && html`<div class="callout" style="margin-top:6px"><${Icon} n="info" cls="sm" /><div>${r.toTarget === 0 ? 'میانگینت همین الان همین عدد است.' : r.toTarget > 0 ? html`برای رسیدن میانگین به <${Money} v=${target} s=${s} />، باید <b>${num(r.toTarget, r.toTarget < 10 ? 2 : 0)}</b> واحد دیگر به قیمت <${Money} v=${p1} s=${s} /> بخری (<${Money} v=${r.toTarget * p1} s=${s} compact />).`
+            : !(p1 > 0) ? 'قیمت خرید تازه را بنویس.' : 'با این قیمت خرید، میانگین به این عدد نمی‌رسد؛ هدف باید بین قیمت خرید تازه و میانگین فعلی باشد.'}</div></div>`}`}
+      </div>
+    </div>
+    <div class="xs muted calc-foot">میانگین پایین‌تر یعنی سربه‌سر زودتر، نه اینکه خرید بیشتر کار درستی است؛ پول بیشتری روی یک دارایی می‌رود. کارمزدها تقریبی‌اند.</div>
+  </div>`;
+}
+
+/* ------------------------------------------- one stock-market trade ------------------------------------------- */
+function TradeTool({ st, s }) {
+  const [kind, setKind] = useState('stock');
+  const [buy, setBuy] = useState(null);
+  const [sell, setSell] = useState(null);
+  const [qty, setQty] = useState(null);
+  const [targetIn, setTarget] = useState(null);
+  const [fees, setFees] = useState(null); // edited { buy, sell } or null = defaults of the kind
+  const [more, setMore] = useState(false);
+  const f = fees || K.TRADE_FEES[kind];
+  const r = K.stockTrade({ buy, sell, qty: qty || 1, buyFeePct: f.buy, sellFeePct: f.sell, targetPct: pctIn(targetIn) });
+  return html`<div class="card calc-card">
+    <div class="card-h"><h3><${Icon} n="chart" cls="sm" />معاملهٔ بورس</h3><${Seg} value=${kind} onChange=${(k) => { setKind(k); setFees(null); }} options=${[['stock', 'سهم'], ['etf', 'صندوق سهامی و طلا'], ['fixed', 'صندوق درآمد ثابت']]} /></div>
+    <div class="calc-split">
+      <div class="col" style="gap:12px">
+        <div class="calc-in two" style="max-width:none">
+          <${MoneyField} label="قیمت خرید (هر سهم)" rial=${buy} onRial=${setBuy} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+          <${MoneyField} label="قیمت فروش (هر سهم)" rial=${sell} onRial=${setSell} s=${s} placeholder="مثلاً ۴٬۸۰۰" />
+        </div>
+        <${NumField} label="تعداد" value=${qty} onInput=${setQty} suffix="سهم" digits=${0} placeholder="۱" />
+        <${NumField} label="سود خالصی که می‌خواهی" value=${targetIn} onInput=${setTarget} suffix="٪" hint="قیمت فروشی که بعد از کارمزدها به این سود می‌رسد" />
+        <button class="calc-link" style="align-self:flex-start" onClick=${() => setMore(!more)}>${more ? 'بستن کارمزدها' : `کارمزد خرید ${num(f.buy, 3)}٪ و فروش ${num(f.sell, 3)}٪ — تغییر`}</button>
+        ${more && html`<div class="calc-adv">
+          <${NumField} label="کارمزد خرید" value=${f.buy} onInput=${(v) => setFees({ ...f, buy: v ?? 0 })} suffix="٪" />
+          <${NumField} label="کارمزد فروش (با مالیات)" value=${f.sell} onInput=${(v) => setFees({ ...f, sell: v ?? 0 })} suffix="٪" />
+        </div>`}
+      </div>
+      <div class="calc-out">
+        ${!r ? html`<div class="empty small">قیمت خرید را بنویس.</div>` : html`
+          ${r.profit !== undefined && html`<span class="small muted">سود خالص</span>
+            <span class=${'calc-big ' + (r.profit >= 0 ? 'pos' : 'neg')}><${Money} v=${r.profit} s=${s} sign /></span>
+            <${Row} t="بازده خالص">${pct(r.ret, { digits: 2 })}</${Row}>
+            <${Row} t="تغییر قیمت">${pct(r.move, { digits: 2 })}</${Row}>
+            <${Row} t="کارمزد و مالیات کل"><${Money} v=${r.buyFee + r.sellFee} s=${s} /></${Row}>`}
+          <${Row} t="پول خرید" sub="با کارمزد"><${Money} v=${r.paid} s=${s} /></${Row}>
+          <div class="calc-total"><span>قیمت فروش سربه‌سر <span class="xs muted">(${pct(r.evenPct, { digits: 2 })})</span></span><b class="num"><${Money} v=${r.even} s=${s} /></b></div>
+          ${r.forTarget && html`<${Row} t=${`برای ${num(pctIn(targetIn))}٪ سود خالص`}><${Money} v=${r.forTarget} s=${s} /></${Row}>`}`}
+      </div>
+    </div>
+    <div class="xs muted calc-foot">کارمزدها تقریبی‌اند و کارگزاری‌ها کمی با هم فرق دارند؛ در فروش سهم، ۰٫۵٪ مالیات هم هست. سود نقدی و افزایش سرمایه در این حساب نیست.</div>
+  </div>`;
+}
+
+/* ------------------------------------------- instalments or cash ------------------------------------------- */
+function InstalTool({ st, s }) {
+  const depPct = I.defaultDepositPct(st);
+  const [cash, setCash] = useState(null);
+  const [down, setDown] = useState(null);
+  const [each, setEach] = useState(null);
+  const [monthsIn, setMonths] = useState(12);
+  const r = K.payInstalments({ cash, down, each, months: monthsIn, depositPct: depPct });
+  return html`<div class="card calc-card">
+    <div class="card-h"><h3><${Icon} n="debt" cls="sm" />قسطی یا نقدی؟</h3></div>
+    <div class="calc-split">
+      <div class="col" style="gap:12px">
+        <${MoneyField} label="قیمت نقدی" rial=${cash} onRial=${setCash} s=${s} />
+        <${MoneyField} label="پیش‌پرداخت قسطی" rial=${down} onRial=${setDown} s=${s} hint="اگر ندارد، خالی بگذار" />
+        <div class="calc-in two" style="max-width:none">
+          <${MoneyField} label="هر قسط" rial=${each} onRial=${setEach} s=${s} />
+          <${NumField} label="تعداد قسط" value=${monthsIn} onInput=${setMonths} suffix="ماه" digits=${0} />
+        </div>
+      </div>
+      <div class="calc-out">
+        ${!r ? html`<div class="empty small">${+cash > 0 && +down >= +cash ? 'پیش‌پرداخت از قیمت نقدی کمتر باشد.' : +monthsIn > 600 ? 'تعداد قسط حداکثر ۶۰۰ ماه.' : 'قیمت نقدی، مبلغ و تعداد قسط را بنویس.'}</div>` : html`
+          <span class="small muted">سود واقعی قسط‌ها در سال</span>
+          <span class="calc-big">${r.realPct === null ? '—' : `${num(r.realPct, 1)}٪`}</span>
+          <${Row} t="کل پرداخت قسطی"><${Money} v=${r.total} s=${s} /></${Row}>
+          <${Row} t=${r.extra >= 0 ? 'بیشتر از نقد' : 'ارزان‌تر از نقد'} sub=${r.extra !== 0 ? pct(Math.abs(r.extraPct), { digits: 1 }) : ''}><${Money} v=${Math.abs(r.extra)} s=${s} /></${Row}>
+          ${r.endBalance !== undefined && html`<div class=${'callout' + (r.endBalance < 0 ? ' warn' : '')} style="margin-top:6px"><${Icon} n="info" cls="sm" /><div>
+            اگر پول نقد (منهای پیش‌پرداخت) را در سپرده ${num(depPct, 1)}٪ بگذاری و قسط‌ها را از آن بدهی، آخر کار
+            ${r.endBalance >= 0 ? html` <b><${Money} v=${r.endBalance} s=${s} /></b> برایت می‌ماند — <b>قسطی به‌صرفه‌تر است</b>.` : html` <b><${Money} v=${-r.endBalance} s=${s} /></b> کم می‌آوری — <b>نقد دادن به‌صرفه‌تر است</b>.`}</div></div>`}`}
+      </div>
+    </div>
+    <div class="xs muted calc-foot">نرخ سپرده از تنظیمات «تحلیل» یا سپرده‌های خودت می‌آید. گران شدن کالا در طول قسط‌ها (که قسطی را جذاب‌تر می‌کند) در این حساب نیست.</div>
   </div>`;
 }

@@ -650,6 +650,14 @@ select.input.imp-sheet { width: auto; max-width: 45%; height: 32px; font-size: 1
 .calc-link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
 .calc-link:hover { text-decoration: underline; }
 .calc-foot { margin-top: 14px; line-height: 1.8; }
+.calc-blk { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.calc-blk.soft { background: var(--surface-2); border-color: transparent; }
+.calc-bt { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 800; }
+.calc-bt .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+.calc-bt .dot.add { background: var(--accent); }
+.calc-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 18px 10px; color: var(--muted); font-size: 12.5px; line-height: 1.8; }
+.calc-empty b { color: var(--ink-2); font-size: 14px; }
+.calc-empty .ico { width: 44px; height: 44px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; margin-bottom: 4px; }
 @media (max-width: 860px) { .calc-groups { columns: 1; } .calc-split { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .calc-in.two { grid-template-columns: 1fr; } .calc-card .card-h .seg { width: 100%; overflow-x: auto; } }
 

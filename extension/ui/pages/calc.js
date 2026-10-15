@@ -433,21 +433,34 @@ function AverageTool({ st, s }) {
     <div class="card-h"><h3><${Icon} n="layers" cls="sm" />میانگین خرید</h3><${Seg} value=${kind} onChange=${setKind} options=${FEE_KINDS} /></div>
     <div class="calc-split">
       <div class="col" style="gap:12px">
-        ${held.length > 0 && html`<div class="field"><label>از دارایی‌هایم</label><select value=${pick} onChange=${(e) => choose(e.target.value)}>
-          <option value="">— انتخاب کن یا دستی بنویس —</option>${held.map((x) => html`<option value=${x.id}>${x.name}</option>`)}</select>
-          ${h && !h.pos.avg && html`<div class="xs warn">قیمت خرید این دارایی ثبت نشده؛ میانگین فعلی را خودت بنویس.</div>`}</div>`}
-        <div class="calc-in two" style="max-width:none">
-          <${NumField} label="الان داری" value=${qty0} onInput=${setQty0} suffix=${h?.pos.unit || 'واحد'} />
-          <${MoneyField} label="میانگین خرید فعلی (هر واحد)" rial=${avg0} onRial=${setAvg0} s=${s} placeholder="مثلاً ۴٬۵۰۰" />
+        ${held.length > 0 && html`<div class="field"><label>از دارایی‌هایم</label><select class="input" value=${pick} onChange=${(e) => choose(e.target.value)}>
+          <option value="">دستی می‌نویسم</option>${held.map((x) => html`<option value=${x.id}>${x.name}</option>`)}</select>
+          ${h && !h.pos.avg && html`<span class="hint warn">قیمت خرید این دارایی ثبت نشده؛ میانگین فعلی را خودت بنویس.</span>`}</div>`}
+        <div class="calc-blk">
+          <div class="calc-bt"><span class="dot"></span>الان داری</div>
+          <div class="calc-in two" style="max-width:none">
+            <${NumField} label="تعداد" value=${qty0} onInput=${setQty0} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۱۰۰" />
+            <${MoneyField} label="میانگین خرید هر واحد" rial=${avg0} onRial=${setAvg0} s=${s} placeholder="مثلاً ۵٬۰۰۰" />
+          </div>
         </div>
-        <div class="calc-in two" style="max-width:none">
-          <${NumField} label="می‌خواهی بخری" value=${qty1} onInput=${setQty1} suffix=${h?.pos.unit || 'واحد'} />
-          <${MoneyField} label="به قیمت (هر واحد)" rial=${p1} onRial=${setP1} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+        <div class="calc-blk">
+          <div class="calc-bt"><span class="dot add"></span>خرید تازه</div>
+          <div class="calc-in two" style="max-width:none">
+            <${NumField} label="تعداد" value=${qty1} onInput=${setQty1} suffix=${h?.pos.unit || 'واحد'} placeholder="مثلاً ۲۰۰" />
+            <${MoneyField} label="قیمت هر واحد" rial=${p1} onRial=${setP1} s=${s} placeholder="مثلاً ۴٬۰۰۰" />
+          </div>
         </div>
-        <${MoneyField} label="یا: می‌خواهم میانگینم برسد به" rial=${target} onRial=${setTarget} s=${s} placeholder="مثلاً ۴٬۲۰۰" hint="چند واحد دیگر به همان قیمت باید بخری؟" />
+        <div class="calc-blk soft">
+          <div class="calc-bt">هدف میانگین <span class="muted" style="font-weight:500">(اختیاری)</span></div>
+          <${MoneyField} label="می‌خواهم میانگینم برسد به" rial=${target} onRial=${setTarget} s=${s} placeholder="مثلاً ۴٬۵۰۰" hint="می‌گوییم چند واحد دیگر به قیمت خرید تازه لازم است" />
+        </div>
       </div>
       <div class="calc-out">
-        ${!r ? html`<div class="empty small">${+qty0 > 0 && !(+avg0 > 0) ? 'میانگین خرید فعلی را هم بنویس.' : 'مقدار و میانگین فعلی، یا خرید تازه را بنویس.'}</div>` : html`
+        ${!r ? html`<div class="calc-empty">
+            <div class="ico"><${Icon} n="layers" /></div>
+            <b>${+qty0 > 0 && !(+avg0 > 0) ? 'میانگین خرید فعلی را هم بنویس' : 'میانگین تازه اینجا می‌آید'}</b>
+            <span>مثلاً ۱۰۰ واحد با میانگین ۵٬۰۰۰ داری و ۲۰۰ واحد دیگر به ۴٬۰۰۰ می‌خری: میانگین می‌شود ۴٬۳۳۳.</span>
+          </div>` : html`
           <span class="small muted">میانگین تازه</span>
           <span class="calc-big"><${Money} v=${r.avg} s=${s} /></span>
           ${r.change !== null && html`<${Row} t="نسبت به میانگین فعلی">${pct(r.change, { digits: 1 })}</${Row}>`}

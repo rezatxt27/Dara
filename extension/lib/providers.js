@@ -434,9 +434,19 @@ export async function fetchAll(refs, enabled = {}) {
 }
 
 /* ------------------------------ History (for charts & backfill) ------------------------------ */
+/** The Tehran total index (TEDPIX, dividends included), daily, ascending: [{date, close}] for the last `days`. */
+export async function tsetmcIndexHistory(days = 400) {
+  const j = await getJSON('https://cdn.tsetmc.com/api/Index/GetIndexB2History/32097828799138957', { timeout: 30000 });
+  const rows = (j?.indexB2 || []).map((x) => { const e = String(x.dEven); return { date: `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`, close: +x.xNivInuClMresIbs }; })
+    .filter((r) => r.close > 0 && /^\d{4}-\d{2}-\d{2}$/.test(r.date)).sort((a, b) => a.date.localeCompare(b.date));
+  const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+  return rows.filter((r) => r.date >= from);
+}
+
 /** [{date, close}] ascending; close in the ref's native unit (Rial, or USD for usd refs). */
 export async function refHistory(ref, days = 400) {
   if (ref.provider === 'tgju') return tgjuHistory(ref.key, days);
+  if (ref.provider === 'tsetmc' && ref.key === 'index') return tsetmcIndexHistory(days);
   if (ref.provider === 'tsetmc' && ref.key) return tsetmcHistory(ref.key, days);
   if (ref.provider === 'nobitex') {
     const { tgju: slug, cg } = cryptoMeta(ref);

@@ -1,8 +1,10 @@
 import asyncio, json, os, sys, shutil
 from playwright.async_api import async_playwright
 import pathlib; ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+import sys as _s; _s.path.insert(0, str(pathlib.Path(__file__).parent)); from pbseed import seed_pb
 SRC = f'{ROOT}/extension'; EXT = '/tmp/dara-test'  # temporary copy with a test-only host permission
 shutil.rmtree(EXT, ignore_errors=True); shutil.copytree(SRC, EXT)
+shutil.rmtree('/tmp/pwe2e', ignore_errors=True)  # a reused profile can keep an old service worker
 m = json.load(open(f'{EXT}/manifest.json')); m['host_permissions'] += ['http://127.0.0.1/*']; json.dump(m, open(f'{EXT}/manifest.json', 'w'), ensure_ascii=False)
 seed = json.load(open(f'{ROOT}/dev/qa/.seed.json'))  # run: node dev/qa/demo_seed.mjs
 THEME = sys.argv[1] if len(sys.argv) > 1 else 'light'
@@ -163,6 +165,17 @@ async def main():
             await pg.click('.msg.bot >> nth=-1 >> button:has-text("دوباره بپرس")'); await pg.wait_for_timeout(300)
             await pg.wait_for_selector('.msg.bot >> nth=-1 >> .cchart', timeout=20000); await pg.wait_for_timeout(400)
             check('assistant: «ask again» replaces the last answer', await pg.locator('.msg.bot').count() == n_before)
+            await seed_pb(pg); await pg.wait_for_timeout(500)
+            await pg.fill('.chat-in textarea', '۷۰۰ میلیون دارم، برای دو سال کجا بگذارم؟'); await pg.keyboard.press('Enter')
+            await pg.wait_for_selector('.msg.bot >> nth=-1 >> a:has-text("باز کردن در سبدساز")', timeout=25000); await pg.wait_for_timeout(400)
+            last = pg.locator('.msg.bot').last
+            check('assistant: «where to put 700M» runs the builder: table, two charts, a link', await last.locator('.md-tbl').count() == 1 and await last.locator('.cchart').count() == 2 and 'امتحان سبدها روی گذشتهٔ بازار' in await last.inner_text())
+            await last.screenshot(path=f'{SH}/assistant-builder-{THEME}.png')
+            await last.locator('a:has-text("باز کردن در سبدساز")').click(); await pg.wait_for_timeout(1500)
+            val = await pg.locator('#builder .field:has-text("مبلغ") input').input_value()
+            check('assistant: the link opens the builder with the same amount', '#/analysis' in pg.url and await pg.locator('#builder .pb-c').count() >= 3 and val.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹٬', '0123456789,')).replace(',', '') == '700000000', (pg.url, val))
+            await pg.goto(pg.url.split('#')[0] + '#/assistant'); await pg.wait_for_timeout(800)
+            n_before = await pg.locator('.msg.bot').count()
             await pg.click('button:has-text("گفتگوی تازه")'); await pg.wait_for_timeout(300)
             check('assistant: a new conversation starts empty', await pg.locator('.msg').count() == 0)
             await pg.click('button:has-text("گفتگوهای قبلی")'); await pg.wait_for_timeout(300)

@@ -8,6 +8,7 @@ import * as store from '../../lib/store.js';
 import { ago, parseNum } from '../../lib/format.js';
 import { act } from '../actions.js';
 import { T as TT, L } from '../tips.js';
+import { Builder } from '../builder.js';
 import * as BB from '../../lib/bubble.js';
 import * as CMP from '../../lib/compare.js';
 
@@ -287,27 +288,6 @@ function Bars({ items, s, total }) {
     <span class="small num" style="text-align:left"><${Money} v=${i.value} s=${s} compact unit=${false} /> <span class="muted">، ${pct(i.value / (total || 1), { sign: false })}</span></span></div>`)}</div>`;
 }
 
-function NewMoney({ pf, s, targets, assets, dirty }) {
-  const [amount, setAmount] = useState(null);
-  const tf = Object.fromEntries(Object.entries(targets).map(([k, v]) => [k, (+v || 0) / 100]));
-  const plan = amount > 0 ? I.allocateNew(pf, tf, amount, assets) : null;
-  const hasTargets = Object.values(tf).some((v) => v > 0);
-  return html`<div class="newmoney" id="newmoney">
-    <div class="row between" style="margin-bottom:8px"><span class="sb small row" style="gap:6px"><${Icon} n="plus" cls="sm" />پول جدید را کجا بگذارم؟${T('newmoney')}</span>
-      ${plan && !dirty && html`<${AskBtn} q=${`اگر ${num(amount / (s.currency === 'rial' ? 1 : 10))} ${unitOf(s)} پول جدید داشته باشم، طبق تخصیص هدفم کجا بگذارم؟ با plan_new_money حساب کن و دلیلش را بگو.`} label="از دستیار بپرس" />`}</div>
-    ${!hasTargets ? html`<div class="xs muted">اول درصد هدف دسته‌ها را در جدول بالا وارد کن (یا «پر کردن با وضعیت فعلی» را بزن و تغییر بده)؛ بعد مبلغ را بنویس.</div>` : html`
-      <div style="max-width:340px"><${MoneyField} label="مبلغی که می‌خواهی سرمایه‌گذاری کنی" rial=${amount} onRial=${setAmount} s=${s} /></div>
-      ${plan && html`<table class="tbl" style="margin-top:10px"><thead><tr><th>دسته</th><th class="n">سهم این پول</th><th class="n">سهم فعلی ← بعد</th><th class="n">هدف</th><th>مثلاً در</th></tr></thead><tbody>
-        ${plan.rows.filter((r) => r.add >= 1).map((r) => html`<tr class="r"><td><div class="row"><${Ava} cat=${r.id} size=${26} /><span class="sb">${r.cat.short}</span></div></td>
-          <td class="n sb"><${Money} v=${r.add} s=${s} compact /></td>
-          <td class="n small num">${pct(r.currentShare, { sign: false })} ← <b>${pct(r.afterShare, { sign: false })}</b></td>
-          <td class="n small num">${pct(r.target, { sign: false })}</td>
-          <td class="small">${r.vehicle ? r.vehicle.name : html`<span class="faint">دارایی جدید</span>`}</td></tr>`)}
-      </tbody></table>
-      <div class="xs muted" style="margin-top:6px">بدون فروش هیچ دارایی. بیشترین فاصله از هدف از <span class="ltr">${pct(plan.maxDevBefore, { sign: false })}</span> به <span class="ltr">${pct(plan.maxDevAfter, { sign: false })}</span> می‌رسد. این فقط حساب ریاضی بر اساس هدف خودت است، نه توصیه خرید.</div>`}`}
-  </div>`;
-}
-
 function Targets({ pf, s, assets }) {
   const [t, setT] = useState(() => ({ ...s.targets }));
   const rows = E.rebalance(pf, Object.fromEntries(Object.entries(t).map(([k, v]) => [k, (+v || 0) / 100])));
@@ -329,8 +309,7 @@ function Targets({ pf, s, assets }) {
       <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
       <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
     </tr>`)}</tbody></table>
-    <hr class="sep" />
-    <${NewMoney} pf=${pf} s=${s} targets=${t} assets=${assets} dirty=${dirty} />
+    <div class="xs muted" style="margin-top:10px">برای پول تازه، «سبدساز» پایین همین صفحه چند سبد را روی گذشتهٔ بازار امتحان می‌کند و برنامه می‌دهد.</div>
   </div>`;
 }
 
@@ -464,6 +443,7 @@ export function AnalysisPage({ st, pf, s, open, route }) {
 
     <${Compare} st=${st} pf=${pf} s=${s} initial=${route?.q?.cmp || null} />
     <${Targets} pf=${pf} s=${s} assets=${st.assets} />
+    <${Builder} st=${st} pf=${pf} s=${s} route=${route} />
 
     <div class="card" id="pnl"><div class="card-h"><h3><${Icon} n="chart" cls="sm" />سود و زیان دارایی‌ها${T('pnl')}</h3><span class="sub">${perf.length ? `بر اساس بهای تمام‌شده، کل: ` : 'برای دیدن بازده، بهای تمام‌شده را در دارایی‌ها وارد کن'}${pf.pnl !== null ? html`<${Money} v=${pf.pnl} s=${s} compact sign cls=${pf.pnl >= 0 ? 'pos' : 'neg'} />` : ''}</span></div>
       ${perf.length ? html`<table class="tbl"><thead><tr><th>دارایی</th><th class="n">بهای تمام‌شده</th><th class="n">ارزش روز</th><th class="n">سود / زیان</th><th class="n">بازده</th></tr></thead><tbody>

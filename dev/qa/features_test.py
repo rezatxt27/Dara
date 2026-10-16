@@ -2,6 +2,7 @@
 # ثبت با یک جمله, سناریو با زبان طبیعی, نقد پرتفوی. Uses synthetic data and the mock AI server.
 # Run: node dev/qa/demo_seed.mjs && (python3 dev/qa/mockai.py 8765 &) && python3 dev/qa/features_test.py [light|dark]
 import asyncio, json, os, sys, shutil, pathlib, re
+sys.path.insert(0, str(pathlib.Path(__file__).parent)); from pbseed import seed_pb
 from playwright.async_api import async_playwright
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXT = '/tmp/dara-feat'
@@ -142,20 +143,6 @@ async def main():
             await pg.close()
         await step('breakeven', t_breakeven())
 
-        # 5) پول جدید
-        async def t_newmoney():
-            pg = await newpage('analysis')
-            box = pg.locator('#newmoney')
-            await box.locator('input').fill('1000000000'); await pg.wait_for_timeout(400)
-            rows = await box.locator('tbody tr').count()
-            check('new money: plan rows appear', rows >= 1, rows)
-            adds = await pg.evaluate("() => [...document.querySelectorAll('#newmoney tbody tr td:nth-child(2)')].map(e => e.innerText)")
-            check('new money: whole amount is allocated (≈ 1 billion toman)', len(adds) >= 1, adds)
-            txt = await box.inner_text()
-            check('new money: says no selling and shows gap before → after', 'بدون فروش' in txt and 'بیشترین فاصله' in txt)
-            await box.screenshot(path=f'{SH}/newmoney-{THEME}.png')
-            await pg.close()
-        await step('newmoney', t_newmoney())
 
         # 7) سناریو با زبان طبیعی
         async def t_nlscenario():
@@ -432,6 +419,33 @@ async def main():
             if await emg.count(): await emg.screenshot(path=f'{SH}/emergency-{THEME}.png')
             await o.close()
         await step('profile', t_profile())
+
+        # «سبدساز»: four mixes on the past, alone or with holdings, a plan with ways in, a saved plan
+        async def t_builder():
+            pg = await newpage('analysis'); await seed_pb(pg); await pg.reload(); await pg.wait_for_timeout(1200)
+            card = pg.locator('#builder')
+            await card.locator('.field:has-text("مبلغ") input').fill('700,000,000'); await pg.wait_for_timeout(900)
+            n_with = await card.locator('.pb-c').count()
+            fits = await card.locator('.pb-c.fits').count()
+            has_tg = bool((await get(pg, 'settings')).get('targets'))
+            txt = await card.inner_text()
+            check('builder: your mix, your target mix and three risk mixes; one fits the profile', n_with == (5 if has_tg else 4) and fits == 1 and 'ماه' in txt and 'بدترین افت' in txt and (not has_tg or 'ترکیب هدف تو' in txt), (n_with, fits, has_tg))
+            await card.screenshot(path=f'{SH}/builder-{THEME}.png')
+            await card.locator('.seg button:has-text("فقط همین پول")').click(); await pg.wait_for_timeout(700)
+            await card.screenshot(path=f'{SH}/builder-alone-{THEME}.png')
+            check('builder: «فقط همین پول» keeps the mixes (yours as proportions)', await card.locator('.pb-c').count() == n_with)
+            await card.locator('.seg button:has-text("کنار دارایی‌هایم")').click(); await pg.wait_for_timeout(700)
+            await card.locator('.pb-c.fits button').click(); await pg.wait_for_timeout(500)
+            rows = await card.locator('.pb-pr').count()
+            await card.locator('.pb-plan').screenshot(path=f'{SH}/builder-plan-{THEME}.png')
+            await card.locator('.pb-plan button:has-text("ذخیرهٔ برنامه")').click(); await pg.wait_for_timeout(700)
+            plans = (await get(pg, 'settings')).get('plans') or []
+            check('builder: a plan per block, saved and listed', rows >= 1 and len(plans) == 1 and await card.locator('.pb-sv').count() == 1, (rows, len(plans)))
+            await pg.set_viewport_size({'width': 420, 'height': 900}); await pg.wait_for_timeout(300)
+            check('builder: no horizontal scroll on a narrow window', not await pg.evaluate("() => document.documentElement.scrollWidth > innerWidth + 1"))
+            await card.screenshot(path=f'{SH}/builder-narrow-{THEME}.png')
+            await pg.close()
+        await step('builder', t_builder())
 
         # more currencies: six on the market page, any other added from «ارز دیگر» (and removable); the editor can pick them
         async def t_fx():

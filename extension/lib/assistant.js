@@ -11,6 +11,7 @@ import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 import { thinPoints } from './chats.js';
 import * as PR from './profile.js';
+import * as PB from './builder.js';
 
 const unitName = (s) => (s?.currency === 'rial' ? 'ریال' : 'تومان');
 /** Rial → display unit, rounded */
@@ -41,6 +42,7 @@ export function systemPrompt(st, privacy = 'full') {
 - برای مقایسهٔ چند گزینه یا چند عدد، یک جدول کوتاه مارک‌داون (حداکثر ۵ ستون) بنویس؛ برای روند، ترکیب یا مقایسهٔ تصویری، show_chart را صدا بزن.
 - توصیه قطعی خرید و فروش نده؛ گزینه‌ها، اثر و ریسک هرکدام را بگو و تصمیم را به کاربر بسپار.
 - دربارهٔ هر سهم یا صندوق، اول get_symbol_report را صدا بزن و فقط با همان عددها حرف بزن؛ منبع و تاریخ را بگو. هرگز نگو «بخر» یا «بفروش»؛ حداکثر بگو «ارزش بررسی دارد» و کنار دلیلش، ریسک‌ها و چیزهایی را که باید بررسی شود بیاور. بازدهی گذشته تضمینی برای آینده نیست.
+- وقتی کاربر می‌پرسد یک مبلغ را کجا بگذارد یا چه سبدی بچیند، build_portfolio را صدا بزن (نه plan_new_money)، مگر فقط تقسیم طبق ترکیب هدفش را بخواهد.
 - برای تغییر داده‌ها فقط ابزارهای propose_* را صدا بزن؛ تغییر بعد از تأیید کاربر اعمال می‌شود. بعد از پیشنهاد، به کاربر بگو دکمه تأیید را بزند.
 ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» فعال است: مبالغ مطلق در دسترس تو نیست؛ با درصدها پاسخ بده.\n' : ''}
 امروز: ${fmtJ(todayIso())}. واحد نمایش: ${unit}.
@@ -69,7 +71,7 @@ export const TOOL_STEPS = {
   plan_new_money: 'تقسیم پول جدید', get_symbol_report: 'خواندن کارنامهٔ نماد', get_radar_today: 'بررسی رادار فرصت‌ها',
   calc_loan: 'محاسبهٔ هزینهٔ وام', calc_instalments: 'مقایسهٔ قسطی و نقدی', calc_savings_goal: 'محاسبهٔ هدف پس‌انداز', calc_average_buy: 'محاسبهٔ میانگین خرید',
   calc_stock_trade: 'محاسبهٔ کارمزد معامله', calc_deposit: 'محاسبهٔ سپرده', calc_rent: 'محاسبهٔ رهن و اجاره',
-  show_chart: 'آماده‌کردن نمودار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
+  show_chart: 'آماده‌کردن نمودار', build_portfolio: 'امتحان سبدها روی گذشتهٔ بازار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
 };
 
 export function makeTools(ctx) {
@@ -391,6 +393,35 @@ export function makeTools(ctx) {
         if (!labels.length || labels.length !== values.length || labels.length > 12 || values.some((v) => !isFinite(+v))) return { error: 'برای custom، labels و values هم‌اندازه (حداکثر ۱۲) و عددی لازم است' };
         const unit = ['money', 'pct', 'number'].includes(a.unit) ? a.unit : 'number';
         return push({ type: 'bars', unit, title: a.title || '', items: labels.map((n, i) => ({ name: String(n).slice(0, 40), value: unit === 'money' ? +values[i] * k : unit === 'pct' ? +values[i] / 100 : +values[i] })) });
+      },
+    },
+    {
+      name: 'build_portfolio',
+      description: '«سبدساز»: وقتی کاربر می‌پرسد یک مبلغ را کجا بگذارد. چهار سبد (ترکیب فعلی خودش، و ترکیب‌های رایج ریسک کم، متوسط و زیاد با رعایت خط قرمزهای پروفایل) روی ۵ یا ۱۰ سال گذشتهٔ واقعی بازار ایران (سپرده، طلای ۱۸، دلار، شاخص کل بورس، بیت‌کوین؛ ماه‌به‌ماه به تومان) امتحان می‌شوند: بازده سالانه و به دلار، بدترین افت، بدترین ۱۲ ماه، درصد دوره‌هایی که از سپرده جلو زده، بازهٔ بد/معمولی/خوب برای مدت کاربر، و دو تست فشار. mode: with (کنار دارایی‌های فعلی؛ پیش‌فرض) یا alone (فقط همین پول). جدول و نمودار و دکمهٔ «باز کردن در سبدساز» خودکار زیر جواب می‌آید. حکم خرید نده؛ توضیح بده هر سبد کجا خوب است و کجا ضربه می‌خورد، و کدام با پروفایل جور است. دربارهٔ سهم تکی اسم پیشنهاد نده.',
+      schema: { type: 'object', properties: { amount: { type: 'number', description: 'به واحد نمایش' }, months: { type: 'number', description: 'افق: ۶، ۱۲، ۲۴ یا ۳۶ ماه' }, mode: { type: 'string', enum: ['with', 'alone'] }, years: { type: 'number', enum: [5, 10] } }, required: ['amount'] },
+      run: async (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10;
+        if (!ctx.pbData) return { error: 'دادهٔ گذشتهٔ بازار اینجا در دسترس نیست' };
+        const data = await ctx.pbData();
+        if (!data || data.error) return { error: data?.error || 'تاریخچهٔ قیمت‌ها دریافت نشد' };
+        const months = [6, 12, 24, 36].reduce((b, x) => (Math.abs(x - (+a.months || 24)) < Math.abs(b - (+a.months || 24)) ? x : b), 24);
+        const amount = (+a.amount || 0) * k;
+        const r = PB.build({ R: PB.returnsFrom(PB.seriesOf(data), I.defaultDepositPct(s)), pf: pfOf(), profile: s.settings.profile, targets: s.settings.targets, amount, horizon: months, mode: a.mode === 'alone' ? 'alone' : 'with', years: +a.years === 10 ? 10 : 5 });
+        if (!r || r.error) return { error: r?.error || 'مبلغ نامعتبر است' };
+        const p0 = (x) => (x === null || x === undefined || !isFinite(x) ? null : Math.round(x * 100));
+        ctx.onChart?.({ id: uid('c'), type: 'bars', unit: 'pct', title: 'بازده سالانه در گذشته', items: r.cands.map((c) => ({ name: c.name, value: c.metrics?.cagr ?? 0, hl: c.fits })) });
+        ctx.onChart?.({ id: uid('c'), type: 'bars', unit: 'pct', signed: true, title: 'بدترین افت', items: r.cands.map((c) => ({ name: c.name, value: c.metrics?.maxDD ?? 0, hl: c.fits })) });
+        ctx.onLink?.({ href: `#/analysis?pb=${Math.round(amount)}&m=${months}&mode=${r.mode}`, label: 'باز کردن در سبدساز' });
+        return { window: `${r.from} تا ${r.to}`, months_tested: r.months, horizon_months: months, mode: r.mode, deposit_rate_pct: r.depositPct, deposit_gain_over_horizon_pct: p0(r.depositGain),
+          risk_from_profile: r.level ? PR.RISK[r.level] : 'پروفایل ساخته نشده', not_modelled: r.other > 0 ? (P() ? 'بخشی از دارایی (ملک، سهام خصوصی، …)' : { amount: disp(r.other, s.settings), unit: unitName(s.settings) }) : undefined,
+          each_asset_yearly_pct: Object.fromEntries(r.each.map((e) => [e.name, p0(e.cagr)])),
+          portfolios: r.cands.map((c) => ({ name: c.name, fits_profile: c.fits || undefined, weights_pct: Object.fromEntries(Object.entries(c.weights).filter(([, v]) => v > 0.004).map(([kk, v]) => [PB.CLASS[kk].short, p0(v)])),
+            yearly_return_pct: p0(c.metrics?.cagr), yearly_in_dollars_pct: p0(c.metrics?.usdCagr), worst_drop_pct: p0(c.metrics?.maxDD), months_under_peak: c.metrics?.under, worst_12m_pct: p0(c.metrics?.worst12),
+            beat_deposit_share_pct: p0(c.metrics?.beat), range_change_pct: c.range ? { bad: p0(c.range.badPct), typical: p0(c.range.midPct), good: p0(c.range.goodPct) } : null,
+            ...(P() ? {} : { range_value: c.range ? { bad: disp(c.range.bad, s.settings), typical: disp(c.range.mid, s.settings), good: disp(c.range.good, s.settings), unit: unitName(s.settings) } : null,
+              new_money_split: Object.fromEntries(Object.entries(c.adds).filter(([, v]) => v >= 1).map(([kk, v]) => [PB.CLASS[kk].short, disp(v, s.settings)])) }),
+            stress_pct: { dollar_up_50: p0(c.stress.usdUp), bourse_down_30: p0(c.stress.bourseDown) } })),
+          note: 'گذشته تضمین آینده نیست؛ سپرده با نرخ امروز برای گذشته حساب شده. نمودار و دکمهٔ «باز کردن در سبدساز» زیر جواب آمده؛ عددها را تکرار نکن، خلاصه و مقایسه کن.' };
       },
     },
     // ---- the calculators of «ماشین‌حساب‌ها», with the same tested formulas (amounts in the display unit both ways) ----

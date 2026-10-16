@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS = {
   preBuyCheck: true,        // the checklist above a new stock or fund purchase
   profile: null,            // «پروفایل سرمایه‌گذاری» (lib/profile.js); null until answered
   profileHint: true,        // the overview invites to fill it in until dismissed
+  plans: [],                // «سبدساز» plans the owner saved (lib/builder.js planToday)
   lastUpdateCheck: 0,         // deposit rate used for comparisons (null → from your fixed-income assets, else 25)
 };
 

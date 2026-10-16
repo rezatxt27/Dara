@@ -105,6 +105,7 @@ class H(BaseHTTPRequestHandler):
             if "دلار" in q: calls.append(tc("simulate_scenario", {"usd_pct": 30, "gold_ounce_pct": -10}, 1))
             if "ثبت کن" in q: calls = [tc("list_assets", {"query": "حساب بانکی ب"}, 0)]
             if "قسط" in q: calls = [tc("calc_loan", {"amount": 100000000, "annual_rate_pct": 23, "months": 36}, 0)]
+            if "کجا بگذارم" in q: calls = [tc("build_portfolio", {"amount": 700000000, "months": 24}, 0)]
             if "نمودار" in q: calls = [tc("show_chart", {"kind": "allocation"}, 0), tc("show_chart", {"kind": "custom", "title": "نرخ واقعی دو وام", "labels": ["وام الف", "وام ب"], "values": [23, 31.5], "unit": "pct"}, 1)]
             return self._send(200, openai_reply("", calls))
         if tools and "ثبت کن" in q and not any("propose" in (m.get("tool_call_id") or "") for m in msgs[last_user_idx:]):
@@ -120,6 +121,8 @@ class H(BaseHTTPRequestHandler):
                 if isinstance(d, dict) and "categories" in d: parts.append("بزرگ‌ترین دسته: " + d["categories"][0]["name"] + f" ({d['categories'][0]['share_pct']}٪).")
                 if isinstance(d, dict) and d.get("ok"): parts.append("پیشنهاد به‌روزرسانی آماده شد؛ لطفاً تأیید کن.")
                 if isinstance(d, dict) and "monthly_installment" in d: parts.append(f"| مورد | مبلغ |\n|---|---|\n| قسط ماهانه | {d['monthly_installment']:,} |\n| کل سود | {d['total_interest']:,} |")
+                if isinstance(d, dict) and d.get("error"): parts.append("خطا: " + str(d["error"]))
+                if isinstance(d, dict) and "portfolios" in d: parts.append("| سبد | بازده سالانه | بدترین افت |\n|---|---|---|\n" + "\n".join(f"| {p['name']} | {p['yearly_return_pct']}٪ | {p['worst_drop_pct']}٪ |" for p in d['portfolios']))
                 if isinstance(d, dict) and d.get("shown") and "نمودار را زیر جواب ببین." not in parts: parts.append("نمودار را زیر جواب ببین.")
         return self._send(200, openai_reply("\n".join(parts) or "پاسخ آزمایشی"))
 

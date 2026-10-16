@@ -628,17 +628,26 @@ const handlers = {
     return { items: [] };
   },
   async history({ ref, days = 60 }) {
-    const { settings } = await store.load('settings');
-    if (ref?.provider && settings?.providers?.[ref.provider] === false) return { points: [], error: 'این منبع قیمت در تنظیمات خاموش است' };
     const id = P.quoteId(ref) + ':' + days;
     const { history } = await store.load('history');
     const h = history[id];
     if (h && Date.now() - h.at < 3 * 3600000) return { points: h.points };
+    // (a fresh copy already fetched is shown even with its source switched off; nothing new is fetched)
+    const { settings } = await store.load('settings');
+    if (ref?.provider && settings?.providers?.[ref.provider] === false) return { points: h?.points || [], error: 'این منبع قیمت در تنظیمات خاموش است' };
     const rows = await rialHistory(ref, days);
     const points = rows.map((r) => [r.date, r.close]);
     // a small cache: the 40 most recent series
     await store.update('history', (h) => Object.fromEntries(Object.entries({ ...h, [id]: { at: Date.now(), points } }).sort((a, b) => b[1].at - a[1].at).slice(0, 40)));
     return { points };
+  },
+  /** «سبدساز»: about ten years of 18k gold, the dollar, bitcoin (in Rial) and the total index, daily. Cached like charts. */
+  async pbData({ days = 3700 } = {}) {
+    const get = async (ref) => { try { return (await handlers.history({ ref, days })).points || []; } catch { return []; } };
+    const [gold, usd, btc, index] = await Promise.all([get({ provider: 'tgju', key: 'geram18' }), get({ provider: 'tgju', key: 'price_dollar_rl' }),
+      get({ provider: 'nobitex', key: 'btc' }), get({ provider: 'tsetmc', key: 'index' })]);
+    if (!gold.length || !usd.length || !index.length) return { error: !index.length ? 'تاریخچهٔ شاخص بورس دریافت نشد (سایت TSETMC گاهی با VPN جواب نمی‌دهد)' : 'تاریخچهٔ طلا و دلار دریافت نشد', gold, usd, btc, index };
+    return { gold, usd, btc, index };
   },
   /** Daily coin bubbles over `days` (coin close ÷ gold inside it at ounce × dollar), with average and today's level. */
   async bubbleStats({ keys = BB.COIN_KEYS, days = 90 } = {}) {

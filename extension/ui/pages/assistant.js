@@ -73,6 +73,15 @@ export function AssistantPage({ st, s, route }) {
   const threadRef = useRef(threadId); threadRef.current = threadId;
   const [msgs, setMsgs] = useState(() => chatRef.current.threads.find((t) => t.id === chatRef.current.current)?.messages || []);
   const [showThreads, setShowThreads] = useState(false);
+  // the page's copy of the store skips chat writes (they're frequent): read the saved conversations fresh on opening
+  useEffect(() => {
+    act.loadChat().then((c) => {
+      if (!c || msgsRef.current.length) return;
+      chatRef.current = c;
+      const t = c.threads.find((x) => x.id === c.current);
+      if (t) { threadRef.current = t.id; setThreadId(t.id); msgsRef.current = t.messages; setMsgs(t.messages); }
+    });
+  }, []);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(null); // {steps:[], conn}
   const stRef = useRef(st); stRef.current = st;
@@ -121,18 +130,19 @@ export function AssistantPage({ st, s, route }) {
     const base = msgsRef.current;
     const proposals = [];
     const charts = [];
+    const links = [];
     const steps = [];
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
     try {
-      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); },
+      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); }, onLink: (l) => { if (links.length < 2 && /^#\//.test(l.href)) links.push(l); }, pbData: () => send('pbData'),
         bubbleStats: async (keys) => { const r = await send('bubbleStats', { keys, days: 90 }); return r?.ok ? r.stats : {}; } });
       // in «only percentages» mode, earlier answers written with full amounts are not sent again
       const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));
       const res = await AI.runAgent({ ai: stRef.current.ai, system: A.systemPrompt(stRef.current, privacy), messages: history, tools, signal: ctl.signal,
         onStep: (st2) => { if (st2.type === 'tool') { steps.push(st2.name); setBusy((b) => ({ ...b, steps: [...steps] })); } if (st2.type === 'conn') setBusy((b) => ({ ...b, conn: st2.conn })); },
         onConnUpdate: (id, patch) => act.patchConnection(id, patch) });
-      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, charts, privacy, by: `${res.conn.name}، ${res.model}` }]);
+      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, charts, links, privacy, by: `${res.conn.name}، ${res.model}` }]);
     } catch (e) {
       persist((m) => [...m, { id: uid('m'), role: 'assistant', error: true, content: e.message + (e.detail ? `\n\n${String(e.detail).slice(0, 200)}` : ''), at: Date.now() }]);
     }
@@ -168,6 +178,7 @@ export function AssistantPage({ st, s, route }) {
             ${m.role === 'user' ? m.content : html`<${Markdown} text=${m.content} />`}
             ${m.steps?.length > 0 && html`<div class="steps">${m.steps.map((x) => html`<span class="pill"><${Icon} n="check" cls="sm" />${STEP[x] || x}</span>`)}</div>`}
             ${(m.charts || []).map((c) => html`<${ChatChart} c=${c} s=${s} key=${c.id} />`)}
+            ${(m.links || []).length > 0 && html`<div class="row" style="gap:6px;margin-top:8px">${m.links.map((l) => html`<a class="btn sm primary" href=${l.href}><${Icon} n="layers" cls="sm" />${l.label}</a>`)}</div>`}
             ${(m.proposals || []).map((p) => html`<${ProposalCard} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}
             ${m.role === 'assistant' && html`<div class="msg-act">
               ${!m.error && html`<button class="btn icon sm ghost" title="کپی جواب" onClick=${() => copy(m)}><${Icon} n="copy" cls="sm" /></button>`}

@@ -43,11 +43,17 @@ export function emergency(p, pf, spend = 0) {
  * A common starting mix for the risk level, by Dara's categories (percent, sums to 100). A template the owner edits,
  * not a recommendation. Without crypto (a red line) its share goes to deposits.
  */
-const MIX = {
+export const MIX = {
   low: { bank: 10, fixed: 45, gold: 25, fx: 15, stock: 5, crypto: 0 },
   mid: { bank: 5, fixed: 30, gold: 25, fx: 15, stock: 20, crypto: 5 },
   high: { bank: 5, fixed: 15, gold: 20, fx: 10, stock: 40, crypto: 10 },
 };
+/** The starting mix for a risk level, by category (percent; no crypto as a red line moves its share to deposits). */
+export function mixFor(level, noCrypto = false) {
+  const m = { ...MIX[level] };
+  if (noCrypto && m.crypto) { m.fixed += m.crypto; m.crypto = 0; }
+  return Object.fromEntries(Object.entries(m).filter(([, v]) => v > 0));
+}
 export function suggestTargets(p) {
   const r = riskLevel(p);
   if (!r) return null;

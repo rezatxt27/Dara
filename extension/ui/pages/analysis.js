@@ -309,7 +309,7 @@ function Targets({ pf, s, assets }) {
       <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
       <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
     </tr>`)}</tbody></table>
-    <div class="xs muted" style="margin-top:10px">برای پول تازه، «سبدساز» پایین همین صفحه چند سبد را روی گذشتهٔ بازار امتحان می‌کند و برنامه می‌دهد.</div>
+    <div class="xs muted" style="margin-top:10px;line-height:1.9">ترکیب هدف کجا به کار می‌رود: همین جدول می‌گوید برای رسیدن به آن چقدر بخری یا بفروشی؛ «سبدساز» پایین همین صفحه سبد «ترکیب هدف تو» را هم روی گذشته امتحان می‌کند؛ و دستیار هم آن را می‌بیند. ذخیره‌اش چیزی را خرید و فروش نمی‌کند. می‌توانی آن را از «پروفایل سرمایه‌گذاری» (تنظیمات) یا از یک سبد در سبدساز هم بگذاری.</div>
   </div>`;
 }
 
@@ -400,6 +400,8 @@ function Scenario({ st, pf, s }) {
 }
 
 export function AnalysisPage({ st, pf, s, open, route }) {
+  // #/analysis?to=targets (or another card's id) opens the page at that card
+  useEffect(() => { const to = route?.q?.to; if (to) setTimeout(() => document.getElementById(to)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200); }, [route?.q?.to]);
   const g = pf.gross || 1;
   const exItems = Object.entries(EXPOSURES).map(([k, v]) => ({ name: v.name, color: v.color, value: pf.byExposure[k] || 0 })).filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
   const liqItems = [['high', '#14BCDB'], ['mid', '#8E70FF'], ['low', '#D946A8']].map(([k, c]) => ({ name: 'نقدشوندگی ' + LIQUIDITY[k], color: c, value: pf.byLiquidity[k] || 0 }));

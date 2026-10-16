@@ -43,6 +43,16 @@ class H(BaseHTTPRequestHandler):
         tool_names = {t["function"]["name"] for t in tools}
         if "Reply with" in text: return self._send(200, openai_reply("OK"))
         if "Call the ping tool" in text: return self._send(200, openai_reply(None, [tc("ping", {})]) if "ping" in tool_names else openai_reply("cannot"))
+        if "جملهٔ کاربر:" in text:
+            print("PB_AMOUNT_LEAKED" if re.search(r"\d{3}|[۰-۹]{3}", text) else "PB_AMOUNT_MASKED", flush=True)
+            out = {"amount_toman": None, "months": None, "mode": None, "risk": None, "no_crypto": None, "past_years": None, "question": None}
+            if "تا عید" in text: out["months"] = 5
+            if "ضرر" in text: out["risk"] = "low"
+            if "بیت" in text: out["no_crypto"] = True
+            return self._send(200, openai_reply(json.dumps(out, ensure_ascii=False)))
+        if "نتیجهٔ سبدساز" in text:
+            print("PB_EXPLAIN_LEAKED" if re.search(r"\d{7,}", text) else "PB_EXPLAIN_PERCENT_ONLY", flush=True)
+            return self._send(200, openai_reply(json.dumps({"summary": "سبد کم‌ریسک با ریسک تو جور است.", "points": ["بدترین افتش کمتر از بقیه بوده.", "بخشی از رشد فقط پایین آمدن ارزش ریال است."], "watch": "گذشته تضمین آینده نیست."}, ensure_ascii=False)))
         if '"shocks"' in text:
             return self._send(200, openai_reply(json.dumps({"title": "توافق", "shocks": {"usd": -20, "gold": 0, "equity": 25, "crypto": 0, "metals": 0, "private": 10, "real": -5},
                 "reasons": {"usd": "انتظار ورود ارز و کاهش نرخ", "equity": "خوش‌بینی به سودآوری شرکت‌ها", "private": "بهبود فضای کسب‌وکار", "real": "کاهش تقاضای سفته‌بازی"}}, ensure_ascii=False)))

@@ -4,6 +4,8 @@ import { html, useState, useEffect, useMemo, useRef, Icon, Money, MoneyField, Se
 import * as B from '../lib/builder.js';
 import * as I from '../lib/insights.js';
 import * as PR from '../lib/profile.js';
+import * as PT from '../lib/pbtalk.js';
+import * as AI from '../lib/ai.js';
 import { T } from './tips.js';
 import { act } from './actions.js';
 import { uid } from '../lib/format.js';
@@ -45,15 +47,15 @@ function CandCard({ c, r, s, on, onPick }) {
   const top = B.CLASSES.filter((k) => (c.weights[k.id] || 0) >= 0.005).sort((a, b) => c.weights[b.id] - c.weights[a.id]);
   const Row = ({ t, children }) => html`<div class="pb-row"><span>${t}</span><b class="num">${children}</b></div>`;
   return html`<div class=${'pb-c' + (on ? ' on' : '') + (c.fits ? ' fits' : '')}>
-    <div class="row between" style="gap:6px"><b>${c.name}</b>${c.fits && html`<span class="pill live">با پروفایلت</span>`}</div>
+    <div class="row between" style="gap:6px"><b>${c.name}</b>${c.fits && html`<span class="pill live">${r.levelFrom === 'sentence' ? 'با خواسته‌ات' : 'با پروفایلت'}</span>`}</div>
     <${StackBar} items=${top.map((k) => ({ name: k.short, value: c.weights[k.id], color: k.color }))} height=${8} />
     <div class="pb-legend xs">${top.map((k) => html`<span><i class="dot" style=${`background:${k.color}`}></i>${k.short} ${num(Math.round(c.weights[k.id] * 100))}٪</span>`)}</div>
     ${m && html`<div class="pb-rows">
       <${Row} t=${html`<${TermTip} id="cagr" label="بازده سالانه" />`}>${pct(m.cagr, { digits: 0 })}</${Row}>
       <${Row} t=${html`<${TermTip} id="inflation" label="همان به دلار" />`}>${pct(m.usdCagr, { digits: 0 })}</${Row}>
       <${Row} t=${html`<${TermTip} id="drawdown" label="بدترین افت" />`}><span class="neg">${pct(m.maxDD, { digits: 0 })}</span>${m.under ? html`<span class="xs muted"> · ${num(m.under)} ماه زیر اوج</span>` : ''}</${Row}>
-      <${Row} t="بدترین ۱۲ ماه"><span class=${m.worst12 < 0 ? 'neg' : ''}>${pct(m.worst12, { digits: 0 })}</span></${Row}>
-      <${Row} t=${`جلوتر از سپرده در ${num(r.horizon)} ماه`}>${m.beat === null ? '—' : `${num(Math.round(m.beat * 100))}٪ دوره‌ها`}</${Row}>
+      <${Row} t=${html`بدترین ۱۲ ماه${T('pbWorst12')}`}><span class=${m.worst12 < 0 ? 'neg' : ''}>${pct(m.worst12, { digits: 0 })}</span></${Row}>
+      <${Row} t=${html`جلوتر از سپرده${T('pbBeat')}`}>${m.beat === null ? '—' : `${num(Math.round(m.beat * 100))}٪ دوره‌ها`}</${Row}>
     </div>`}
     ${c.range && html`<div class="pb-range">
       <div class="xs muted">بعد از ${H_OPTS.find((x) => x[0] === r.horizon)?.[1] || num(r.horizon) + ' ماه'}، <${TermTip} id="range" label="اگر گذشته تکرار شود" /></div>
@@ -61,7 +63,7 @@ function CandCard({ c, r, s, on, onPick }) {
         <span><i>معمولی</i><${Money} v=${c.range.mid} s=${s} compact unit=${false} /><em class="num">${pct(c.range.midPct, { digits: 0 })}</em></span>
         <span><i>خوب</i><${Money} v=${c.range.good} s=${s} compact unit=${false} /><em class="num">${pct(c.range.goodPct, { digits: 0 })}</em></span></div>
       <div class="xs muted" style="margin-top:4px">معمولی به دلار: <b class=${'num ' + (c.range.midUsdPct < 0 ? 'neg' : '')}>${pct(c.range.midUsdPct, { digits: 0 })}</b></div></div>`}
-    <div class="pb-stress xs"><span>دلار +۵۰٪: <b class="num pos">${pct(c.stress.usdUp, { digits: 0 })}</b></span><span>بورس −۳۰٪: <b class="num neg">${pct(c.stress.bourseDown, { digits: 0 })}</b></span></div>
+    <div class="pb-stress xs">${T('pbStress')}<span>دلار +۵۰٪: <b class="num pos">${pct(c.stress.usdUp, { digits: 0 })}</b></span><span>بورس −۳۰٪: <b class="num neg">${pct(c.stress.bourseDown, { digits: 0 })}</b></span></div>
     ${c.moved.length > 0 && html`<div class="xs warn">${c.moved.map((k) => B.CLASS[k].short).join('، ')} در این بازه داده نداشت؛ سهمش سپرده حساب شد.</div>`}
     <button class=${'btn sm' + (on ? ' primary' : '')} onClick=${onPick}>${on ? 'انتخاب شد' : 'برنامهٔ این سبد'}</button>
   </div>`;
@@ -77,7 +79,7 @@ function Plan({ c, r, s, st, radar, data, onSaved }) {
   };
   const toTargets = async () => {
     if (Object.keys(s.targets || {}).length && !confirm('ترکیب هدفی که قبلاً گذاشته‌ای با این سبد عوض شود؟')) return;
-    await act.setSettings({ targets: c.byCat }); toast('ترکیب هدف گذاشته شد');
+    await act.setSettings({ targets: c.byCat }); toast('ترکیب هدف گذاشته شد؛ در کارت «تخصیص هدف» همین صفحه می‌بینی چقدر بخری یا بفروشی');
   };
   return html`<div class="pb-step" style="margin-top:14px"><span>۳</span>برنامه‌ات</div><div class="pb-plan" id="pb-plan">
     <div class="sb" style="margin-bottom:8px">برنامهٔ «${c.name}» برای <${Money} v=${r.amount} s=${s} compact /></div>
@@ -94,8 +96,12 @@ function Plan({ c, r, s, st, radar, data, onSaved }) {
     })}
     ${!radar?.day && html`<div class="xs muted">با روشن بودن «رادار فرصت‌ها»، صندوق‌های هر دسته (با بازده و حباب) هم اینجا می‌آید.</div>`}
     <div class="xs muted" style="margin:8px 0">صندوق‌ها فقط از یک غربال ثابت رد شده‌اند (سابقهٔ یک ساله، اندازهٔ کافی، بازده یا حباب)؛ رتبه‌بندی «بهترین» نیست. پیش از خرید، کارنامه‌شان را ببین.</div>
-    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary sm" onClick=${save}><${Icon} n="check" cls="sm" />ذخیرهٔ برنامه</button>
-      ${c.byCat && html`<button class="btn sm" onClick=${toTargets}>بگذارش ترکیب هدف</button>`}</div>
+    <div class="pb-acts">
+      <div class="pb-act"><div class="row" style="gap:4px"><button class="btn primary sm" onClick=${save}><${Icon} n="check" cls="sm" />ذخیرهٔ برنامه</button>${T('pbSave')}</div>
+        <div class="xs muted">فقط یادداشت می‌شود؛ چیزی خرید و فروش نمی‌شود. پایین همین بخش می‌بینی از امروز چه کرده، در برابر سپرده.</div></div>
+      ${c.byCat && html`<div class="pb-act"><div class="row" style="gap:4px"><button class="btn sm" onClick=${toTargets}>بگذارش ترکیب هدف</button>${T('pbTarget')}</div>
+        <div class="xs muted">درصدهای این سبد هدفِ هر دسته در «تخصیص هدف» می‌شود؛ آنجا می‌بینی چقدر بخری یا بفروشی تا به آن برسی. <button class="calc-link" onClick=${() => document.getElementById('targets')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>دیدن تخصیص هدف ←</button></div></div>`}
+    </div>
   </div>`;
 }
 
@@ -104,11 +110,83 @@ function Saved({ s, data }) {
   if (!plans.length) return null;
   const latest = B.latestOf(data);
   const del = async (id) => { await act.setSettings({ plans: plans.filter((p) => p.id !== id) }); toast('برنامه حذف شد'); };
-  return html`<div class="pb-saved"><div class="xs sb muted" style="margin-bottom:6px">برنامه‌های ذخیره‌شده</div>
+  return html`<div class="pb-saved"><div class="xs sb muted row" style="margin-bottom:6px;gap:4px">برنامه‌های ذخیره‌شده${T('pbSaved')}</div>
     ${plans.map((p) => { const v = B.planToday(p, latest); return html`<div class="row between pb-sv">
       <span><b>${p.name}</b> <span class="xs muted">· <${Money} v=${p.amount} s=${s} compact /> · ${fmtJ(new Date(p.at).toISOString().slice(0, 10), 'dm')}</span></span>
       <span class="small">${v ? html`از آن روز <b class=${'num ' + (v.pct >= 0 ? 'pos' : 'neg')}>${pct(v.pct, { digits: 1 })}</b> <span class="xs muted">(سپرده ${pct(v.deposit, { digits: 1 })}${v.missing.length ? `؛ ${v.missing.map((k) => B.CLASS[k].short).join('، ')} بدون قیمت` : ''})</span>` : html`<span class="xs muted">در انتظار قیمت</span>`}
         <button class="btn icon sm ghost danger" title="حذف برنامه" onClick=${() => del(p.id)}><${Icon} n="trash" cls="sm" /></button></span></div>`; })}
+  </div>`;
+}
+
+/** «با یک جمله بگو»: read here, and by an AI connection when there is one (the amount is not sent to it). */
+function Sentence({ st, s, onApply }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [got, setGot] = useState(null); // { it, ai, note }
+  const conns = AI.orderedConnections(st.ai);
+  const go = async () => {
+    const t = text.trim(); if (!t || busy) return;
+    const local = PT.parseIntent(t); // people say amounts in toman, whatever the display unit; «ریال» in the sentence wins
+    let it = local, ai = false, note = '';
+    if (conns.length) {
+      setBusy(true);
+      try {
+        const res = await AI.extract({ ai: st.ai, system: PT.intentSystem(), prompt: PT.intentPrompt(PT.maskedSentence(t, local)), maxTokens: 300 });
+        it = PT.mergeIntent(local, PT.cleanIntent(res.json)); ai = true;
+      } catch (e) { note = 'هوش مصنوعی جواب نداد؛ جمله بدون آن خوانده شد.'; }
+      setBusy(false);
+    }
+    const chips = PT.intentChips(it);
+    if (!(it.amount > 0) && !chips.length) { setGot({ it, ai, note: it.question || 'چیزی از این جمله نفهمیدم؛ مبلغ و مدت را بنویس، مثلاً «۷۰۰ میلیون برای دو سال».', miss: true }); return; }
+    onApply(it);
+    const miss = [!(it.amount > 0) && (local.fxAmount ? 'مبلغ ارزی را نمی‌شود اینجا حساب کرد؛ مبلغ را به تومان در خانهٔ «مبلغ» بنویس' : 'مبلغ را پیدا نکردم؛ در خانهٔ «مبلغ» بنویسش'), !it.horizon && 'مدت را نفهمیدم؛ از دکمه‌های «برای چه مدت» انتخاب کن'].filter(Boolean);
+    setGot({ it, ai, note: [note, ...miss].filter(Boolean).join('. ') + (miss.length || note ? '.' : ''), chips });
+  };
+  return html`<div class="pb-say">
+    <div class="row" style="gap:8px">
+      <input class="input grow" aria-label="با یک جمله بگو" placeholder="با یک جمله بگو؛ مثلاً «۷۰۰ میلیون دارم، دو سال لازمش ندارم، ریسک زیاد نمی‌خوام، رمزارز نه»" value=${text}
+        onInput=${(e) => setText(e.target.value)} onKeyDown=${(e) => e.key === 'Enter' && go()} />
+      <button class="btn primary" onClick=${go} disabled=${!text.trim() || busy}><${Icon} n=${busy ? 'refresh' : 'sparkles'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال خواندن…' : 'بساز'}</button>${T('pbSentence')}
+    </div>
+    ${got && html`<div class=${'pb-got xs' + (got.miss ? ' warn' : '')}>
+      ${!got.miss && html`<span class="muted">فهمیدم:</span>
+        ${got.it.amount > 0 && html`<span class="chip"><${Money} v=${got.it.amount} s=${s} compact /></span>`}
+        ${got.chips.map((c) => html`<span class="chip">${c.t}</span>`)}
+        <span class="faint">${got.ai ? '· با هوش مصنوعی' : conns.length ? '' : '· بدون هوش مصنوعی'}</span>`}
+      ${got.note && html`<span class=${got.miss ? '' : 'muted'}>${got.note}</span>`}
+    </div>`}
+  </div>`;
+}
+
+/** «برام توضیح بده»: the result in plain words, by an AI connection; percentages only. */
+function Explain({ st, r, pick }) {
+  const [state, setState] = useState(null); // { key, busy, out, err }
+  const conns = AI.orderedConnections(st.ai);
+  const facts = useMemo(() => PT.explainFacts(r, { pick }), [r, pick]);
+  const key = JSON.stringify(facts); // a new result (targets, holdings, rate…) hides an old explanation
+  const cur = state?.key === key ? state : null;
+  const run = async () => {
+    setState({ key, busy: true });
+    try {
+      const res = await AI.extract({ ai: st.ai, system: PT.explainSystem(), prompt: PT.explainPrompt(facts), maxTokens: 900 });
+      const out = PT.cleanExplain(res.json);
+      if (!out) throw new Error('پاسخ مدل خالی بود؛ دوباره امتحان کن');
+      setState({ key, out, by: `${res.conn.name}، ${res.model}` });
+    } catch (e) { setState({ key, err: e.message || 'ارتباط با هوش مصنوعی ممکن نشد' }); }
+  };
+  return html`<div class="pb-explain">
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      ${conns.length ? html`<button class="btn sm" onClick=${run} disabled=${cur?.busy}><${Icon} n=${cur?.busy ? 'refresh' : 'sparkles'} cls=${'sm' + (cur?.busy ? ' spin' : '')} />${cur?.busy ? 'در حال نوشتن…' : cur?.out ? 'دوباره توضیح بده' : pick ? `برام توضیح بده («${pick}»)` : 'برام توضیح بده'}</button>`
+        : html`<a class="btn sm" href="#/settings?to=ai"><${Icon} n="sparkles" cls="sm" />برای توضیح ساده، هوش مصنوعی را وصل کن</a>`}
+      ${T('pbExplain')}
+    </div>
+    ${cur?.err && html`<div class="callout err" style="margin-top:8px"><${Icon} n="circleX" cls="sm" /><div>${cur.err}</div></div>`}
+    ${cur?.out && html`<div class="pb-exp-body">
+      ${cur.out.summary && html`<p>${cur.out.summary}</p>`}
+      ${cur.out.points.length > 0 && html`<ul>${cur.out.points.map((p) => html`<li>${p}</li>`)}</ul>`}
+      ${cur.out.watch && html`<div class="callout warn" style="margin-top:6px"><${Icon} n="alert" cls="sm" /><div>${cur.out.watch}</div></div>`}
+      <div class="xs faint" style="margin-top:6px">${cur.by}. فقط درصدها فرستاده شد، نه مبلغ‌ها. عددها از حساب روی گذشته‌اند؛ متن را هوش مصنوعی نوشته.</div>
+    </div>`}
   </div>`;
 }
 
@@ -119,23 +197,36 @@ export function Builder({ st, pf, s, route }) {
   const [mode, setMode] = useState(() => (q.mode === 'alone' ? 'alone' : 'with'));
   const [years, setYears] = useState(5);
   const [pick, setPick] = useState(null);
+  const [prefs, setPrefs] = useState(null); // { risk, noCrypto } said in the sentence, for this run only
   const data = usePbData();
   const radar = useRadar();
   const box = useRef();
   useEffect(() => { if (q.pb) setTimeout(() => box.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200); }, []);
   const R = useMemo(() => (data && !data.error ? B.returnsFrom(B.seriesOf(data), I.defaultDepositPct(st)) : null), [data]);
-  const r = useMemo(() => (R && amount > 0 ? B.build({ R, pf, profile: s.profile, targets: s.targets, amount, horizon, mode, years }) : null), [R, amount, horizon, mode, years, pf.gross, s.profile, s.targets]);
+  const r = useMemo(() => (R && amount > 0 ? B.build({ R, pf, profile: s.profile, targets: s.targets, amount, horizon, mode, years, prefs }) : null), [R, amount, horizon, mode, years, pf.gross, s.profile, s.targets, prefs]);
+  const apply = (it) => {
+    if (it.amount > 0) setAmount(it.amount);
+    if (it.horizon) setHorizon(it.horizon);
+    if (it.mode) setMode(it.mode);
+    if (it.years) setYears(it.years);
+    const p = { risk: it.risk || null, noCrypto: typeof it.noCrypto === 'boolean' ? it.noCrypto : null };
+    setPrefs(p.risk || p.noCrypto !== null ? p : null);
+    setPick(null);
+  };
   const chosen = r?.cands?.find((c) => c.id === pick) || null;
   return html`<div class="card" id="builder" ref=${box}>
     <div class="card-h"><h3><${Icon} n="layers" cls="sm" />سبدساز${T('pbHow')}</h3><span class="sub">پول تازه را کجا بگذارم؟</span></div>
     <div class="pb-step"><span>۱</span>مبلغ و مدت را بگو</div>
+    <${Sentence} st=${st} s=${s} onApply=${apply} />
+    ${prefs && html`<div class="pb-prefs xs"><${Icon} n="info" cls="sm" /><span class="grow">برای همین بار از جمله‌ات: ${[prefs.risk && `ریسک ${PR.RISK[prefs.risk]}`, prefs.noCrypto === true && 'بدون رمزارز', prefs.noCrypto === false && 'رمزارز هم باشد'].filter(Boolean).join('، ')}${PR.isSet(s.profile) ? ' (به‌جای پروفایلت)' : ''}.</span>
+      <button class="calc-link" onClick=${() => setPrefs(null)}>${PR.isSet(s.profile) ? 'برگرد به پروفایل' : 'برداشتن'}</button></div>`}
     <div class="pb-in">
       <div style="min-width:220px;flex:1"><${MoneyField} label="مبلغ" rial=${amount} onRial=${setAmount} s=${s} placeholder="مثلاً ۷۰۰ میلیون" /></div>
-      <div class="field"><label>برای چه مدت</label><${Seg} value=${horizon} onChange=${setHorizon} options=${H_OPTS} /></div>
-      <div class="field"><label>حساب کن</label><${Seg} value=${mode} onChange=${setMode} options=${[['with', 'کنار دارایی‌هایم'], ['alone', 'فقط همین پول']]} /></div>
-      <div class="field"><label>گذشته</label><${Seg} value=${years} onChange=${setYears} options=${[[5, '۵ سال'], [10, '۱۰ سال']]} /></div>
+      <div class="field"><label class="ltip">برای چه مدت${T('pbHorizon')}</label><${Seg} value=${horizon} onChange=${setHorizon} options=${H_OPTS} /></div>
+      <div class="field"><label class="ltip">حساب کن${T('pbMode')}</label><${Seg} value=${mode} onChange=${setMode} options=${[['with', 'کنار دارایی‌هایم'], ['alone', 'فقط همین پول']]} /></div>
+      <div class="field"><label class="ltip">گذشته${T('pbYears')}</label><${Seg} value=${years} onChange=${setYears} options=${[[5, '۵ سال'], [10, '۱۰ سال']]} /></div>
     </div>
-    ${!PR.isSet(s.profile) && html`<div class="callout" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>پروفایل سرمایه‌گذاری‌ات را بساز تا سبدِ هم‌خوان با ریسکت مشخص شود و خط قرمزهایت رعایت شود. <a href="#/settings?to=profile">ساختن ←</a></div></div>`}
+    ${!PR.isSet(s.profile) && !prefs?.risk && html`<div class="callout" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>پروفایل سرمایه‌گذاری‌ات را بساز تا سبدِ هم‌خوان با ریسکت مشخص شود و خط قرمزهایت رعایت شود. <a href="#/settings?to=profile">ساختن ←</a></div></div>`}
     ${!data ? html`<div class="empty small">در حال خواندن ۱۰ سال قیمت طلا، دلار، بورس و رمزارز…</div>`
       : data.error ? html`<div class="callout warn" style="margin-top:10px"><${Icon} n="wifi" cls="sm" /><div>${data.error}. کمی بعد دوباره امتحان کن.</div></div>`
       : !(amount > 0) ? html`<div class="empty small">مبلغ را بنویس تا چند سبد روی گذشتهٔ واقعی بازار ایران امتحان شوند.
@@ -148,6 +239,7 @@ export function Builder({ st, pf, s, route }) {
         ${r.mode === 'with' && r.cands[0] && amount / r.cands[0].value0 < 0.2 && html`<div class="callout" style="margin-bottom:10px"><${Icon} n="info" cls="sm" /><div>این مبلغ حدود ${num(Math.round(amount / r.cands[0].value0 * 100))}٪ دارایی‌هایت است؛ برای همین سبدها به هم نزدیک‌اند و بیشتر ترکیب فعلی‌ات تعیین‌کننده است. برای دیدن فرق خود ترکیب‌ها، <button class="calc-link" onClick=${() => setMode('alone')}>«فقط همین پول»</button> را بزن.</div></div>`}
         ${(() => { const f = r.cands.find((c) => c.fits) || r.cands.find((c) => c.id === 'mid'); const m = f?.metrics; return m && html`<div class="pb-tldr"><${Icon} n="sparkles" cls="sm" /><div>
           ${f.fits ? 'سبدی که با پروفایلت جور است' : 'سبد میانه'} («${f.name}») در ${num(r.years)} سال گذشته سالی حدود <b class="num">${pct(m.cagr, { digits: 0, sign: false })}</b> رشد کرده (به دلار <b class="num">${pct(m.usdCagr, { digits: 0 })}</b>)، بدترین افتش <b class="num">${pct(Math.abs(m.maxDD), { digits: 0, sign: false })}</b> بوده و در <b class="num">${num(Math.round((m.beat || 0) * 100))}٪</b> دوره‌های ${num(horizon)} ماهه از سپرده جلو زده. بقیه را کنارش مقایسه کن؛ روی هر کارت بزن تا برنامه‌اش را ببینی.</div></div>`; })()}
+        <${Explain} st=${st} r=${r} pick=${chosen?.name || null} />
         <div class="pb-step"><span>۲</span>سبدها را مقایسه کن</div>
         <div class="pb-cards">${r.cands.map((c) => html`<${CandCard} c=${c} r=${r} s=${s} on=${pick === c.id} onPick=${() => { setPick(pick === c.id ? null : c.id); setTimeout(() => document.getElementById('pb-plan')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80); }} />`)}</div>
         <div class="pb-chart"><div class="xs sb ink2" style="margin-bottom:4px">اگر از ${monthFa(r.from)} همین سبدها را داشتی</div>

@@ -837,3 +837,26 @@ svg.rot { transform: rotate(180deg); }
 .pb-step span { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
 .pb-tldr { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--ink); font-size: 13px; line-height: 1.95; margin-bottom: 4px; }
 .pb-tldr > svg { color: var(--accent); margin-top: 4px; flex: none; }
+
+/* سبدساز: a sentence, «برام توضیح بده», and what the plan buttons do */
+.pb-say { margin-bottom: 12px; }
+.pb-say .input { min-width: 0; }
+.pb-got { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.pb-got.warn { color: var(--warn); }
+.pb-got .chip { font-size: 12px; }
+.pb-prefs { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: var(--accent-soft); margin-bottom: 10px; color: var(--ink-2); }
+.pb-prefs svg { color: var(--accent); flex: none; }
+.pb-explain { margin: 10px 0 4px; }
+.pb-exp-body { margin-top: 10px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-2, var(--card)); font-size: 13px; line-height: 2; }
+.pb-exp-body p { margin: 0 0 6px; }
+.pb-exp-body ul { margin: 0; padding-inline-start: 18px; }
+.pb-exp-body li { margin: 2px 0; }
+.pb-acts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 4px; }
+.pb-act { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px dashed var(--line-2, var(--line)); }
+.pb-act .xs { line-height: 1.9; }
+.pb-stress { align-items: center; }
+.prof-more { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.prof-more > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; list-style: none; }
+.prof-more > summary::-webkit-details-marker { display: none; }
+.prof-more > summary::before { content: '‹'; display: inline-block; transition: transform .15s; color: var(--ink-3, var(--ink-2)); font-weight: 700; }
+.prof-more[open] > summary::before { transform: rotate(-90deg); }

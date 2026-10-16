@@ -168,11 +168,14 @@ export function holdings(pf) {
  * it is measured together. mode 'alone': just the amount, in each mix.
  * R: returnsFrom(); years: 5 or 10; horizon: months ahead.
  */
-export function build({ R, pf = null, profile = null, targets = null, amount, horizon = 12, mode = 'with', years = 5 } = {}) {
+// prefs: what the owner said in a sentence ({ risk, noCrypto }); it wins over the profile for this run only
+export function build({ R, pf = null, profile = null, targets = null, amount, horizon = 12, mode = 'with', years = 5, prefs = null } = {}) {
   if (!R?.months?.length || !(amount > 0)) return null;
   const W = lastMonths(R, years * 12);
   if (W.months.length < 24) return { error: 'تاریخچهٔ کافی نیست' };
-  const level = riskLevel(profile); const noCrypto = !!profile?.noCrypto;
+  const level = RISK[prefs?.risk] ? prefs.risk : riskLevel(profile);
+  const levelFrom = RISK[prefs?.risk] ? 'sentence' : level ? 'profile' : null;
+  const noCrypto = typeof prefs?.noCrypto === 'boolean' ? prefs.noCrypto : !!profile?.noCrypto;
   const usdIdx = [1]; for (const x of W.r.usd) usdIdx.push(usdIdx[usdIdx.length - 1] * (1 + x));
   const h = holdings(pf);
   const withMode = mode === 'with' && h.modelled > 0;
@@ -211,7 +214,7 @@ export function build({ R, pf = null, profile = null, targets = null, amount, ho
   // what each block did on its own in the same window
   const each = CLASSES.map((c) => { const has = !W.r[c.id].some((x) => x === null || x === undefined); const m = has ? metrics(path({ [c.id]: 1 }, W), { depositPct: R.depositPct, horizon }) : null; return { id: c.id, name: c.short, cagr: m?.cagr ?? null, maxDD: m?.maxDD ?? null }; });
   return { mode: withMode ? 'with' : 'alone', askedWith: mode === 'with', amount, horizon, years, from: W.months[0], to: W.months[W.months.length - 1], months: W.months.length,
-    depositPct: R.depositPct, depositGain: Math.pow(1 + R.depositPct / 1200, horizon) - 1, level, profileSet: isSet(profile), other: withMode ? h.other : 0, cands, each };
+    depositPct: R.depositPct, depositGain: Math.pow(1 + R.depositPct / 1200, horizon) - 1, level, levelFrom, noCrypto, profileSet: isSet(profile), other: withMode ? h.other : 0, cands, each };
 }
 
 /* ------------------------------------------------------------ what to buy ------------------------------------------------------------ */

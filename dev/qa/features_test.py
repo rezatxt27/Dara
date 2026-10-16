@@ -401,6 +401,9 @@ async def main():
             pg.on('dialog', lambda d: asyncio.ensure_future(d.accept()))
             card = pg.locator('#profile')
             await card.locator('.chip:has-text("رشد بلندمدت")').click(); await card.locator('.chip:has-text("بیشتر از ۳ سال")').click(); await card.locator('.chip:has-text("صبر می‌کنم")').click()
+            q_before = await card.locator('.field:visible').count()
+            check('profile: three questions up front, the rest folded', q_before == 3 and await card.locator('details.prof-more:not([open])').count() == 1, q_before)
+            await card.locator('.prof-more > summary').click(); await pg.wait_for_timeout(200)
             await card.locator('.field:has-text("خرج ماهانه") input').fill('200,000,000')
             await card.locator('.toggle[title="رمزارز نمی‌خواهم"]').click(); await pg.wait_for_timeout(200)
             risk = await card.locator('.card-h .sub').inner_text()
@@ -446,6 +449,45 @@ async def main():
             await card.screenshot(path=f'{SH}/builder-narrow-{THEME}.png')
             await pg.close()
         await step('builder', t_builder())
+
+        # «سبدساز» in words: a sentence fills it in (the amount never goes to the AI), «برام توضیح بده», and what the plan buttons do
+        async def t_pbtalk():
+            pg = await newpage('analysis'); await seed_pb(pg); await pg.reload(); await pg.wait_for_timeout(1200)
+            card = pg.locator('#builder')
+            await card.locator('.pb-say input').fill('۷۰۰ میلیون دارم، تا عید لازمش ندارم، نمی‌خوام ضرر کنم، بیت‌کوین نه')
+            await card.locator('.pb-say button:has-text("بساز")').click()
+            await pg.wait_for_selector('#builder .pb-got .chip', timeout=15000); await pg.wait_for_timeout(900)
+            got = await card.locator('.pb-got').inner_text()
+            amt = await card.locator('.field:has-text("مبلغ") input').input_value()
+            on6 = await card.locator('.pb-in .seg button.on:has-text("۶ ماه"), .pb-in .seg button[aria-pressed="true"]:has-text("۶ ماه")').count()
+            fits = await card.locator('.pb-c.fits').inner_text() if await card.locator('.pb-c.fits').count() == 1 else ''
+            log = open('/tmp/mockai.log').read() if os.path.exists('/tmp/mockai.log') else ''
+            check('builder sentence: amount, «تا عید» → 6 months, low risk and no crypto understood', ''.join(c for c in amt.translate(str.maketrans('۰۱۲۳۴۵۶۷۸۹', '0123456789')) if c.isdigit()) == '700000000', (amt, got))
+            check('builder sentence: chips say what was understood, with AI', 'ریسک کم' in got and 'بدون رمزارز' in got and 'هوش مصنوعی' in got and on6 >= 1, (got, on6))
+            check('builder sentence: the low-risk mix fits «what you said», over the profile', 'ریسک کم' in fits and 'با خواسته‌ات' in fits and await card.locator('.pb-prefs').count() == 1, fits[:60])
+            check('builder sentence: the amount is not sent to the AI', 'PB_AMOUNT_MASKED' in log and 'PB_AMOUNT_LEAKED' not in log)
+            await card.locator('.pb-say').screenshot(path=f'{SH}/builder-sentence-{THEME}.png')
+            await card.locator('.pb-explain button:has-text("برام توضیح بده")').click()
+            await pg.wait_for_selector('#builder .pb-exp-body', timeout=15000)
+            body = await card.locator('.pb-exp-body').inner_text()
+            log = open('/tmp/mockai.log').read()
+            check('builder explain: plain words shown, only percentages sent', 'ریسک' in body and 'PB_EXPLAIN_PERCENT_ONLY' in log and 'PB_EXPLAIN_LEAKED' not in log, body[:80])
+            await card.locator('.pb-explain').screenshot(path=f'{SH}/builder-explain-{THEME}.png')
+            await card.locator('.pb-prefs button').click(); await pg.wait_for_timeout(600)
+            fits2 = await card.locator('.pb-c.fits').inner_text() if await card.locator('.pb-c.fits').count() == 1 else ''
+            check('builder sentence: «برگرد به پروفایل» brings the profile back', 'با پروفایلت' in fits2 and await card.locator('.pb-prefs').count() == 0, fits2[:60])
+            await card.locator('.pb-c.fits button:has-text("برنامهٔ این سبد")').click(); await pg.wait_for_timeout(500)
+            acts = await card.locator('.pb-act').all_inner_texts()
+            check('builder plan: each button says what it does', len(acts) == 2 and 'فقط یادداشت' in acts[0] and 'تخصیص هدف' in acts[1], [a[:40] for a in acts])
+            await card.locator('.pb-act').first.locator('.tipbtn').hover(); await pg.wait_for_timeout(300)
+            tip = await pg.locator('.tippop').inner_text() if await pg.locator('.tippop').count() else ''
+            check('builder plan: «ذخیرهٔ برنامه» help explains nothing is bought', 'خریده یا فروخته نمی‌شود' in tip, tip[:60])
+            await card.locator('.pb-acts').screenshot(path=f'{SH}/builder-acts-{THEME}.png')
+            await card.locator('.pb-act button:has-text("دیدن تخصیص هدف")').click(); await pg.wait_for_timeout(900)
+            top = await pg.evaluate("() => document.getElementById('targets').getBoundingClientRect().top")
+            check('builder plan: «دیدن تخصیص هدف» goes to the targets card', abs(top) < 200, top)
+            await pg.close()
+        await step('pbtalk', t_pbtalk())
 
         # «واژه‌نامه»: the help button opens it, search narrows it, and words in running text open their meaning
         async def t_glossary():

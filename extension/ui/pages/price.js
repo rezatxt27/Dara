@@ -13,6 +13,7 @@ import { TGJU_BY_KEY, NOBITEX_BY_KEY } from '../../lib/catalog.js';
 import { todayIso } from '../../lib/jalali.js';
 import { ago, timeHM } from '../../lib/format.js';
 import { AlertModal } from './market.js';
+import { Terms } from '../glossary.js';
 
 const RANGES = [[7, 'هفته'], [30, 'ماه'], [91, '۳ ماه'], [365, 'سال']];
 const PERIODS = [[7, 'هفته'], [30, 'ماه'], [91, '۳ ماه'], [365, 'سال']];
@@ -130,8 +131,8 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         <div class="xs muted">طلای داخل سکه با قیمت انس جهانی × دلار آزاد؛ باقی قیمت، حباب است.</div>
       </div>`}
       ${fund && html`<div class="pd-card"><div class="sb small">صندوق</div>
-        <div class="pd-line"><span>NAV ابطال</span><span><${Money} v=${fund.nav} s=${s} /></span></div>
-        <div class="pd-line"><span>حباب (قیمت بازار ÷ NAV)</span><b class="ltr">${pct(fund.bubble, { digits: 1 })}</b></div></div>`}
+        <div class="pd-line"><span><${Terms} text="NAV ابطال" /></span><span><${Money} v=${fund.nav} s=${s} /></span></div>
+        <div class="pd-line"><span><${Terms} text="حباب (قیمت بازار ÷ NAV)" /></span><b class="ltr">${pct(fund.bubble, { digits: 1 })}</b></div></div>`}
       ${goldGap !== null && pure && !pure.stale && html`<div class="pd-card"><div class="sb small">در برابر قیمت جهانی${H('pWorld')}</div>
         <div class="pd-line"><span>طلای خالص هر گرم (انس × دلار)</span><span><${Money} v=${pure.price} s=${s} /></span></div>
         <div class="pd-line"><span>طلای ۱۸ عیار بازار نسبت به آن</span><b class="ltr">${pct(goldGap, { digits: 1 })}</b></div>
@@ -155,7 +156,8 @@ export function PriceDetail({ st, s, refOf, onClose }) {
  *  with its source and day. Facts only; nothing here says buy or sell. */
 function Report({ rep, info, price, s, depositPct = 25 }) {
   const P = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? html`<span class="faint">—</span>` : html`<${Delta} p=${x} showAbs=${false} digits=${d} />`);
-  const line = (t, v) => html`<div class="pd-line"><span>${t}</span><span>${v}</span></div>`;
+  const seen = new Set();
+  const line = (t, v) => html`<div class="pd-line"><span>${typeof t === 'string' ? html`<${Terms} text=${t} seen=${seen} />` : t}</span><span>${v}</span></div>`;
   // the same periods for the total index and the dollar, under the symbol's own returns
   const B = rep?.bench; const PER = [['۱ ماه', 'm1'], ['۳ ماه', 'm3'], ['۶ ماه', 'm6'], ['۱۲ ماه', 'y1']];
   const benchRows = B && ['index', 'usd'].some((k) => PER.some(([, p]) => B[p]?.[k] !== null && B[p]?.[k] !== undefined)) && html`<div class="pd-bench">

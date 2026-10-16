@@ -20,6 +20,7 @@ import { SettingsPage, WelcomePage, clearSample } from './pages/settings.js';
 import { AssistantPage } from './pages/assistant.js';
 import { CapturePage } from './pages/capture.js';
 import { EmergencyCard } from './profile.js';
+import { Glossary, openGlossary } from './glossary.js';
 import * as U from '../lib/update.js';
 
 const ROUTES = [
@@ -320,6 +321,8 @@ function App() {
   const [priceRef, setPriceRef] = useState(null); // a price's detail drawer, from any page
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
+  const [gloss, setGloss] = useState(undefined); // undefined: closed; null or a word's id: open
+  useEffect(() => { const h = (e) => setGloss(e.detail ?? null); addEventListener('dara-glossary', h); return () => removeEventListener('dara-glossary', h); }, []);
   useTick(30000);
   useEffect(() => {
     const h = () => setRoute(parseHash());
@@ -369,6 +372,7 @@ function App() {
         <span class="topstatus"><${StatusChip} st=${st} /></span>
         <button class="btn icon" title="به‌روزرسانی قیمت‌ها" onClick=${refresh} disabled=${busy}><${Icon} n="refresh" cls=${busy ? 'spin' : ''} /></button>
         <button class="btn icon" title=${s.privacy ? 'نمایش مبالغ' : 'پنهان‌کردن مبالغ'} onClick=${() => act.setSettings({ privacy: !s.privacy })}><${Icon} n=${s.privacy ? 'eyeOff' : 'eye'} /></button>
+        <button class="btn icon" title="واژه‌نامه: معنی اصطلاح‌ها" aria-label="واژه‌نامه" onClick=${() => openGlossary()}><${Icon} n="help" /></button>
         <button class="btn icon" title="تغییر تم" onClick=${() => act.setSettings({ theme: themeNext })}><${Icon} n=${s.theme === 'dark' ? 'moon' : s.theme === 'light' ? 'sun' : 'monitor'} /></button>
         <button class="btn primary newbtn" aria-label="دارایی جدید" onClick=${() => setEditing({})}><${Icon} n="plus" /><span class="t">دارایی جدید</span></button>
       </div>
@@ -385,6 +389,7 @@ function App() {
       ${page === 'capture' && html`<${CapturePage} ...${ctx} />`}
     </main>
     ${priceRef && html`<${PriceDetail} key=${E.quoteId(priceRef)} st=${st} s=${s} refOf=${priceRef} onClose=${() => setPriceRef(null)} />`}
+    ${gloss !== undefined && html`<${Glossary} key=${gloss || 'all'} at=${gloss} onClose=${() => setGloss(undefined)} />`}
     ${editing && html`<${AssetEditor} key=${editing.asset?.id || "new"} st=${st} s=${s} asset=${editing.asset} preset=${editing.preset} onClose=${() => setEditing(null)} />`}
     <${Toasts} />
   </div>`;

@@ -12,6 +12,7 @@ import { uid } from './format.js';
 import { thinPoints } from './chats.js';
 import * as PR from './profile.js';
 import * as PB from './builder.js';
+import * as GL from './glossary.js';
 
 const unitName = (s) => (s?.currency === 'rial' ? 'ریال' : 'تومان');
 /** Rial → display unit, rounded */
@@ -39,6 +40,7 @@ export function systemPrompt(st, privacy = 'full') {
 - هر عددی را فقط از داده‌ها یا خروجی ابزارها بیاور؛ هرگز عدد نساز یا حدس نزن. اگر داده‌ای نیست، صریح بگو.
 - برای هر محاسبه (سناریو، تغییرات، زمان‌بندی، تاریخچه) ابزار مربوط را صدا بزن و خودت حساب نکن. برای قسط وام، قسطی یا نقدی، هدف پس‌انداز، میانگین خرید، کارمزد بورس، سود یا شکستن سپرده و رهن و اجاره، ابزارهای calc_* را صدا بزن.
 - مبالغ را به ${unit} بنویس، با جداکننده هزارگان؛ برای اعداد بزرگ از «میلیون/میلیارد» استفاده کن.
+- کاربر ممکن است اصطلاح‌های مالی (NAV، حباب، P/E، EPS، نقدشوندگی، بدترین افت، …) را نشناسد: اولین باری که یکی را به کار می‌بری، در چند کلمه ساده توضیحش بده. اگر کاربر معنی واژه‌ای را پرسید، explain_term را صدا بزن و با یک مثال ساده جواب بده.
 - برای مقایسهٔ چند گزینه یا چند عدد، یک جدول کوتاه مارک‌داون (حداکثر ۵ ستون) بنویس؛ برای روند، ترکیب یا مقایسهٔ تصویری، show_chart را صدا بزن.
 - توصیه قطعی خرید و فروش نده؛ گزینه‌ها، اثر و ریسک هرکدام را بگو و تصمیم را به کاربر بسپار.
 - دربارهٔ هر سهم یا صندوق، اول get_symbol_report را صدا بزن و فقط با همان عددها حرف بزن؛ منبع و تاریخ را بگو. هرگز نگو «بخر» یا «بفروش»؛ حداکثر بگو «ارزش بررسی دارد» و کنار دلیلش، ریسک‌ها و چیزهایی را که باید بررسی شود بیاور. بازدهی گذشته تضمینی برای آینده نیست.
@@ -71,7 +73,7 @@ export const TOOL_STEPS = {
   plan_new_money: 'تقسیم پول جدید', get_symbol_report: 'خواندن کارنامهٔ نماد', get_radar_today: 'بررسی رادار فرصت‌ها',
   calc_loan: 'محاسبهٔ هزینهٔ وام', calc_instalments: 'مقایسهٔ قسطی و نقدی', calc_savings_goal: 'محاسبهٔ هدف پس‌انداز', calc_average_buy: 'محاسبهٔ میانگین خرید',
   calc_stock_trade: 'محاسبهٔ کارمزد معامله', calc_deposit: 'محاسبهٔ سپرده', calc_rent: 'محاسبهٔ رهن و اجاره',
-  show_chart: 'آماده‌کردن نمودار', build_portfolio: 'امتحان سبدها روی گذشتهٔ بازار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
+  show_chart: 'آماده‌کردن نمودار', explain_term: 'خواندن واژه‌نامه', build_portfolio: 'امتحان سبدها روی گذشتهٔ بازار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
 };
 
 export function makeTools(ctx) {
@@ -393,6 +395,16 @@ export function makeTools(ctx) {
         if (!labels.length || labels.length !== values.length || labels.length > 12 || values.some((v) => !isFinite(+v))) return { error: 'برای custom، labels و values هم‌اندازه (حداکثر ۱۲) و عددی لازم است' };
         const unit = ['money', 'pct', 'number'].includes(a.unit) ? a.unit : 'number';
         return push({ type: 'bars', unit, title: a.title || '', items: labels.map((n, i) => ({ name: String(n).slice(0, 40), value: unit === 'money' ? +values[i] * k : unit === 'pct' ? +values[i] / 100 : +values[i] })) });
+      },
+    },
+    {
+      name: 'explain_term',
+      description: 'معنی یک اصطلاح مالی از واژه‌نامهٔ دارا (همان توضیحی که کاربر در برنامه می‌بیند): NAV، حباب، P/E، EPS، سود نقدی، افزایش سرمایه، شاخص کل، درآمد ثابت، ETF، نقدشوندگی، بدترین افت، نوسان، سربه‌سر، سود مؤثر، مواجهه، متوازن‌سازی و…',
+      schema: { type: 'object', properties: { term: { type: 'string' } }, required: ['term'] },
+      run: ({ term } = {}) => {
+        const hits = GL.search(term).slice(0, 2);
+        if (!hits.length) return { error: 'این واژه در واژه‌نامهٔ دارا نیست؛ با دانش عمومی و ساده توضیح بده' };
+        return { entries: hits.map((t) => ({ term: t.term, short: t.short, explanation: t.long, example: t.example })) };
       },
     },
     {

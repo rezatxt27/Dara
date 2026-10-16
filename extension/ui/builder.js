@@ -7,6 +7,7 @@ import * as PR from '../lib/profile.js';
 import { T } from './tips.js';
 import { act } from './actions.js';
 import { uid } from '../lib/format.js';
+import { TermTip } from './glossary.js';
 
 const H_OPTS = [[6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال'], [36, '۳ سال']];
 const monthFa = (m) => (m ? fmtJ(m + '-15', 'my') : '');
@@ -48,14 +49,14 @@ function CandCard({ c, r, s, on, onPick }) {
     <${StackBar} items=${top.map((k) => ({ name: k.short, value: c.weights[k.id], color: k.color }))} height=${8} />
     <div class="pb-legend xs">${top.map((k) => html`<span><i class="dot" style=${`background:${k.color}`}></i>${k.short} ${num(Math.round(c.weights[k.id] * 100))}٪</span>`)}</div>
     ${m && html`<div class="pb-rows">
-      <${Row} t="بازده سالانه">${pct(m.cagr, { digits: 0 })}</${Row}>
-      <${Row} t="همان به دلار">${pct(m.usdCagr, { digits: 0 })}</${Row}>
-      <${Row} t="بدترین افت"><span class="neg">${pct(m.maxDD, { digits: 0 })}</span>${m.under ? html`<span class="xs muted"> · ${num(m.under)} ماه زیر اوج</span>` : ''}</${Row}>
+      <${Row} t=${html`<${TermTip} id="cagr" label="بازده سالانه" />`}>${pct(m.cagr, { digits: 0 })}</${Row}>
+      <${Row} t=${html`<${TermTip} id="inflation" label="همان به دلار" />`}>${pct(m.usdCagr, { digits: 0 })}</${Row}>
+      <${Row} t=${html`<${TermTip} id="drawdown" label="بدترین افت" />`}><span class="neg">${pct(m.maxDD, { digits: 0 })}</span>${m.under ? html`<span class="xs muted"> · ${num(m.under)} ماه زیر اوج</span>` : ''}</${Row}>
       <${Row} t="بدترین ۱۲ ماه"><span class=${m.worst12 < 0 ? 'neg' : ''}>${pct(m.worst12, { digits: 0 })}</span></${Row}>
       <${Row} t=${`جلوتر از سپرده در ${num(r.horizon)} ماه`}>${m.beat === null ? '—' : `${num(Math.round(m.beat * 100))}٪ دوره‌ها`}</${Row}>
     </div>`}
     ${c.range && html`<div class="pb-range">
-      <div class="xs muted">بعد از ${H_OPTS.find((x) => x[0] === r.horizon)?.[1] || num(r.horizon) + ' ماه'}، اگر گذشته تکرار شود</div>
+      <div class="xs muted">بعد از ${H_OPTS.find((x) => x[0] === r.horizon)?.[1] || num(r.horizon) + ' ماه'}، <${TermTip} id="range" label="اگر گذشته تکرار شود" /></div>
       <div class="pb-3"><span><i>بد</i><${Money} v=${c.range.bad} s=${s} compact unit=${false} /><em class="num">${pct(c.range.badPct, { digits: 0 })}</em></span>
         <span><i>معمولی</i><${Money} v=${c.range.mid} s=${s} compact unit=${false} /><em class="num">${pct(c.range.midPct, { digits: 0 })}</em></span>
         <span><i>خوب</i><${Money} v=${c.range.good} s=${s} compact unit=${false} /><em class="num">${pct(c.range.goodPct, { digits: 0 })}</em></span></div>
@@ -78,7 +79,7 @@ function Plan({ c, r, s, st, radar, data, onSaved }) {
     if (Object.keys(s.targets || {}).length && !confirm('ترکیب هدفی که قبلاً گذاشته‌ای با این سبد عوض شود؟')) return;
     await act.setSettings({ targets: c.byCat }); toast('ترکیب هدف گذاشته شد');
   };
-  return html`<div class="pb-plan" id="pb-plan">
+  return html`<div class="pb-step" style="margin-top:14px"><span>۳</span>برنامه‌ات</div><div class="pb-plan" id="pb-plan">
     <div class="sb" style="margin-bottom:8px">برنامهٔ «${c.name}» برای <${Money} v=${r.amount} s=${s} compact /></div>
     ${rows.map((k) => {
       const vs = B.vehicles(k.id, { radar, quotes: st.quotes, depositPct: dep });
@@ -127,6 +128,7 @@ export function Builder({ st, pf, s, route }) {
   const chosen = r?.cands?.find((c) => c.id === pick) || null;
   return html`<div class="card" id="builder" ref=${box}>
     <div class="card-h"><h3><${Icon} n="layers" cls="sm" />سبدساز${T('pbHow')}</h3><span class="sub">پول تازه را کجا بگذارم؟</span></div>
+    <div class="pb-step"><span>۱</span>مبلغ و مدت را بگو</div>
     <div class="pb-in">
       <div style="min-width:220px;flex:1"><${MoneyField} label="مبلغ" rial=${amount} onRial=${setAmount} s=${s} placeholder="مثلاً ۷۰۰ میلیون" /></div>
       <div class="field"><label>برای چه مدت</label><${Seg} value=${horizon} onChange=${setHorizon} options=${H_OPTS} /></div>
@@ -136,13 +138,17 @@ export function Builder({ st, pf, s, route }) {
     ${!PR.isSet(s.profile) && html`<div class="callout" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>پروفایل سرمایه‌گذاری‌ات را بساز تا سبدِ هم‌خوان با ریسکت مشخص شود و خط قرمزهایت رعایت شود. <a href="#/settings?to=profile">ساختن ←</a></div></div>`}
     ${!data ? html`<div class="empty small">در حال خواندن ۱۰ سال قیمت طلا، دلار، بورس و رمزارز…</div>`
       : data.error ? html`<div class="callout warn" style="margin-top:10px"><${Icon} n="wifi" cls="sm" /><div>${data.error}. کمی بعد دوباره امتحان کن.</div></div>`
-      : !(amount > 0) ? html`<div class="empty small">مبلغ را بنویس تا چهار سبد روی گذشتهٔ واقعی بازار ایران امتحان شوند.</div>`
+      : !(amount > 0) ? html`<div class="empty small">مبلغ را بنویس تا چند سبد روی گذشتهٔ واقعی بازار ایران امتحان شوند.
+          <div class="chips" style="justify-content:center;margin-top:10px">${[2e9, 7e9, 2e10].map((v) => html`<button class="chip" onClick=${() => setAmount(v)}><${Money} v=${v} s=${s} compact /></button>`)}</div></div>`
       : r?.error ? html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${r.error}</div></div>`
       : r && html`
         <div class="small muted pb-sum">از ${monthFa(r.from)} تا ${monthFa(r.to)} (${num(r.months)} ماه)، ماه‌به‌ماه و به تومان. ${r.mode === 'with' ? 'مبلغ کنار دارایی‌هایت حساب شده؛ عددها برای کل دارایی‌های قابل‌مدل است.' : 'فقط همین مبلغ.'} سپرده در همین ${num(horizon)} ماه (با نرخ امروز ${num(r.depositPct, 1)}٪): <b class="num">${pct(r.depositGain, { digits: 0 })}</b>. عددها به تومان‌اند و بخشی از رشدشان فقط پایین آمدن ارزش ریال است؛ ستون «به دلار» این را جدا می‌کند.
           ${r.askedWith && r.mode === 'alone' ? ' (هنوز دارایی قابل‌مدلی ثبت نکرده‌ای؛ فقط همین مبلغ حساب شد.)' : ''}
           ${r.other > 0 ? html` ملک، سهام خصوصی، فلزات و سایر (<${Money} v=${r.other} s=${s} compact />) در این حساب نیستند.` : ''}</div>
         ${r.mode === 'with' && r.cands[0] && amount / r.cands[0].value0 < 0.2 && html`<div class="callout" style="margin-bottom:10px"><${Icon} n="info" cls="sm" /><div>این مبلغ حدود ${num(Math.round(amount / r.cands[0].value0 * 100))}٪ دارایی‌هایت است؛ برای همین سبدها به هم نزدیک‌اند و بیشتر ترکیب فعلی‌ات تعیین‌کننده است. برای دیدن فرق خود ترکیب‌ها، <button class="calc-link" onClick=${() => setMode('alone')}>«فقط همین پول»</button> را بزن.</div></div>`}
+        ${(() => { const f = r.cands.find((c) => c.fits) || r.cands.find((c) => c.id === 'mid'); const m = f?.metrics; return m && html`<div class="pb-tldr"><${Icon} n="sparkles" cls="sm" /><div>
+          ${f.fits ? 'سبدی که با پروفایلت جور است' : 'سبد میانه'} («${f.name}») در ${num(r.years)} سال گذشته سالی حدود <b class="num">${pct(m.cagr, { digits: 0, sign: false })}</b> رشد کرده (به دلار <b class="num">${pct(m.usdCagr, { digits: 0 })}</b>)، بدترین افتش <b class="num">${pct(Math.abs(m.maxDD), { digits: 0, sign: false })}</b> بوده و در <b class="num">${num(Math.round((m.beat || 0) * 100))}٪</b> دوره‌های ${num(horizon)} ماهه از سپرده جلو زده. بقیه را کنارش مقایسه کن؛ روی هر کارت بزن تا برنامه‌اش را ببینی.</div></div>`; })()}
+        <div class="pb-step"><span>۲</span>سبدها را مقایسه کن</div>
         <div class="pb-cards">${r.cands.map((c) => html`<${CandCard} c=${c} r=${r} s=${s} on=${pick === c.id} onPick=${() => { setPick(pick === c.id ? null : c.id); setTimeout(() => document.getElementById('pb-plan')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80); }} />`)}</div>
         <div class="pb-chart"><div class="xs sb ink2" style="margin-bottom:4px">اگر از ${monthFa(r.from)} همین سبدها را داشتی</div>
           <${Lines} months=${[r.from, r.to]} series=${r.cands.map((c) => ({ name: c.name, p: c.path, color: LINE_COLORS[c.id], hl: c.fits }))} /></div>

@@ -7,6 +7,7 @@ import * as E from '../../lib/engine.js';
 import * as I from '../../lib/insights.js';
 import { act } from '../actions.js';
 import * as PR from '../../lib/profile.js';
+import { Terms } from '../glossary.js';
 
 const ORDER = ['negBubble', 'goldBubble', 'fixedBeat', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
 const SIG_D = {
@@ -138,8 +139,8 @@ function Card({ c, radar, s, isNew, marked, onMark, openPrice }) {
       <button class=${'btn icon sm ghost' + (marked ? ' on' : '')} title=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-label=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-pressed=${marked ? 'true' : 'false'} onClick=${onMark}><${Icon} n=${marked ? 'circleCheck' : 'plus'} cls="sm" /></button>
     </div>
     <${Viz} kind=${c.kind} m=${c.m} rec=${c.kind === 'stock' ? radar.stocks?.[c.ins] : null} day=${radar.day} s=${s} />
-    <div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small">${t}</div>`)}</div>
-    <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs">${t}</div>`)}</div>
+    ${((seen) => html`<div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small"><${Terms} text=${t} seen=${seen} /></div>`)}</div>
+    <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs"><${Terms} text=${t} seen=${seen} /></div>`)}</div>`)(new Set())}
     <div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار و کارنامه</button><span class="grow"></span><${AskBtn} q=${q} label="از دستیار بپرس" /></div>
   </article>`;
 }

@@ -69,7 +69,7 @@ function Threads({ chat, onOpen, onDelete, onClose }) {
 export function AssistantPage({ st, s, route }) {
   // the open conversation; every change is saved into its thread (see lib/chats.js)
   const chatRef = useRef(CH.normalize(st.chat));
-  const [threadId, setThreadId] = useState(() => chatRef.current.current || uid('t'));
+  const [threadId, setThreadId] = useState(() => uid('t')) // a fresh id until the saved conversations are read;
   const threadRef = useRef(threadId); threadRef.current = threadId;
   const [msgs, setMsgs] = useState([]);
   const [showThreads, setShowThreads] = useState(false);
@@ -80,7 +80,8 @@ export function AssistantPage({ st, s, route }) {
     act.loadChat().then((c) => {
       if (c) {
         chatRef.current = c;
-        const t = c.threads.find((x) => x.id === c.current);
+        // a question sent from another page («بپرس») starts its own conversation; otherwise the last one reopens
+        const t = route.q.ask ? null : c.threads.find((x) => x.id === c.current);
         if (t) { threadRef.current = t.id; setThreadId(t.id); msgsRef.current = t.messages; setMsgs(t.messages); }
       }
       setLoaded(true);
@@ -157,6 +158,8 @@ export function AssistantPage({ st, s, route }) {
     const q = route.q.ask;
     if (!q || !loaded) return;
     history.replaceState(null, '', '#/assistant');
+    // a question from another page starts its own conversation, also when this page was already open
+    if (msgsRef.current.length && !busy) newThread();
     if (active) ask(q); else setText(q);
   }, [route.q.ask, loaded]);
   const setPropStatus = (mid, pid, status) => persist((list) => list.map((m) => (m.id === mid ? { ...m, proposals: m.proposals.map((p) => (p.id === pid ? { ...p, status } : p)) } : m)));

@@ -435,7 +435,7 @@ async def main():
             await card.screenshot(path=f'{SH}/builder-alone-{THEME}.png')
             check('builder: «فقط همین پول» keeps the mixes (yours as proportions)', await card.locator('.pb-c').count() == n_with)
             await card.locator('.seg button:has-text("کنار دارایی‌هایم")').click(); await pg.wait_for_timeout(700)
-            await card.locator('.pb-c.fits button').click(); await pg.wait_for_timeout(500)
+            await card.locator('.pb-c.fits button:has-text("برنامهٔ این سبد")').click(); await pg.wait_for_timeout(500)
             rows = await card.locator('.pb-pr').count()
             await card.locator('.pb-plan').screenshot(path=f'{SH}/builder-plan-{THEME}.png')
             await card.locator('.pb-plan button:has-text("ذخیرهٔ برنامه")').click(); await pg.wait_for_timeout(700)
@@ -446,6 +446,29 @@ async def main():
             await card.screenshot(path=f'{SH}/builder-narrow-{THEME}.png')
             await pg.close()
         await step('builder', t_builder())
+
+        # «واژه‌نامه»: the help button opens it, search narrows it, and words in running text open their meaning
+        async def t_glossary():
+            pg = await newpage('analysis'); await seed_pb(pg); await pg.reload(); await pg.wait_for_timeout(1000)
+            await pg.click('button[aria-label="واژه‌نامه"]'); await pg.wait_for_timeout(300)
+            all_n = await pg.locator('.drawer .gl-it').count()
+            await pg.fill('.drawer input.input', 'NAV'); await pg.wait_for_timeout(200)
+            await pg.locator('.drawer .gl-h').first.click(); await pg.wait_for_timeout(200)
+            body = await pg.locator('.drawer .gl-b').first.inner_text()
+            await pg.screenshot(path=f'{SH}/glossary-{THEME}.png')
+            check('glossary: opens from the top bar, searchable, explains NAV', all_n >= 25 and 'ابطال' in body, (all_n, body[:60]))
+            await pg.keyboard.press('Escape'); await pg.wait_for_timeout(200)
+            card = pg.locator('#builder')
+            await card.locator('.field:has-text("مبلغ") input').fill('700,000,000'); await pg.wait_for_timeout(900)
+            await card.locator('.pb-c .term').first.hover(); await pg.wait_for_timeout(300)
+            pop = await pg.locator('.tippop').inner_text() if await pg.locator('.tippop').count() else ''
+            check('glossary: a word on the builder opens its meaning, with a way to the full list', 'همهٔ واژه‌ها' in pop and len(pop) > 40, pop[:80])
+            await pg.locator('.tippop button:has-text("همهٔ واژه‌ها")').click(); await pg.wait_for_timeout(300)
+            check('glossary: «همهٔ واژه‌ها» opens the list at that word', await pg.locator('.drawer .gl-it.on').count() == 1)
+            await pg.keyboard.press('Escape')
+            check('builder: a plain summary sits above the mixes', await card.locator('.pb-tldr').count() == 1)
+            await pg.close()
+        await step('glossary', t_glossary())
 
         # more currencies: six on the market page, any other added from «ارز دیگر» (and removable); the editor can pick them
         async def t_fx():

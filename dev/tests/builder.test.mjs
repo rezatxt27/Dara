@@ -124,3 +124,18 @@ test('build_portfolio in percent mode with holdings: no post-addition weights or
   const full = await A.makeTools({ getState: () => st, privacy: 'full', pbData: async () => data }).find((t) => t.name === 'build_portfolio').run({ amount: 700_000_000, months: 24 });
   assert.ok(JSON.stringify(full).includes('weights_pct'));
 });
+
+test('glossary: words found as whole words, each once; search; the assistant can read it', async () => {
+  const G = await import('../../extension/lib/glossary.js');
+  const p = G.split('حباب ۳٪ (آخرین قیمت در برابر آخرین NAV)؛ حباب بالا. P/E ۸ در برابر میانهٔ گروه');
+  const ids = p.filter((x) => typeof x !== 'string').map((x) => x.id);
+  assert.deepEqual(ids, ['bubble', 'nav', 'pe', 'median']);
+  assert.equal(p.map((x) => (typeof x === 'string' ? x : x.text)).join(''), 'حباب ۳٪ (آخرین قیمت در برابر آخرین NAV)؛ حباب بالا. P/E ۸ در برابر میانهٔ گروه');
+  assert.ok(!G.split('حبابی').some((x) => typeof x !== 'string'), 'not inside a longer word');
+  assert.equal(G.split('NAV ابطال امروز')[0].id, 'nav');
+  assert.equal(G.search('nav')[0].id, 'nav');
+  for (const t of G.TERMS) assert.ok(t.short && t.long && t.aliases.length, t.id);
+  const st = { assets: [], quotes: {}, settings: { currency: 'toman' }, snapshots: {}, events: [], flows: [], alerts: [] };
+  const r = A.makeTools({ getState: () => st }).find((t) => t.name === 'explain_term').run({ term: 'P/E' });
+  assert.equal(r.entries[0].term.startsWith('P/E'), true);
+});

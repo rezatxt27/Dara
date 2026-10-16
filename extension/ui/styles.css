@@ -449,6 +449,7 @@ input[dir="ltr"], .latin, .msg .by { font-family: 'Vazir', ui-monospace, Tahoma,
 
 /* «این عدد از کجا آمد؟» */
 .xwrap { display: inline-flex; vertical-align: middle; }
+.xwrap.tw { display: inline; vertical-align: baseline; }
 .xbtn { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--faint); cursor: pointer; transition: color .15s, background .15s; }
 .xbtn:hover, .xbtn.on { color: var(--accent); background: var(--accent-soft); }
 .xbtn.light { color: rgba(255,255,255,.6); } .xbtn.light:hover, .xbtn.light.on { color: #fff; background: rgba(255,255,255,.16); }
@@ -820,3 +821,19 @@ svg.rot { transform: rotate(180deg); }
 .pb-saved { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .pb-sv { padding: 6px 0; gap: 10px; flex-wrap: wrap; }
 @media (max-width: 560px) { .pb-in .seg { width: 100%; overflow-x: auto; } }
+
+/* glossary words in running text, and «واژه‌نامه» */
+.term { display: inline; padding: 0; margin: 0; border: 0; background: none; font: inherit; color: inherit; cursor: help; text-decoration: underline dotted; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+.term:hover, .term.on { color: var(--accent); }
+.term:focus-visible { outline: 2px solid var(--accent-soft); border-radius: 4px; }
+.gl-list { display: flex; flex-direction: column; margin-top: 10px; }
+.gl-it { border-bottom: 1px solid var(--line); }
+.gl-h { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 2px; border: 0; background: none; font: inherit; color: inherit; text-align: right; cursor: pointer; }
+.gl-s { display: block; margin-top: 2px; }
+.gl-b { padding: 0 2px 12px; line-height: 2; color: var(--ink-2); }
+.gl-it.on .gl-h b { color: var(--accent); }
+
+.pb-step { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; font-size: 13px; font-weight: 800; }
+.pb-step span { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.pb-tldr { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: var(--accent-soft); color: var(--ink); font-size: 13px; line-height: 1.95; margin-bottom: 4px; }
+.pb-tldr > svg { color: var(--accent); margin-top: 4px; flex: none; }

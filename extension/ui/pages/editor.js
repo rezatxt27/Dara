@@ -1,6 +1,7 @@
 import { html, useState, useEffect, useMemo, useRef, Tip, Icon, Drawer, Seg, NumField, MoneyField, JDateField, Money, Ava, Toggle, send, toast, refLabel, num, pct, fmtJ, money, useRadar } from '../components.js';
 import * as RD from '../../lib/radar.js';
 import * as PR from '../../lib/profile.js';
+import { Terms } from '../glossary.js';
 import * as I from '../../lib/insights.js';
 import * as BB from '../../lib/bubble.js';
 import { CryptoPicker } from '../pickers.js';
@@ -484,7 +485,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
 
     ${(preBuy?.lines.length > 0 || profNotes.length > 0) && html`<details class="sec prebuy" open>
       <summary class="st"><${Icon} n="info" cls="sm" />پیش از خرید ببین</summary>
-      <ul class="prebuy-l">${profNotes.map((l) => html`<li class="warn">${l.t}</li>`)}${(preBuy?.lines || []).map((l) => html`<li class=${l.warn ? 'warn' : ''}>${l.t}</li>`)}</ul>
+      <ul class="prebuy-l">${profNotes.map((l) => html`<li class="warn">${l.t}</li>`)}${((seen) => (preBuy?.lines || []).map((l) => html`<li class=${l.warn ? 'warn' : ''}><${Terms} text=${l.t} seen=${seen} /></li>`))(new Set())}</ul>
       <span class="hint">${!preBuy ? 'از پروفایل سرمایه‌گذاری‌ات. ' : preBuy.rep ? `از رادار، جلسهٔ ${fmtJ(preBuy.rep.day)}.` : 'با روشن بودن رادار فرصت‌ها، P/E، فاصله از سقف و نقدشوندگی هم اینجا می‌آید.'} فقط برای اطلاع است؛ ثبت را عوض نمی‌کند. در تنظیمات می‌شود خاموشش کرد.</span>
     </details>`}
 

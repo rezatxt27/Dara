@@ -73,7 +73,10 @@ test('builder: with holdings, new money fills gaps toward each mix and everythin
 test('builder: saved plan valued from later prices', () => {
   const p = { at: Date.now() - 365 * 864e5, adds: { gold: 1e9, deposit: 1e9 }, start: { gold: 100 }, depositPct: 20 };
   const v = B.planToday(p, { gold: 150 });
-  close(v.pct, (1.5e9 + 1.2e9) / 2e9 - 1, 1e-3); close(v.deposit, 0.2, 1e-3);
+  const dep = Math.pow(1 + 20 / 1200, 12) - 1;
+  close(v.pct, (1.5e9 + 1e9 * (1 + dep)) / 2e9 - 1, 1e-3); close(v.deposit, dep, 1e-3); assert.deepEqual(v.missing, []);
+  assert.deepEqual(B.planToday({ ...p, adds: { usd: 1e9 } }, { gold: 150 }).missing, ['usd']);
+  assert.equal(B.planToday({ ...p, at: undefined }, { gold: 150 }), null);
 });
 
 test('assistant build_portfolio: table numbers, two charts, a link, nothing absolute in percent mode', async () => {
@@ -94,4 +97,30 @@ test('builder: the owner’s target mix is one of the candidates', () => {
   const t = r.cands.find((c) => c.id === 'targets');
   close(t.weights.gold, 0.5); close(t.weights.deposit, 0.5);
   assert.ok(!B.build({ R, amount: 1e9, horizon: 12, mode: 'alone', targets: {} }).cands.some((c) => c.id === 'targets'));
+});
+
+test('review fixes: allocation by block, deposit never «beats» itself, cost inside the path', () => {
+  // online gold counts as gold: a 25%-gold mix adds no more gold to an owner who is all online gold
+  const add = B.allocClasses({ gold: 1e10 }, { deposit: 0.55, gold: 0.25, usd: 0.15, bourse: 0.05 }, 1e10);
+  assert.ok(add.gold < 1); close(Object.values(add).reduce((a, b) => a + b, 0), 1e10);
+  const W = B.lastMonths(R, 60);
+  assert.equal(B.metrics(B.path({ deposit: 1 }, W), { depositPct: 24, horizon: 24 }).beat, 0);
+  const r = B.build({ R, amount: 1e9, horizon: 12, mode: 'alone' });
+  const low = r.cands.find((c) => c.id === 'low');
+  assert.ok(low.path[0] < 1 && low.path[0] > 0.98, 'the cost of buying in comes off at the start');
+  assert.ok(isFinite(low.range.midUsdPct) && low.range.midUsdPct < low.range.midPct);
+});
+
+test('build_portfolio in percent mode with holdings: no post-addition weights or stress', async () => {
+  const now = Date.now();
+  const st = { assets: [{ id: 'b', name: 'بانک', category: 'bank', mode: 'balance', balance: 5e10, balanceAt: now }], quotes: {}, settings: { currency: 'toman', targets: {}, depositPct: 24 }, snapshots: {}, events: [], flows: [], alerts: [] };
+  const pts = (m) => Object.entries(m).map(([k, v]) => [k + '-28', v]);
+  const data = { gold: pts(fx.geram18), usd: pts(fx.usd), index: pts(fx.index), btc: pts(btc) };
+  const tools = A.makeTools({ getState: () => st, privacy: 'percent', pbData: async () => data });
+  const r = await tools.find((t) => t.name === 'build_portfolio').run({ amount: 700_000_000, months: 24 });
+  assert.equal(r.mode, 'with');
+  const json = JSON.stringify(r);
+  assert.ok(!json.includes('weights_pct') && !json.includes('stress_pct') && json.includes('mix_recipe_pct'));
+  const full = await A.makeTools({ getState: () => st, privacy: 'full', pbData: async () => data }).find((t) => t.name === 'build_portfolio').run({ amount: 700_000_000, months: 24 });
+  assert.ok(JSON.stringify(full).includes('weights_pct'));
 });

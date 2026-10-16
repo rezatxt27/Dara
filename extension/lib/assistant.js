@@ -415,12 +415,16 @@ export function makeTools(ctx) {
         return { window: `${r.from} تا ${r.to}`, months_tested: r.months, horizon_months: months, mode: r.mode, deposit_rate_pct: r.depositPct, deposit_gain_over_horizon_pct: p0(r.depositGain),
           risk_from_profile: r.level ? PR.RISK[r.level] : 'پروفایل ساخته نشده', not_modelled: r.other > 0 ? (P() ? 'بخشی از دارایی (ملک، سهام خصوصی، …)' : { amount: disp(r.other, s.settings), unit: unitName(s.settings) }) : undefined,
           each_asset_yearly_pct: Object.fromEntries(r.each.map((e) => [e.name, p0(e.cagr)])),
-          portfolios: r.cands.map((c) => ({ name: c.name, fits_profile: c.fits || undefined, weights_pct: Object.fromEntries(Object.entries(c.weights).filter(([, v]) => v > 0.004).map(([kk, v]) => [PB.CLASS[kk].short, p0(v)])),
+          // percent-only with holdings: the weights after adding a known amount would give away the total, so the
+          // model gets each mix's own recipe and no stress figures (they are linear in those weights)
+          portfolios: r.cands.map((c) => { const hide = P() && r.mode === 'with'; const w = hide ? (c.byCat ? PB.mixWeights(c.byCat) : c.weights) : c.weights; return { name: c.name, fits_profile: c.fits || undefined,
+            [hide ? 'mix_recipe_pct' : 'weights_pct']: Object.fromEntries(Object.entries(w).filter(([, v]) => v > 0.004).map(([kk, v]) => [PB.CLASS[kk].short, p0(v)])),
             yearly_return_pct: p0(c.metrics?.cagr), yearly_in_dollars_pct: p0(c.metrics?.usdCagr), worst_drop_pct: p0(c.metrics?.maxDD), months_under_peak: c.metrics?.under, worst_12m_pct: p0(c.metrics?.worst12),
             beat_deposit_share_pct: p0(c.metrics?.beat), range_change_pct: c.range ? { bad: p0(c.range.badPct), typical: p0(c.range.midPct), good: p0(c.range.goodPct) } : null,
             ...(P() ? {} : { range_value: c.range ? { bad: disp(c.range.bad, s.settings), typical: disp(c.range.mid, s.settings), good: disp(c.range.good, s.settings), unit: unitName(s.settings) } : null,
               new_money_split: Object.fromEntries(Object.entries(c.adds).filter(([, v]) => v >= 1).map(([kk, v]) => [PB.CLASS[kk].short, disp(v, s.settings)])) }),
-            stress_pct: { dollar_up_50: p0(c.stress.usdUp), bourse_down_30: p0(c.stress.bourseDown) } })),
+            range_typical_in_dollars_pct: c.range ? p0(c.range.midUsdPct) : null,
+            stress_pct: hide ? undefined : { dollar_up_50: p0(c.stress.usdUp), bourse_down_30: p0(c.stress.bourseDown) } }; }),
           note: 'گذشته تضمین آینده نیست؛ سپرده با نرخ امروز برای گذشته حساب شده. نمودار و دکمهٔ «باز کردن در سبدساز» زیر جواب آمده؛ عددها را تکرار نکن، خلاصه و مقایسه کن.' };
       },
     },

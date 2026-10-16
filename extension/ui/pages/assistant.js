@@ -71,16 +71,20 @@ export function AssistantPage({ st, s, route }) {
   const chatRef = useRef(CH.normalize(st.chat));
   const [threadId, setThreadId] = useState(() => chatRef.current.current || uid('t'));
   const threadRef = useRef(threadId); threadRef.current = threadId;
-  const [msgs, setMsgs] = useState(() => chatRef.current.threads.find((t) => t.id === chatRef.current.current)?.messages || []);
+  const [msgs, setMsgs] = useState([]);
   const [showThreads, setShowThreads] = useState(false);
-  // the page's copy of the store skips chat writes (they're frequent): read the saved conversations fresh on opening
+  // the page's copy of the store skips chat writes (they're frequent): the saved conversations are read fresh on
+  // opening, and nothing can be asked (or saved) before that, so a stale copy never overwrites newer messages
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     act.loadChat().then((c) => {
-      if (!c || msgsRef.current.length) return;
-      chatRef.current = c;
-      const t = c.threads.find((x) => x.id === c.current);
-      if (t) { threadRef.current = t.id; setThreadId(t.id); msgsRef.current = t.messages; setMsgs(t.messages); }
-    });
+      if (c) {
+        chatRef.current = c;
+        const t = c.threads.find((x) => x.id === c.current);
+        if (t) { threadRef.current = t.id; setThreadId(t.id); msgsRef.current = t.messages; setMsgs(t.messages); }
+      }
+      setLoaded(true);
+    }, () => setLoaded(true));
   }, []);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(null); // {steps:[], conn}
@@ -122,7 +126,7 @@ export function AssistantPage({ st, s, route }) {
 
   const ask = async (q) => {
     q = (q ?? text).trim();
-    if (!q || busy) return;
+    if (!q || busy || !loaded) return;
     setText('');
     const privacy = stRef.current.ai.privacy;
     const userMsg = { id: uid('m'), role: 'user', content: q, at: Date.now(), privacy };
@@ -151,10 +155,10 @@ export function AssistantPage({ st, s, route }) {
   // «بپرس» buttons elsewhere open this page with ?ask=…: send it once, then clean the address.
   useEffect(() => {
     const q = route.q.ask;
-    if (!q) return;
+    if (!q || !loaded) return;
     history.replaceState(null, '', '#/assistant');
     if (active) ask(q); else setText(q);
-  }, [route.q.ask]);
+  }, [route.q.ask, loaded]);
   const setPropStatus = (mid, pid, status) => persist((list) => list.map((m) => (m.id === mid ? { ...m, proposals: m.proposals.map((p) => (p.id === pid ? { ...p, status } : p)) } : m)));
 
   return html`<div class="page">
@@ -171,7 +175,7 @@ export function AssistantPage({ st, s, route }) {
           ${!active && html`<div class="empty"><div class="ico"><${Icon} n="bot" /></div><div class="sb" style="margin-bottom:6px">دستیار هنوز فعال نیست</div>
             <div class="small" style="margin-bottom:12px">یک اتصال هوش مصنوعی (هر سرویس سازگار با OpenAI، Anthropic یا مدل محلی) اضافه کن.</div>
             <a class="btn primary" href="#/settings" onClick=${() => setTimeout(() => document.getElementById('ai')?.scrollIntoView({ behavior: 'smooth' }), 300)}><${Icon} n="plug" cls="sm" />افزودن اتصال</a></div>`}
-          ${active && !msgs.length && html`<div class="empty" style="padding:30px 10px"><div class="ico"><${Icon} n="message" /></div>
+          ${active && loaded && !msgs.length && html`<div class="empty" style="padding:30px 10px"><div class="ico"><${Icon} n="message" /></div>
             <div class="sb" style="margin-bottom:4px">درباره دارایی‌هایت بپرس</div><div class="small" style="margin-bottom:14px">دستیار به داده‌های واقعی دارا دسترسی دارد، سناریو شبیه‌سازی می‌کند و تغییرات را فقط با تأیید تو اعمال می‌کند.</div>
             <div class="sugg" style="justify-content:center">${SUGGESTIONS.map((q) => html`<button class="chip" onClick=${() => ask(q)}>${q}</button>`)}</div></div>`}
           ${msgs.map((m) => html`<div class=${'msg ' + (m.role === 'user' ? 'user' : 'bot') + (m.error ? ' err' : '')} key=${m.id}>

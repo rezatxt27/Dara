@@ -58,7 +58,8 @@ function CandCard({ c, r, s, on, onPick }) {
       <div class="xs muted">بعد از ${H_OPTS.find((x) => x[0] === r.horizon)?.[1] || num(r.horizon) + ' ماه'}، اگر گذشته تکرار شود</div>
       <div class="pb-3"><span><i>بد</i><${Money} v=${c.range.bad} s=${s} compact unit=${false} /><em class="num">${pct(c.range.badPct, { digits: 0 })}</em></span>
         <span><i>معمولی</i><${Money} v=${c.range.mid} s=${s} compact unit=${false} /><em class="num">${pct(c.range.midPct, { digits: 0 })}</em></span>
-        <span><i>خوب</i><${Money} v=${c.range.good} s=${s} compact unit=${false} /><em class="num">${pct(c.range.goodPct, { digits: 0 })}</em></span></div></div>`}
+        <span><i>خوب</i><${Money} v=${c.range.good} s=${s} compact unit=${false} /><em class="num">${pct(c.range.goodPct, { digits: 0 })}</em></span></div>
+      <div class="xs muted" style="margin-top:4px">معمولی به دلار: <b class=${'num ' + (c.range.midUsdPct < 0 ? 'neg' : '')}>${pct(c.range.midUsdPct, { digits: 0 })}</b></div></div>`}
     <div class="pb-stress xs"><span>دلار +۵۰٪: <b class="num pos">${pct(c.stress.usdUp, { digits: 0 })}</b></span><span>بورس −۳۰٪: <b class="num neg">${pct(c.stress.bourseDown, { digits: 0 })}</b></span></div>
     ${c.moved.length > 0 && html`<div class="xs warn">${c.moved.map((k) => B.CLASS[k].short).join('، ')} در این بازه داده نداشت؛ سهمش سپرده حساب شد.</div>`}
     <button class=${'btn sm' + (on ? ' primary' : '')} onClick=${onPick}>${on ? 'انتخاب شد' : 'برنامهٔ این سبد'}</button>
@@ -105,7 +106,7 @@ function Saved({ s, data }) {
   return html`<div class="pb-saved"><div class="xs sb muted" style="margin-bottom:6px">برنامه‌های ذخیره‌شده</div>
     ${plans.map((p) => { const v = B.planToday(p, latest); return html`<div class="row between pb-sv">
       <span><b>${p.name}</b> <span class="xs muted">· <${Money} v=${p.amount} s=${s} compact /> · ${fmtJ(new Date(p.at).toISOString().slice(0, 10), 'dm')}</span></span>
-      <span class="small">${v ? html`از آن روز <b class=${'num ' + (v.pct >= 0 ? 'pos' : 'neg')}>${pct(v.pct, { digits: 1 })}</b> <span class="xs muted">(سپرده ${pct(v.deposit, { digits: 1 })})</span>` : html`<span class="xs muted">در انتظار قیمت</span>`}
+      <span class="small">${v ? html`از آن روز <b class=${'num ' + (v.pct >= 0 ? 'pos' : 'neg')}>${pct(v.pct, { digits: 1 })}</b> <span class="xs muted">(سپرده ${pct(v.deposit, { digits: 1 })}${v.missing.length ? `؛ ${v.missing.map((k) => B.CLASS[k].short).join('، ')} بدون قیمت` : ''})</span>` : html`<span class="xs muted">در انتظار قیمت</span>`}
         <button class="btn icon sm ghost danger" title="حذف برنامه" onClick=${() => del(p.id)}><${Icon} n="trash" cls="sm" /></button></span></div>`; })}
   </div>`;
 }
@@ -138,7 +139,7 @@ export function Builder({ st, pf, s, route }) {
       : !(amount > 0) ? html`<div class="empty small">مبلغ را بنویس تا چهار سبد روی گذشتهٔ واقعی بازار ایران امتحان شوند.</div>`
       : r?.error ? html`<div class="callout warn"><${Icon} n="alert" cls="sm" /><div>${r.error}</div></div>`
       : r && html`
-        <div class="small muted pb-sum">از ${monthFa(r.from)} تا ${monthFa(r.to)} (${num(r.months)} ماه)، ماه‌به‌ماه و به تومان. ${r.mode === 'with' ? 'مبلغ کنار دارایی‌هایت حساب شده؛ عددها برای کل دارایی‌های قابل‌مدل است.' : 'فقط همین مبلغ.'} سپرده در همین ${num(horizon)} ماه: <b class="num">${pct(r.depositGain, { digits: 0 })}</b>.
+        <div class="small muted pb-sum">از ${monthFa(r.from)} تا ${monthFa(r.to)} (${num(r.months)} ماه)، ماه‌به‌ماه و به تومان. ${r.mode === 'with' ? 'مبلغ کنار دارایی‌هایت حساب شده؛ عددها برای کل دارایی‌های قابل‌مدل است.' : 'فقط همین مبلغ.'} سپرده در همین ${num(horizon)} ماه (با نرخ امروز ${num(r.depositPct, 1)}٪): <b class="num">${pct(r.depositGain, { digits: 0 })}</b>. عددها به تومان‌اند و بخشی از رشدشان فقط پایین آمدن ارزش ریال است؛ ستون «به دلار» این را جدا می‌کند.
           ${r.askedWith && r.mode === 'alone' ? ' (هنوز دارایی قابل‌مدلی ثبت نکرده‌ای؛ فقط همین مبلغ حساب شد.)' : ''}
           ${r.other > 0 ? html` ملک، سهام خصوصی، فلزات و سایر (<${Money} v=${r.other} s=${s} compact />) در این حساب نیستند.` : ''}</div>
         ${r.mode === 'with' && r.cands[0] && amount / r.cands[0].value0 < 0.2 && html`<div class="callout" style="margin-bottom:10px"><${Icon} n="info" cls="sm" /><div>این مبلغ حدود ${num(Math.round(amount / r.cands[0].value0 * 100))}٪ دارایی‌هایت است؛ برای همین سبدها به هم نزدیک‌اند و بیشتر ترکیب فعلی‌ات تعیین‌کننده است. برای دیدن فرق خود ترکیب‌ها، <button class="calc-link" onClick=${() => setMode('alone')}>«فقط همین پول»</button> را بزن.</div></div>`}

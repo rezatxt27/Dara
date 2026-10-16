@@ -2,7 +2,6 @@
 // Iran's markets — deposits, 18k gold, the dollar, the Tehran total index and bitcoin, in Rial, month by month — with
 // the worst falls, a range of outcomes for the owner's horizon, two stress tests and a plan of what to buy.
 // Pure. Money in Rial. Nothing here says what to buy: it shows how each mix behaved and leaves the choice.
-import * as I from './insights.js';
 import * as RD from './radar.js';
 import * as BB from './bubble.js';
 import { CAT } from './catalog.js';
@@ -94,7 +93,7 @@ export function metrics(p, { depositPct = 25, horizon = 12 } = {}) {
   const vol = Math.sqrt(rets.reduce((a, b) => a + (b - mu) ** 2, 0) / Math.max(1, rets.length - 1)) * Math.sqrt(12);
   const H = Math.max(1, Math.min(horizon, n)); const dep = Math.pow(1 + depositPct / 1200, H);
   let ahead = 0, all = 0;
-  for (let t = 0; t + H <= n; t++) { all++; if (p[t + H] / p[t] > dep) ahead++; }
+  for (let t = 0; t + H <= n; t++) { all++; if (p[t + H] / p[t] > dep * (1 + 1e-9)) ahead++; }
   return { cagr, maxDD, under: longest, worst12, vol, beat: all ? ahead / all : null, months: n };
 }
 
@@ -107,23 +106,27 @@ function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>>
  */
 export function range(w, R, horizon = 12, { runs = 1500, block = 6, seed = 7 } = {}) {
   const n = R.months.length; if (n < 12) return null;
+  const starts = Math.max(1, n - block + 1); // blocks never wrap from the last month back to the first
   const rand = rng(seed + horizon * 31 + Math.round((w.gold || 0) * 1000) + Math.round((w.bourse || 0) * 977));
-  const out = [];
+  const out = []; const outUsd = [];
   for (let k = 0; k < runs; k++) {
-    let h = Object.fromEntries(IDS.map((c) => [c, w[c] || 0])); let t = 0;
+    let h = Object.fromEntries(IDS.map((c) => [c, w[c] || 0])); let t = 0; let u = 1;
     while (t < horizon) {
-      const s = Math.floor(rand() * n);
+      const s = Math.floor(rand() * starts);
       for (let j = 0; j < block && t < horizon; j++, t++) {
-        const m = (s + j) % n;
+        const m = Math.min(n - 1, s + j);
+        u *= 1 + (R.r.usd[m] || 0);
         for (const c of IDS) if (h[c]) h[c] *= 1 + (R.r[c][m] || 0);
         if (t % 12 === 11) { const v = IDS.reduce((a, c) => a + h[c], 0); h = Object.fromEntries(IDS.map((c) => [c, (w[c] || 0) * v])); }
       }
     }
-    out.push(IDS.reduce((a, c) => a + h[c], 0));
+    const v = IDS.reduce((a, c) => a + h[c], 0);
+    out.push(v); outUsd.push(v / u);
   }
-  out.sort((a, b) => a - b);
-  const q = (p) => out[Math.min(out.length - 1, Math.floor(p * out.length))];
-  return { bad: q(0.1), mid: q(0.5), good: q(0.9) };
+  out.sort((a, b) => a - b); outUsd.sort((a, b) => a - b);
+  const q = (arr, p) => arr[Math.min(arr.length - 1, Math.floor(p * arr.length))];
+  // the middle outcome in dollars too: in rial almost everything grows when the rial falls
+  return { bad: q(out, 0.1), mid: q(out, 0.5), good: q(out, 0.9), midUsd: q(outUsd, 0.5) };
 }
 
 /** Two shocks: the dollar up 50% (domestic gold and coins rise with it, the ounce held still; bitcoin is priced in
@@ -133,6 +136,21 @@ export function stress(w) {
 }
 
 /* ------------------------------------------------------------ the mixes ------------------------------------------------------------ */
+/** New money toward class targets without selling: first the gaps (target × total after − held), then the rest by
+ *  target. The same rule as «پول تازه», but by block, so online gold and gold funds count as the gold they are. */
+export function allocClasses(cur, T, amount) {
+  const ids = IDS.filter((c) => (T[c] || 0) > 0);
+  const add = Object.fromEntries(IDS.map((c) => [c, 0]));
+  if (!ids.length || !(amount > 0)) return add;
+  const G1 = IDS.reduce((a, c) => a + (cur[c] || 0), 0) + amount;
+  const gaps = Object.fromEntries(ids.map((c) => [c, Math.max(0, T[c] * G1 - (cur[c] || 0))]));
+  const gs = ids.reduce((a, c) => a + gaps[c], 0);
+  if (gs >= amount) for (const c of ids) add[c] = amount * gaps[c] / gs;
+  else for (const c of ids) add[c] = gaps[c] + (amount - gs) * T[c];
+  return add;
+}
+/** A mix by category (percent) → weights by block. */
+export const mixWeights = (byCat) => norm(toClasses(byCat || {}));
 const toClasses = (byCat) => { const w = {}; for (const [k, v] of Object.entries(byCat)) { const c = CAT_CLASS[k]; if (c) w[c] = (w[c] || 0) + v; } return w; };
 const norm = (w) => { const s = IDS.reduce((a, c) => a + Math.max(0, w[c] || 0), 0); return s > 0 ? Object.fromEntries(IDS.map((c) => [c, Math.max(0, w[c] || 0) / s])) : null; };
 
@@ -168,12 +186,7 @@ export function build({ R, pf = null, profile = null, targets = null, amount, ho
     let adds, total;
     if (withMode) {
       if (m.id === 'current') adds = Object.fromEntries(IDS.map((c) => [c, amount * m.w[c]]));
-      else {
-        const plan = pf ? I.allocateNew(pf, Object.fromEntries(Object.entries(m.byCat).map(([k, v]) => [k, v / 100])), amount) : null;
-        adds = Object.fromEntries(IDS.map((c) => [c, 0]));
-        if (plan) for (const r of plan.rows) { const c = CAT_CLASS[r.id]; if (c) adds[c] += r.add; }
-        else for (const c of IDS) adds[c] = amount * m.w[c];
-      }
+      else adds = allocClasses(h.cur, m.w, amount);
       total = Object.fromEntries(IDS.map((c) => [c, h.cur[c] + adds[c]]));
     } else {
       adds = Object.fromEntries(IDS.map((c) => [c, amount * (m.w[c] || 0)]));
@@ -182,7 +195,9 @@ export function build({ R, pf = null, profile = null, targets = null, amount, ho
     const value0 = IDS.reduce((a, c) => a + total[c], 0);
     const cost = IDS.reduce((a, c) => a + adds[c] * CLASS[c].cost / 100, 0);
     const u = usable(norm(total), W);
-    const p = path(u.w, W);
+    // the cost of buying in comes off at the start, so every figure below is after it
+    const cf = value0 > 0 ? IDS.reduce((a, c) => a + adds[c] * CLASS[c].cost / 100, 0) / value0 : 0;
+    const p = path(u.w, W).map((v) => v * (1 - cf));
     const mt = metrics(p, { depositPct: R.depositPct, horizon });
     // the same path in dollars: how much of the gain was only the rial losing value
     if (mt) mt.usdCagr = Math.pow(p[p.length - 1] / usdIdx[usdIdx.length - 1], 12 / (p.length - 1)) - 1;
@@ -190,7 +205,7 @@ export function build({ R, pf = null, profile = null, targets = null, amount, ho
     const net = value0 - cost;
     return { id: m.id, name: m.name, level: m.level || null, fits: !!level && m.level === level, byCat: m.byCat || null,
       weights: u.w, moved: u.moved, adds, value0, cost, metrics: mt,
-      range: rg && { bad: net * rg.bad, mid: net * rg.mid, good: net * rg.good, badPct: (net * rg.bad) / value0 - 1, midPct: (net * rg.mid) / value0 - 1, goodPct: (net * rg.good) / value0 - 1 },
+      range: rg && { bad: net * rg.bad, mid: net * rg.mid, good: net * rg.good, badPct: (net * rg.bad) / value0 - 1, midPct: (net * rg.mid) / value0 - 1, goodPct: (net * rg.good) / value0 - 1, midUsdPct: (net * rg.midUsd) / value0 - 1 },
       stress: stress(u.w), path: p };
   });
   // what each block did on its own in the same window
@@ -227,18 +242,19 @@ export function vehicles(classId, { radar = null, quotes = {}, depositPct = 25 }
 
 /** A saved plan, valued today from the latest prices: { now, pct, deposit } (deposit: the same money in a deposit). */
 export function planToday(plan, latest, now = Date.now()) {
-  if (!plan?.start || !latest) return null;
+  if (!plan?.start || !latest || !(plan.at > 0)) return null;
   const days = Math.max(0, (now - plan.at) / 864e5);
-  let v = 0, v0 = 0;
+  const dep = (x) => Math.pow(1 + (plan.depositPct || 0) / 1200, x * 12 / 365) - 1; // monthly compounding, as in the test of the past
+  let v = 0, v0 = 0; const missing = [];
   for (const c of IDS) {
     const a = plan.adds?.[c] || 0; if (!a) continue;
     v0 += a;
-    if (c === 'deposit') v += a * (1 + (plan.depositPct || 0) / 100 * days / 365);
+    if (c === 'deposit') v += a * (1 + dep(days));
     else if (plan.start[c] > 0 && latest[c] > 0) v += a * latest[c] / plan.start[c];
-    else v += a;
+    else { v += a; missing.push(c); }
   }
   if (!(v0 > 0)) return null;
-  return { value: v, pct: v / v0 - 1, deposit: (plan.depositPct || 0) / 100 * days / 365, days: Math.floor(days) };
+  return { value: v, pct: v / v0 - 1, deposit: dep(days), days: Math.floor(days), missing };
 }
 
 /** The latest price of each block from the history points (for saving a plan and valuing it later). */

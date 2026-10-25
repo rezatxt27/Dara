@@ -497,16 +497,6 @@ async function runRadar({ force = false, batch = 40 } = {}) {
         } catch { /* names are optional */ }
       }
     } catch (e) { radar.error = e.message; }
-    // individual (حقیقی) money in and out of each stock, for the session just scanned: TSETMC lists only the latest session,
-    // so it is gathered once per session (tried again every 20 minutes until it matches that session's volumes)
-    if (tse && radar.day && radar.flowFor !== radar.day && (changed || Date.now() - (radar.flowAt || 0) > 20 * 60e3)) {
-      radar.flowAt = Date.now();
-      try {
-        const n = RD.applyFlows(radar, await P.tsetmcClientTypes(), radar.day);
-        if (n) changed = true;
-        if (n >= 50) radar.flowFor = radar.day;
-      } catch { /* the money flow is optional */ }
-    }
     // the total index and the dollar over the year, once a session — to say how a return compares
     const ixLast = radar.bench?.index?.d?.[radar.bench.index.d.length - 1] || 0;
     const ixLag = radar.day && ixLast < RD.dayNum(radar.day) && Date.now() - (radar.benchAt || 0) > 2 * 3600e3;
@@ -544,6 +534,18 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     }
     // 4) which cards are new today (per signal), and the owner's rules
     const pending = Object.values(radar.stocks).filter((r) => r.need > 0).length;
+    // individual (حقیقی) money in and out of each stock for the session just scanned. TSETMC lists only the latest session,
+    // and a stock's row is matched against that session's volume — known only once its own list has come — so it is
+    // gathered again (every few minutes while stocks are still waiting) until every stock is in — or until the next session
+    // has begun (the list is then that session's, see waitFor); then done for the session.
+    if (tse && radar.day && !radar.waitFor && radar.flowFor !== radar.day && Date.now() - (radar.flowAt || 0) > (pending ? 3 : 20) * 60e3) {
+      radar.flowAt = Date.now();
+      try {
+        const n = RD.applyFlows(radar, await P.tsetmcClientTypes(), radar.day);
+        if (n) changed = true;
+        if (n >= 50 && !pending) radar.flowFor = radar.day;
+      } catch { /* the money flow is optional */ }
+    }
     let cards = null;
     const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
     if (changed && radar.day) {

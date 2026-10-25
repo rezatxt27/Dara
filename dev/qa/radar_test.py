@@ -225,13 +225,18 @@ async def main():
 
         async def t_plus():
             pg = await newpage('radar')
+            pulse0 = await pg.inner_text('.rd-pulse')
+            check('pulse: while a stock still waits for its prices, breadth and money wait too (and say so)', 'مثبت / منفی' not in pulse0 and 'نماد مانده' in pulse0, pulse0.replace('\n', ' | ')[:200])
+            # every stock in: the whole pulse
+            await pg.evaluate("async () => { const { radar } = await chrome.storage.local.get('radar'); delete radar.stocks.PEND; await chrome.storage.local.set({ radar }); }")
+            await pg.reload(); await pg.wait_for_timeout(1500)
             txt = await pg.inner_text('.page')
             pulse = await pg.inner_text('.rd-pulse')
             check('market pulse at the top: index, breadth, individual money, market P/E', all(w in pulse for w in ['نبض بازار', 'شاخص کل', 'مثبت / منفی', 'پول حقیقی امروز', 'P/E بازار', 'سپرده']), pulse.replace('\n', ' | ')[:240])
             order = await pg.evaluate("() => { const a = document.querySelector('.rd-pulse'), b = document.querySelector('.rd-sec'); return !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }")
             check('…before every section', order)
-            check('section «برترین‌های امروز»', 'برترین‌های امروز' in txt)
-            top = pg.locator('.rd-sec:has(h4:has-text("برترین‌های امروز")) .rd-card')
+            check('section «بالاترین امتیاز ترکیبی امروز»', 'بالاترین امتیاز ترکیبی امروز' in txt)
+            top = pg.locator('.rd-sec:has(h4:has-text("بالاترین امتیاز ترکیبی امروز")) .rd-card')
             n = await top.count()
             scores = [int((await top.nth(i).locator('.rd-sc-n b').inner_text()).translate(FA)) for i in range(n)]
             check('top cards: score ≥ 65, best first, at most 6 before «همه»', n > 0 and n <= 6 and all(x >= 65 for x in scores) and scores == sorted(scores, reverse=True), scores)
@@ -240,14 +245,14 @@ async def main():
             check('section «ورود پول حقیقی» with the steady-inflow stocks', 'ورود پول حقیقی' in txt and await pg.locator('.rd-sec:has(h4:has-text("ورود پول حقیقی")) .rd-card:has-text("نماد3")').count() == 1)
             check('flow line on stock cards', await pg.locator('.rd-flow').count() > 3)
             gold = await pg.inner_text('.rd-gold')
-            check('cheapest way to buy gold: ranked, cheapest marked, funds approximate', 'ارزان‌ترین امروز' in gold and 'حدودی' in gold and '۱۸ عیار' in gold, gold.replace('\n', ' | ')[:240])
+            check('cheapest way to buy gold: coins and 18k ranked against world gold, funds apart by their bubble', 'ارزان‌ترین امروز' in gold and 'صندوق‌های طلا' in gold and 'کم‌حباب‌ترین صندوق' in gold and '۱۸ عیار' in gold, gold.replace('\n', ' | ')[:240])
             tr = await pg.locator('.rd-track').all_inner_texts()
             check('scorecard line visible under stock sections, with the result once a month has passed', len(tr) >= 3 and any('یک ماه بعد میانگین' in t and 'شاخص کل' in t for t in tr), tr[:3])
             mine = await pg.inner_text('.rd-mine')
             check('a holding on steady outflow gets a warning', 'خروج پول حقیقی' in mine, mine.replace('\n', ' | ')[:200])
             await pg.screenshot(path=f'{SH}/radar-plus-{THEME}.png', clip={'x': 0, 'y': 0, 'width': 1440, 'height': 2000}, full_page=True)
             await pg.locator('.rd-sec:has(h4:has-text("ارزان‌ترین راه خرید طلا"))').screenshot(path=f'{SH}/radar-gold-{THEME}.png')
-            await pg.locator('.rd-sec:has(h4:has-text("برترین‌های امروز"))').screenshot(path=f'{SH}/radar-top-{THEME}.png')
+            await pg.locator('.rd-sec:has(h4:has-text("بالاترین امتیاز ترکیبی امروز"))').screenshot(path=f'{SH}/radar-top-{THEME}.png')
             await pg.locator('.rd-sec:has(h4:has-text("ورود پول حقیقی"))').screenshot(path=f'{SH}/radar-inflow-{THEME}.png')
             # a rule on the combined score
             await pg.click('.seg >> text=قاعده‌های من'); await pg.wait_for_timeout(200)

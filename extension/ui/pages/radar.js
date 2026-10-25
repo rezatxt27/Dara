@@ -13,7 +13,7 @@ import { Terms } from '../glossary.js';
 const ORDER = ['top', 'gold', 'negBubble', 'goldBubble', 'fixedBeat', 'inflow', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
 const STOCK_SIGS = new Set(['top', 'inflow', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
 const SIG_D = {
-  top: 'نمادهایی که در جمع روند، ارزش، پول حقیقی، توجه بازار و ریسک کم، امروز بیشترین امتیاز را گرفته‌اند.',
+  top: 'نمادهایی که در جمع روند، ارزش، پول حقیقی، توجه بازار و ریسک کم، امروز بیشترین امتیاز را گرفته‌اند؛ فهرست بررسی است، نه خرید.',
   inflow: 'پرمعامله‌هایی که در جلسه‌های اخیر بیشتر روزها پول حقیقی واردشان شده، به اندازهٔ قابل‌توجهی از معاملاتشان.',
   momentum12: 'پرمعامله‌هایی که در ۱۲ ماه گذشته جزو ۱۰٪ پربازده بازار بوده‌اند.',
   momentum3: 'پرمعامله‌هایی که در ۳ ماه گذشته جزو ۱۰٪ پربازده بازار بوده‌اند.',
@@ -27,7 +27,7 @@ const SIG_D = {
 };
 // the ⓘ beside each section: what it takes to get in, and where it can mislead
 const SIG_TIP = {
-  top: 'امتیاز ترکیبی (۰ تا ۱۰۰) جایگاه هر نماد پرمعامله را در پنج بخش در برابر بقیهٔ بازار می‌سنجد: روند (بازدهی ۱۲ و ۳ ماه)، ارزش (P/E در برابر هم‌گروه‌ها؛ زیان‌ده صفر می‌گیرد)، پول حقیقی (۵ جلسهٔ اخیر)، توجه بازار (حجم امروز در برابر معمول) و ریسک کم (نوسان روزانه و بیشترین افت سال). وزن بخش‌ها با سطح ریسک پروفایلت عوض می‌شود. بخشی که برای نمادی معلوم نیست کنار می‌رود و بقیه وزنش را می‌گیرند. فقط امتیاز ۶۵ به بالا اینجا می‌آید. امتیاز بالا یعنی «ارزش بررسی دارد»، نه «بخر».',
+  top: 'امتیاز ترکیبی (۰ تا ۱۰۰) جایگاه هر نماد پرمعامله را در پنج بخش در برابر بقیهٔ بازار می‌سنجد: روند (بازدهی ۱۲ و ۳ ماه)، ارزش (P/E در برابر هم‌گروه‌ها؛ زیان‌ده صفر می‌گیرد)، پول حقیقی (۵ جلسهٔ اخیر)، توجه بازار (حجم امروز در برابر معمول) و ریسک کم (نوسان روزانه و بیشترین افت سال). وزن بخش‌ها با سطح ریسک پروفایلت عوض می‌شود. بخشی که برای نمادی معلوم نیست کنار می‌رود و بقیه وزنش را می‌گیرند. فقط امتیاز ۶۵ به بالا، با دست‌کم چهار بخشِ معلوم (از جمله ریسک)، اینجا می‌آید. امتیاز بالا یعنی «ارزش بررسی دارد»، نه «بخر».',
   inflow: 'پول حقیقی یعنی خرید منهای فروش اشخاص حقیقی (نه شرکت‌ها و صندوق‌ها)، به ریال، از آمار روزانهٔ سایت بورس. شرط: دست‌کم ۳ جلسه آمار، ورود خالص در ۵ جلسهٔ اخیر حداقل ۸٪ ارزش معاملات، و ورود در بیشتر جلسه‌ها. «قدرت خریدار» یعنی میانگین خرید هر خریدار حقیقی تقسیم بر میانگین فروش هر فروشندهٔ حقیقی. ورود پول گاهی ادامه‌دار نیست و ممکن است یک خریدار بزرگ باشد.',
   momentum12: 'از بین نمادهای پرمعامله، ۱۰٪ که بیشترین بازدهی ۱۲ ماه (تعدیل‌شده) را داشته‌اند. روند قوی گاهی ادامه پیدا می‌کند، ولی سهمی که چند برابر شده ممکن است خبرهای خوبش را قبلاً در قیمت گرفته باشد؛ P/E و فاصله از سقف را کنارش ببین.',
   momentum3: 'همان روند قوی در ۳ ماه اخیر، برای نمادهایی که در فهرست اول ۱۲ ماه نیامده‌اند. حرکت‌های کوتاه‌مدت پرنوسان‌ترند و زودتر برمی‌گردند.',
@@ -131,7 +131,7 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
       ${ORDER.map((sig) => {
-        if (sig === 'gold') return only !== 'stock' && gold?.rows.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />` : null;
+        if (sig === 'gold') return only !== 'stock' && gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />` : null;
         const all = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
         if (!all.length) return null;
         const list = showAll[sig] ? all : all.filter(RD.isFirst);
@@ -175,7 +175,7 @@ function Score({ c, full }) {
   return html`<div class=${'rd-score' + (full ? ' full' : '')}>
     <div class="row" style="gap:10px;align-items:center">
       <span class=${'rd-sc-n ' + tone} title="امتیاز ترکیبی از ۱۰۰"><b class="num">${num(c.score)}</b><span class="xs">از ۱۰۰</span></span>
-      ${full ? html`<div class="rd-parts grow">${PART_ORDER.filter((k) => c.parts?.[k] !== undefined).map((k) => html`<div class="rd-part" title=${`${RD.SCORE_PARTS[k]}: بهتر از ${num(Math.round(c.parts[k] * 100))}٪ نمادهای پرمعامله`}>
+      ${full ? html`<div class="rd-parts grow">${PART_ORDER.filter((k) => c.parts?.[k] !== undefined).map((k) => html`<div class="rd-part" title=${`${RD.SCORE_PARTS[k]}: بهتر از ${num(Math.round(c.parts[k] * 100))}٪ ${k === 'value' ? 'نمادهای پرمعاملهٔ سودده (زیان‌ده صفر می‌گیرد)' : k === 'flow' ? 'نمادهای پرمعامله‌ای که آمار پول حقیقی‌شان هست' : 'نمادهای پرمعامله'}`}>
           <span class="xs muted">${RD.SCORE_PARTS[k]}</span><span class="rd-pbar"><i style=${`width:${Math.max(4, Math.round(c.parts[k] * 100))}%`}></i></span></div>`)}</div>`
         : html`<span class="xs muted grow">امتیاز ترکیبی${c.parts ? ` · قوی در ${PART_ORDER.filter((k) => c.parts[k] >= 0.7).map((k) => RD.SCORE_PARTS[k]).join('، ') || '—'}` : ''}</span>`}
     </div>
@@ -205,6 +205,7 @@ function Pulse({ p, s }) {
     <div class="row between wrap" style="gap:8px"><div class="row" style="gap:8px;align-items:center"><span class=${'rd-dot ' + tone} aria-hidden="true"></span><h4 style="margin:0">نبض بازار</h4><span class="xs muted">جلسهٔ ${fmtJ(p.day)}</span></div>
       <${Tip} title="نبض بازار" text="خلاصهٔ همین جلسه از داده‌های سایت بورس: تغییر شاخص کل، تعداد نمادهای مثبت و منفی، پول حقیقی (خرید منهای فروش اشخاص حقیقی)، و P/E میانهٔ نمادهای سودده. «بازده سود» یعنی ۱ تقسیم بر P/E: اگر سود شرکت‌ها ثابت بماند، هر ۱۰۰ تومان سهم چقدر سود سالانه دارد؛ کنار سود سپرده می‌آید تا مقایسه ساده باشد. پیش‌بینی نیست." /></div>
     ${line && html`<div class="rd-pline">${line}.</div>`}
+    ${p.pending > 0 && html`<div class="xs muted">تعداد مثبت و منفی و پول حقیقی وقتی قیمت‌های پایانی همهٔ نمادها رسید می‌آید (${num(p.pending)} نماد مانده).</div>`}
     <div class="rd-stats">
       <div class="rd-stat"><span class="xs muted">شاخص کل</span><b class=${'num ' + (p.indexDay > 0 ? 'pos' : p.indexDay < 0 ? 'neg' : '')}>${pctTxt(p.indexDay, 1)}</b><span class="xs muted">${p.index1m !== null ? `یک ماه ${pctTxt(p.index1m)}` : 'امروز'}</span></div>
       ${breadth > 0 && html`<div class="rd-stat"><span class="xs muted">مثبت / منفی</span><b class="num"><span class="pos">${num(p.up)}</span> / <span class="neg">${num(p.down)}</span></b>
@@ -216,21 +217,28 @@ function Pulse({ p, s }) {
   </section>`;
 }
 
-/** «ارزان‌ترین راه خرید طلا، امروز»: each way's premium over world gold plus its buying cost, cheapest first. */
+/** «ارزان‌ترین راه خرید طلا، امروز»: coins and 18k by their premium over world gold plus buying cost; gold funds by their bubble. */
 function GoldRoutes({ g, s, openPrice }) {
   const [all, setAll] = useState(false);
-  const rows = all ? g.rows : g.rows.slice(0, 5);
+  const rows = all ? g.rows : g.rows.slice(0, 4);
+  const funds = all ? g.funds : g.funds.slice(0, 3);
   const max = Math.max(...g.rows.map((r) => Math.abs(r.buy)), 0.01);
-  return html`<section class="rd-sec">
-    <div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4><${Tip} title="ارزان‌ترین راه خرید طلا" text=${`هر راه خرید طلا با قیمت جهانی طلا (اونس × دلار بازار آزاد) مقایسه می‌شود: برای هر گرم طلای خالص چند درصد بیشتر یا کمتر از قیمت جهانی می‌پردازی، به‌علاوهٔ نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش) که موقع خرید پرداخت می‌شود. برای صندوق‌های طلا عدد تقریبی است: حباب صندوق نسبت به NAV روی حباب طلای ۱۸ عیار گذاشته می‌شود. هزینه‌های رفت‌وبرگشت تخمینی‌اند (۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکه ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪، صندوق حدود ${num(BB.ROUTE_COST.etf, 1)}٪). حباب‌ها هر روز عوض می‌شوند.`} /><span class="xs muted">هر گرم طلای خالص چقدر گران‌تر از قیمت جهانی، با هزینهٔ خرید</span></div>
-    <div class="card rd-gold">${rows.map((r) => html`<div class=${'rd-grow' + (r.best ? ' best' : '')}>
-      ${r.ref ? html`<button class="rd-name" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos">ارزان‌ترین امروز</span>`}</button>`
+  const fmax = Math.max(...g.funds.map((r) => Math.abs(r.buy)), 0.01);
+  const more = g.rows.length > 4 || g.funds.length > 3;
+  const row = (r, mx, sub) => html`<div class=${'rd-grow' + (r.best ? ' best' : '')}>
+      ${r.ref ? html`<button class="rd-name" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos">${r.kind === 'etf' ? 'کم‌حباب‌ترین صندوق' : 'ارزان‌ترین امروز'}</span>`}</button>`
         : html`<div class="rd-name" style="cursor:default"><b>${r.name}</b>${r.best ? html`<span class="xs pos">ارزان‌ترین امروز</span>` : r.retail ? html`<span class="xs muted">قیمت مغازه</span>` : ''}</div>`}
-      <span class="rd-gbar" aria-hidden="true"><i class=${r.buy < 0 ? 'neg' : ''} style=${`width:${Math.max(3, (Math.abs(r.buy) / max) * 100)}%`}></i></span>
-      <div class="rd-gnum"><b class="num">${pctTxt(r.buy, 1)}</b><span class="xs muted">${r.approx ? 'حدودی، ' : ''}حباب ${pctTxt(r.premium, 1)} + هزینه ${num(r.cost / 2, 2)}٪</span></div>
-    </div>`)}
-    ${g.rows.length > 5 && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(g.rows.length)})`}</button>`}
-    <div class="xs muted">قیمت جهانی هر گرم طلای خالص: ${money(g.gold.price, s)} (اونس × دلار آزاد). اختلاف معمولاً یعنی هزینهٔ نگه‌داری در ایران، نه سود یا ضرر قطعی.</div>
+      <span class="rd-gbar" aria-hidden="true"><i class=${r.buy < 0 ? 'neg' : ''} style=${`width:${Math.max(3, (Math.abs(r.buy) / mx) * 100)}%`}></i></span>
+      <div class="rd-gnum"><b class="num">${pctTxt(r.buy, 1)}</b><span class="xs muted">${sub}</span></div>
+    </div>`;
+  return html`<section class="rd-sec">
+    <div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4><${Tip} title="ارزان‌ترین راه خرید طلا" text=${`سکه‌ها و طلای ۱۸ عیار با قیمت جهانی طلا (اونس × دلار بازار آزاد) مقایسه می‌شوند: برای هر گرم طلای خالص چند درصد بیشتر یا کمتر از قیمت جهانی می‌پردازی، به‌علاوهٔ نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش) که موقع خرید پرداخت می‌شود. صندوق‌های طلا جدا آمده‌اند، با حبابشان نسبت به NAV: ارزش دارایی صندوق خودش با قیمت داخلی آنچه نگه می‌دارد (بیشتر گواهی سکه و شمش، به سهم‌های متفاوت) حساب می‌شود، پس با این فهرست مستقیم مقایسه‌پذیر نیست. هزینه‌ها تخمینی‌اند (۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکه ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪، صندوق حدود ${num(BB.ROUTE_COST.etf, 1)}٪). حباب‌ها هر روز عوض می‌شوند.`} /><span class="xs muted">هر گرم طلای خالص چقدر گران‌تر از قیمت جهانی، با هزینهٔ خرید</span></div>
+    <div class="card rd-gold">
+      ${rows.map((r) => row(r, max, `حباب ${pctTxt(r.premium, 1)} + هزینه ${num(r.cost / 2, 2)}٪`))}
+      ${funds.length > 0 && html`<div class="rd-gsub xs muted">صندوق‌های طلا: حباب نسبت به ارزش دارایی‌هایشان (NAV ${fmtJ(funds[0].navDay)})، با هزینهٔ خرید</div>
+        ${funds.map((r) => row(r, fmax, `حباب ${pctTxt(r.bubble, 1)} + هزینه ${num(r.cost / 2, 2)}٪`))}`}
+      ${more && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(g.rows.length + g.funds.length)})`}</button>`}
+      <div class="xs muted">قیمت جهانی هر گرم طلای خالص: ${money(g.gold.price, s)} (اونس × دلار آزاد). حباب یعنی هزینهٔ نگه‌داری طلا در ایران نسبت به قیمت جهانی؛ ممکن است بالا یا پایین برود.</div>
     </div></section>`;
 }
 

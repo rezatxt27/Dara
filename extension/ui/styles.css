@@ -894,3 +894,4 @@ svg.rot { transform: rotate(180deg); }
 .rd-gbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .rd-gbar i { display: block; height: 100%; background: var(--faint); border-radius: 3px; } .rd-gbar i.neg { background: var(--pos); }
 .rd-gnum { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: end; }
 @media (max-width: 640px) { .rd-grow { grid-template-columns: 1fr auto; } .rd-gbar { display: none; } }
+.rd-gsub { padding: 12px 0 2px; }

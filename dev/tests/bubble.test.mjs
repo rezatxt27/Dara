@@ -242,21 +242,22 @@ test('auxiliary NAVs: errors never kept; «no NAV» remembered only when the exc
   assert.deepEqual(Object.keys(errors), ['tsetmc:5:nav'], 'auxiliary errors removed, the real one kept');
 });
 
-test('gold routes: premium over world gold plus the buying half of the round-trip cost, cheapest first; funds approximate', () => {
+test('gold routes: premium over world gold plus the buying half of the round-trip cost, cheapest first; funds apart, by their bubble', () => {
   const q = base();
-  const r = BB.goldRoutes(q, [{ key: 'f1', name: 'صندوق طلا', sym: 'طلاا', bubble: -0.01, navDay: '2026-10-03', ref: { provider: 'tsetmc', key: 'X' } }], now);
+  const r = BB.goldRoutes(q, [{ key: 'f1', name: 'صندوق طلا', sym: 'طلاا', bubble: -0.01, navDay: '2026-10-03', ref: { provider: 'tsetmc', key: 'X' } },
+    { key: 'f2', name: 'صندوق دو', sym: 'طلاب', bubble: 0.02, navDay: '2026-10-03', ref: {} }], now);
   const by = Object.fromEntries(r.rows.map((x) => [x.key, x]));
   const p18 = 96_000_000 / (0.75 * G) - 1;
   close(by.geram18.premium, p18, 1e-12); close(by.geram18.buy, p18 + 1.5 / 200, 1e-12);
-  close(by['etf:f1'].premium, 0.99 * (1 + p18) - 1, 1e-12); assert.equal(by['etf:f1'].approx, true);
+  assert.ok(r.rows.every((x) => x.kind !== 'etf'));
   assert.ok(r.rows.every((x, i) => !i || r.rows[i - 1].buy <= x.buy));
   assert.equal(r.rows.filter((x) => x.best).length, 1); assert.equal(r.best, r.rows[0]);
+  // funds: their own list, by bubble + buying fee; never «cheapest» against coins (a NAV already carries home prices)
+  assert.deepEqual(r.funds.map((f) => f.key), ['etf:f1', 'etf:f2']);
+  close(r.funds[0].buy, -0.01 + 0.3 / 200, 1e-12); assert.ok(r.funds[0].best && !r.funds[1].best);
   // a stale coin is left out; a stale world price gives nothing at all
   const s = base(); s['tgju:rob'] = Q(300_000_000, { at: now - 5 * 864e5, fetchedAt: now - 5 * 864e5 });
   assert.ok(!BB.goldRoutes(s, [], now).rows.some((x) => x.key === 'rob'));
   const t = base(); t['tgju:ons'] = Q(4000, { at: now - 5 * 864e5, fetchedAt: now - 5 * 864e5 });
   assert.equal(BB.goldRoutes(t, [], now), null);
-  // without a fresh 18k price a fund can't be placed
-  const u = base(); delete u['tgju:geram18'];
-  assert.ok(!BB.goldRoutes(u, [{ key: 'f1', bubble: 0, ref: {} }], now).rows.some((x) => x.kind === 'etf'));
 });

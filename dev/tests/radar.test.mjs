@@ -649,3 +649,27 @@ test('gold funds for the gold routes: traded gold funds with a same-day bubble, 
   assert.deepEqual(g.map((x) => x.key), ['y', 'x']); // z barely trades
   close(g[0].bubble, -0.02); assert.equal(g[0].ref.provider, 'tsetmc');
 });
+
+test('review fixes: «5 sessions» are the market\'s last 5; the share counts only days with a known value; top needs enough parts; pulse waits for every stock', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  // money known only from 3 weeks ago: nothing in the last 5 sessions
+  const rec = R.stocks.S3; const v = rec.h.at(-1)[2];
+  rec.fl = [[D0 - 25, v, 1], [D0 - 24, v, 1], [D0 - 23, v, 1]];
+  let m = RD.stockMetrics(rec, D0, {}, R.sess);
+  assert.equal(m.flowN, 0); assert.equal(m.flow5, null);
+  // two of the last five sessions known, one of them missing from the value history: the share leaves it out
+  rec.fl = [[D0 - 1, Math.round(0.1 * v), 1], [D0, Math.round(0.1 * v), 1]];
+  rec.h = rec.h.filter((x) => x[0] !== D0 - 1);
+  m = RD.stockMetrics(rec, D0, {}, R.sess);
+  assert.equal(m.flowN, 2); close(m.flowShare5, 0.1, 1e-6); close(m.flow5, 2 * Math.round(0.1 * v), 1e-9);
+  // without a session list: the calendar (5 sessions ≈ 7 days)
+  const sl = RD.lastSessions([], D0, 5); assert.ok(sl.has(D0 - 6) && !sl.has(D0 - 7));
+  // the highest-score list wants at least TOP_PARTS parts known, including risk
+  const b = RD.buildCards(R);
+  for (const c of b.cards.filter((x) => x.sig === 'top')) assert.ok(Object.keys(c.parts).length >= RD.TOP_PARTS && c.parts.safety !== undefined);
+  // a stock still waiting for its list: no breadth, no market money (it would be part of the market only)
+  R.stocks.S9.need = 8;
+  const p = RD.pulse(R);
+  assert.equal(p.pending, 1); assert.equal(p.up + p.down + p.flat, 0); assert.equal(p.flowToday, null);
+  assert.equal(RD.SIGNALS.top.t, 'بالاترین امتیاز ترکیبی امروز');
+});

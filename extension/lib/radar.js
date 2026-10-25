@@ -228,16 +228,32 @@ export function applyFlows(radar, rows, day) {
   if (n) radar.flowDays = [...new Set([...(radar.flowDays || []), day])].sort().slice(-FLOW_KEEP);
   return n;
 }
-/** A stock's individual money flow up to day D: the last 5 sessions (and 20), as money and as a share of the value traded. */
-function flowMetrics(rec, D) {
-  const fl = (rec.fl || []).filter((x) => x[0] <= D && x[0] > D - 45);
-  if (!fl.length) return { flowN: 0, flow5: null, flow20: null, flowShare5: null, flowPos5: null, power: null, flowToday: null };
-  const l5 = fl.slice(-5), l20 = fl.slice(-20);
+/**
+ * The last n sessions up to day D, as day numbers: from the session list when it is long enough, else the calendar
+ * (Iran's market trades five days a week: n sessions ≈ n × 7/5 days). Returns { has(day), from }.
+ */
+export function lastSessions(sess, D, n) {
+  const l = (sess || []).map(dayNum).filter((d) => d <= D).slice(-n);
+  if (l.length >= n) { const set = new Set(l); return { has: (d) => set.has(d), from: l[0] }; }
+  const from = D - Math.ceil((n * 7) / 5) + 1;
+  return { has: (d) => d >= from && d <= D, from };
+}
+/**
+ * A stock's individual money flow over the last 5 sessions (and 20) up to day D — sessions of the market, so a week the
+ * browser was off doesn't stretch «5 sessions» back a month. flowN: how many of the last 5 sessions are known. The share
+ * counts only sessions whose value traded is known too.
+ */
+function flowMetrics(rec, D, sess) {
+  const s5 = lastSessions(sess, D, 5), s20 = lastSessions(sess, D, 20);
+  const fl = (rec.fl || []).filter((x) => x[0] <= D);
+  const l5 = fl.filter((x) => s5.has(x[0])), l20 = fl.filter((x) => s20.has(x[0]));
+  if (!l5.length) return { flowN: 0, flow5: null, flow20: l20.length ? l20.reduce((a, x) => a + x[1], 0) : null, flowShare5: null, flowPos5: null, power: null, flowToday: null };
   const val = new Map((rec.h || []).map((x) => [x[0], x[2]]));
   const sum = (l) => l.reduce((a, x) => a + x[1], 0);
-  const v5 = l5.reduce((a, x) => a + (val.get(x[0]) || 0), 0);
+  const both = l5.filter((x) => val.get(x[0]) > 0);
+  const v5 = both.reduce((a, x) => a + val.get(x[0]), 0);
   const last = fl[fl.length - 1];
-  return { flowN: fl.length, flow5: sum(l5), flow20: sum(l20), flowShare5: v5 > 0 ? sum(l5) / v5 : null, flowPos5: l5.filter((x) => x[1] > 0).length,
+  return { flowN: l5.length, flow5: sum(l5), flow20: sum(l20), flowShare5: v5 > 0 ? sum(both) / v5 : null, flowPos5: l5.filter((x) => x[1] > 0).length,
     flowToday: last[0] === D ? last[1] : null, power: last[0] === D ? last[2] : null };
 }
 
@@ -281,7 +297,7 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
     traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
     peRel: isFinite(rec.pe) && rec.pe > 0 && mPE > 0 ? rec.pe / mPE : null, dayChange: rec.today?.py > 0 ? rec.today.close / rec.today.py - 1 : null,
     dd1y: fullYear && yr.length > 20 ? dd : null, dvol, ey: isFinite(rec.pe) && rec.pe > 0 && rec.eps > 0 ? 1 / rec.pe : null,
-    ...flowMetrics(rec, D),
+    ...flowMetrics(rec, D, sess),
   };
 }
 /** Median P/E of each sector over its stocks with a positive, sane P/E (a sector needs MIN_SECTOR of them). */
@@ -348,6 +364,7 @@ export const SCORE_W = {
 export const SCORE_PARTS = { trend: 'روند', value: 'ارزش', flow: 'پول حقیقی', attention: 'توجه بازار', safety: 'ریسک کم' };
 export const TOP_MIN = 65; // a stock's score must reach this to be among «برترین‌های امروز»
 export const TOP_N = 10;
+export const TOP_PARTS = 4; // a stock needs at least this many parts known (and its risk) to be among the highest — a score from two parts says little
 /** Percentile (0…1) of each item's value among the items that have one; ties share their middle place. */
 function ranks(list, get) {
   const v = []; for (const x of list) { const y = get(x); if (y !== null && y !== undefined && isFinite(y)) v.push([x, y]); }
@@ -405,25 +422,29 @@ export function pulse(radar, { depositPct = 25 } = {}) {
   let indexDay = null;
   if (ix?.d?.length) { let i = ix.d.length - 1; while (i > 0 && ix.d[i] > D) i--; if (ix.d[i] === D && i > 0 && ix.p[i - 1] > 0) indexDay = ix.p[i] / ix.p[i - 1] - 1; }
   const m1 = benchRet(radar, 30, D);
+  // while some stocks still wait for their own lists, breadth and money would cover only part of the market: not shown
+  const pending = Object.values(radar.stocks || {}).filter((r) => r.need > 0).length;
   let up = 0, down = 0, flat = 0; const pes = [];
   for (const rec of Object.values(radar.stocks || {})) {
     const t = rec.today;
     if (t?.day === radar.day && t.close > 0 && t.py > 0 && t.vol > 0) { const c = t.close / t.py - 1; if (c > 0.001) up++; else if (c < -0.001) down++; else flat++; }
     if (rec.pe > 0 && rec.pe < 100 && rec.eps > 0 && !rec.need) pes.push(rec.pe);
   }
-  const days = (radar.flowDays || []).map(dayNum).filter((d) => d <= D);
-  const last5 = new Set(days.slice(-5));
+  const s5 = lastSessions(radar.sess, D, 5);
+  const days = (radar.flowDays || []).map(dayNum).filter((d) => d <= D && s5.has(d));
+  const last5 = new Set(days);
   let flowToday = null, flow5 = null;
-  if (days.length) {
+  if (days.length && !pending) {
     flow5 = 0; if (days[days.length - 1] === D) flowToday = 0;
     for (const rec of Object.values(radar.stocks || {})) for (const [d, net] of rec.fl || []) { if (last5.has(d)) flow5 += net; if (d === D && flowToday !== null) flowToday += net; }
   }
   const pe = pes.length >= 20 ? median(pes) : null;
   const ey = pe ? 1 / pe : null;
   let tone = 0;
+  if (pending) up = down = flat = 0;
   if (up + down >= 20) { if (up > down * 1.3) tone++; else if (down > up * 1.3) tone--; }
   if (flowToday !== null) { if (flowToday > 0) tone++; else if (flowToday < 0) tone--; }
-  return { day: radar.day, indexDay, index1m: m1.index, usd1m: m1.usd, up, down, flat, flowToday, flow5, flowSessions: Math.min(5, days.length), pe, ey,
+  return { day: radar.day, indexDay, index1m: m1.index, usd1m: m1.usd, up, down, flat, flowToday, flow5, flowSessions: pending ? 0 : days.length, pending, pe, ey,
     depositPct, eyVsDeposit: ey !== null ? ey - depositPct / 100 : null, tone };
 }
 
@@ -442,7 +463,7 @@ const N = (x, d = 1) => (x === null || !isFinite(x) ? '—' : (+x.toFixed(d)).to
 const fa = (s) => String(s).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[c]).replace(/\./g, '٫');
 
 export const SIGNALS = {
-  top: { t: 'برترین‌های امروز (امتیاز ترکیبی)', kind: 'stock' },
+  top: { t: 'بالاترین امتیاز ترکیبی امروز', kind: 'stock' },
   inflow: { t: 'ورود پول حقیقی', kind: 'stock' },
   momentum12: { t: 'روند قوی، ۱۲ ماه', kind: 'stock' },
   momentum3: { t: 'روند قوی، ۳ ماه', kind: 'stock' },
@@ -512,8 +533,8 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins,
     volRel: volMed > 0 && s.m.dvol !== null ? s.m.dvol / volMed : null });
   const b12 = benchLine(radar, 365, '۱۲ ماه'), b3 = benchLine(radar, 91, '۳ ماه');
-  // 0) the combined score: the best few, whatever brought them up
-  const ranked = live.filter((s) => scores.get(s.ins)?.score >= TOP_MIN).sort((a, b) => scores.get(b.ins).score - scores.get(a.ins).score || a.ins.localeCompare(b.ins));
+  // 0) the combined score: the highest few (with enough of it known), whatever brought them up
+  const ranked = live.filter((s) => scores.get(s.ins)?.score >= TOP_MIN && Object.keys(scores.get(s.ins).parts).length >= TOP_PARTS && scores.get(s.ins).parts.safety !== undefined).sort((a, b) => scores.get(b.ins).score - scores.get(a.ins).score || a.ins.localeCompare(b.ins));
   ranked.slice(0, Math.min(TOP_N, max)).forEach((s, i) => { const sc = scores.get(s.ins); push('top', s, [`امتیاز ${fa(sc.score)} از ۱۰۰؛ ${i === 0 ? 'بالاترین' : `رتبهٔ ${fa(i + 1)}`} بین ${fa(scores.size)} نماد پرمعامله`,
     `قوی‌ترین بخش‌ها: ${Object.entries(sc.parts).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => SCORE_PARTS[k]).join(' و ')}`]); });
   // 1) momentum: the top tenth of liquid stocks by 12- and 3-month return (positive), best first

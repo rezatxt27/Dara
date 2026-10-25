@@ -888,14 +888,28 @@ svg.rot { transform: rotate(180deg); }
 .rd-track { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding: 6px 10px; border-radius: 10px; background: var(--surface-2); align-self: flex-start; max-width: 100%; }
 .rd-track.good { color: var(--pos); background: color-mix(in srgb, var(--pos) 10%, transparent); }
 .rd-track.bad { color: var(--ink-2); }
-.rd-gold { display: flex; flex-direction: column; gap: 4px; padding: 8px 14px 12px; margin: 0; }
-.rd-grow { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(80px, 1fr) minmax(150px, auto); gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
-.rd-grow.best .rd-gbar i { background: var(--pos); }
-.rd-gbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; } .rd-gbar i { display: block; height: 100%; background: var(--faint); border-radius: 3px; } .rd-gbar i.neg { background: var(--pos); }
-.rd-gnum { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: end; }
-@media (max-width: 640px) { .rd-grow { grid-template-columns: 1fr auto; } .rd-gbar { display: none; } }
-.rd-gsub { padding: 12px 0 2px; }
-
+.rd-gold { display: flex; flex-direction: column; gap: 0; padding: 14px 16px; margin: 0; }
+.rd-ghero { font-size: 14.5px; line-height: 1.9; padding: 10px 14px; border-radius: 12px; background: var(--pos-bg); color: var(--ink); }
+.rd-ghero b { font-weight: 800; }
+.rd-gref { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; padding: 10px 2px 4px; }
+.rd-ghead, .rd-grow { display: grid; grid-template-columns: minmax(150px, 1.3fr) minmax(170px, 1.4fr) minmax(110px, .8fr); gap: 14px; align-items: center; }
+.rd-ghead { padding: 12px 0 6px; border-bottom: 1px solid var(--line); }
+.rd-ghead span:last-child, .rd-ggram { text-align: end; justify-self: end; }
+.rd-grow { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.rd-grow:last-of-type { border-bottom: 0; }
+.rd-gname { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rd-gname b { font-size: 14.5px; }
+.rd-gprem, .rd-ggram { display: flex; flex-direction: column; gap: 2px; }
+.rd-gprem b, .rd-ggram b { font-size: 16px; font-weight: 800; }
+.rd-ggram { align-items: flex-end; }
+.rd-grow.best .rd-ggram b { color: var(--pos); }
+.rd-gsub { display: flex; flex-direction: column; gap: 2px; padding: 16px 0 6px; border-bottom: 1px solid var(--line); }
+@media (max-width: 640px) {
+  .rd-ghead { display: none; }
+  .rd-grow { grid-template-columns: 1fr auto; }
+  .rd-gprem { grid-column: 1; grid-row: 2; }
+  .rd-ggram { grid-column: 2; grid-row: 1 / span 2; }
+}
 /* settings: who made Dara */
 .maker { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .maker-av { width: 42px; height: 42px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px;

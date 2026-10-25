@@ -571,7 +571,9 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const fpush = (sig, x, why) => cards.push({ id: `f:${x.f.key}`, sig, rank: at(sig), kind: 'fund', sym: x.f.symbol || '', name: x.f.name, sub: [FUND_KIND[x.f.fundType] || x.f.type, x.f.traded ? 'قابل معامله' : 'صدور و ابطالی'].filter(Boolean).join('، '),
     ref: fundRef(x.f), why: why.filter(Boolean), check: fundChecks(x.f, x.m, money), m: x.m, key: x.f.key });
   funds.filter((x) => x.m.bubble !== null && x.m.bubble <= -0.01 && x.m.tradable).sort((a, b) => a.m.bubble - b.m.bubble).slice(0, max)
-    .forEach((x) => fpush('negBubble', x, [`قیمت پایانی ${fa(P0(x.m.bubble, 1))} کمتر از NAV ابطال همان روز (${fa(x.m.navDay.slice(5).replace('-', '/'))})`, 'یعنی آن روز هر واحد ارزان‌تر از ارزش دارایی‌هایش معامله شد؛ قیمت امروز را خودت ببین']));
+    .forEach((x) => { fpush('negBubble', x, [`قیمت پایانی ${fa(P0(x.m.bubble, 1))} کمتر از NAV ابطال همان روز (${fa(x.m.navDay.slice(5).replace('-', '/'))})`, 'یعنی آن روز هر واحد ارزان‌تر از ارزش دارایی‌هایش معامله شد؛ قیمت امروز را خودت ببین']);
+      // a deep discount is usually a lasting one (block or thinly traded holdings, units that can't be redeemed at NAV): said on the card
+      if (x.m.bubble <= -BIG_DISCOUNT) cards[cards.length - 1].check.unshift(`فاصلهٔ ${fa(P0(x.m.bubble))} زیر NAV بزرگ است؛ چنین فاصله‌ای معمولاً ماندگار است (مثلاً صندوقی که سهام بلوکی یا کم‌معامله دارد) و لزوماً بسته نمی‌شود. سابقهٔ قیمت و NAV این صندوق را در چند ماه اخیر ببین`); });
   const gold = funds.filter((x) => x.m.gold && x.m.bubble !== null && x.m.tradable).sort((a, b) => a.m.bubble - b.m.bubble);
   // the three smallest bubbles (those under NAV already have their own card above)
   if (gold.length >= 3) gold.slice(0, 3).forEach((x, i) => { if (!(x.m.bubble <= -0.01)) fpush('goldBubble', x, [`حباب ${fa(P(x.m.bubble, 1))}؛ ${i === 0 ? 'کمترین' : `رتبهٔ ${fa(i + 1)}`} از ${fa(gold.length)} صندوق طلای پرمعامله`, 'بیشتر دارایی این صندوق‌ها طلا و گواهی سکه است؛ حباب کمتر یعنی بهای کمتری بالای ارزش دارایی‌ها']); });
@@ -590,6 +592,7 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
 }
 // short lists by design (three gold funds; two per fund type) are never folded
 const NOCAP = new Set(['topFund', 'goldBubble']);
+export const BIG_DISCOUNT = 0.1; // a fund this far under its NAV: the gap is most likely a lasting one
 /** Shown before «همه را ببین»: the first SHOW of each signal. */
 export const isFirst = (c) => NOCAP.has(c.sig) || !(c.rank >= SHOW);
 export const shown = (cards) => cards.filter(isFirst);

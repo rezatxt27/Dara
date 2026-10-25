@@ -198,24 +198,33 @@ export function alertBubble(al, quotes = {}, now = Date.now()) {
 // Round-trip cost (buy and later sell, percent of the price) of each way — the same estimates the «where to put it» page
 // uses; an exchange-traded gold fund pays only the broker's fee.
 export const ROUTE_COST = { geram18: 1.5, sekee: 2, sekeb: 2, nim: 2.5, rob: 3, retail_gerami: 6, etf: 0.3 };
+export const ROUTE_BUDGET = 1e9; // «با ۱۰۰ میلیون تومان»: the sum each way is shown buying (Rial)
 /**
- * Gold in hand (coins, 18k) priced against the world's gold today: how much more than world gold one pays per gram of
- * pure gold (the premium), plus half the round-trip cost (the buying side), cheapest first. Gold funds are listed apart,
- * by their bubble over NAV: a fund's NAV is valued at home prices of what it holds (mostly coin and gold-bar
- * certificates, in shares that differ by fund), so its premium over world gold can't be read from the coins here.
- * funds: from radar.goldFunds — [{ key, name, sym, bubble, navDay, ref }]. Only fresh prices; returns
- * { rows: [{ key, kind, name, premium, cost, buy, best }], funds: [{ key, name, sym, ref, bubble, cost, buy, best }], best, gold }
- * or null without a fresh world gold price.
+ * Gold in hand (coins, 18k) against the world's gold today. For each way: its market price, the gold inside it valued at
+ * the world price (ounce × free-market dollar), the premium over that, and what a fixed sum buys after the buying half of
+ * the round-trip cost — as grams of 18k gold at the world price, the unit people know. `buy` is the all-in premium
+ * ((1 + premium) ÷ (1 − half the cost) − 1): the lower, the more gold for the money. Gold funds are listed apart, by their
+ * bubble over NAV: a fund's NAV is valued at home prices of what it holds (mostly coin and gold-bar certificates, in
+ * shares that differ by fund), so its premium over world gold can't be read from the coins here.
+ * funds: from radar.goldFunds — [{ key, name, sym, bubble, navDay, ref }]. Only fresh prices. Returns
+ * { rows: [{ key, kind, name, price, intrinsic, pure, premium, cost, buy, grams18, best }], funds: [{ …, bubble, cost, buy, best }],
+ *   best, gold: { price (pure gram), per18, ounce, usd, at, ounceAt } } — or null without a fresh world gold price.
  */
 export function goldRoutes(quotes = {}, funds = [], now = Date.now()) {
   const cb = coinBubbles(quotes, now);
   if (!cb.gold || cb.gold.stale) return null;
-  const rows = cb.rows.filter((r) => !r.stale).map((r) => ({ key: r.key, kind: r.kind, name: r.name, premium: r.bubble, cost: ROUTE_COST[r.key] ?? 2, retail: r.retail }));
-  for (const r of rows) r.buy = r.premium + r.cost / 200;
+  const half = (c) => c / 200;
+  const rows = cb.rows.filter((r) => !r.stale).map((r) => {
+    const cost = ROUTE_COST[r.key] ?? 2;
+    return { key: r.key, kind: r.kind, name: r.name, price: r.price, intrinsic: r.intrinsic, pure: r.pure, premium: r.bubble, cost, retail: r.retail,
+      buy: (1 + r.bubble) / (1 - half(cost)) - 1, grams18: (ROUTE_BUDGET * (1 - half(cost)) / r.price) * (r.pure / 0.75) };
+  });
   rows.sort((a, b) => a.buy - b.buy);
   if (rows[0]) rows[0].best = true;
   const fl = (funds || []).filter((f) => f.bubble > -0.5 && f.bubble < 1).map((f) => ({ key: 'etf:' + f.key, kind: 'etf', name: f.sym ? `صندوق ${f.sym}` : f.name, sym: f.sym, ref: f.ref,
-    navDay: f.navDay, bubble: f.bubble, cost: ROUTE_COST.etf, buy: f.bubble + ROUTE_COST.etf / 200 })).sort((a, b) => a.buy - b.buy);
+    navDay: f.navDay, bubble: f.bubble, cost: ROUTE_COST.etf, buy: (1 + f.bubble) / (1 - half(ROUTE_COST.etf)) - 1 })).sort((a, b) => a.buy - b.buy);
   if (fl[0]) fl[0].best = true;
-  return { rows, funds: fl, best: rows[0] || null, gold: cb.gold };
+  const ons = quotes['tgju:ons'];
+  return { rows, funds: fl, best: rows[0] || null,
+    gold: { ...cb.gold, per18: cb.gold.price * 0.75, ounceAt: qAt(ons, now), weekend: worldClosedBetween(qAt(ons, now), now) && now - qAt(ons, now) > 12 * 3600000 } };
 }

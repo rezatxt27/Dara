@@ -77,7 +77,7 @@ async def main():
         seed['assets'] = [a for a in seed['assets'] if not str(a.get('id', '')).startswith('rh')] + [hold('rh1', 'سهم داغ', 'tsetmc', 'HOT', 'داغ'), hold('rh2', 'سهم کف', 'tsetmc', 'LOW', 'کف'), hold('rh3', 'صندوق درآمد ثابت', 'fipiran', 'd2', '')]
         # the gold yardsticks priced just now (synthetic): ounce, dollar, coins, 18k
         import time; nowms = int(time.time() * 1000)
-        for k, v in {'ons': 4000, 'price_dollar_rl': 1_000_000, 'sekee': 1_050_000_000, 'nim': 540_000_000, 'rob': 300_000_000, 'retail_gerami': 125_000_000, 'geram18': 99_000_000}.items():
+        for k, v in {'ons': 3994, 'price_dollar_rl': 2_695_000, 'sekee': 2_647_350_000, 'nim': 1_406_000_000, 'rob': 754_600_000, 'retail_gerami': 382_000_000, 'geram18': 259_933_000}.items():
             seed['quotes']['tgju:' + k] = {'price': v, 'changePct': 0, 'at': nowms, 'fetchedAt': nowms, 'source': 'mock'}
         seed['meta'] = {**seed.get('meta', {}), 'radar': {'day': DAY, 'newCount': 3, 'pending': 1}}
         await boot.evaluate("async (s) => { await chrome.storage.local.clear(); await chrome.storage.local.set(s); }", {**seed, 'radar': radar, 'radarUser': {'rules': [], 'marks': [], 'seenDay': None}})
@@ -245,7 +245,7 @@ async def main():
             check('section «ورود پول حقیقی» with the steady-inflow stocks', 'ورود پول حقیقی' in txt and await pg.locator('.rd-sec:has(h4:has-text("ورود پول حقیقی")) .rd-card:has-text("نماد3")').count() == 1)
             check('flow line on stock cards', await pg.locator('.rd-flow').count() > 3)
             gold = await pg.inner_text('.rd-gold')
-            check('cheapest way to buy gold: coins and 18k ranked against world gold, funds apart by their bubble', 'ارزان‌ترین امروز' in gold and 'صندوق‌های طلا' in gold and 'کم‌حباب‌ترین صندوق' in gold and '۱۸ عیار' in gold, gold.replace('\n', ' | ')[:240])
+            check('cheapest way to buy gold: a plain sentence, the world 18k gram, premium and grams per row, funds apart', all(w in gold for w in ['امروز', 'گرم', 'قیمت جهانی هر گرم طلای ۱۸ عیار', 'گران‌تر از ارزش طلای داخلش', 'بیشترین طلا برای پولت', 'صندوق‌های طلا', 'کم‌حباب‌ترین صندوق']), gold.replace('\n', ' | ')[:240])
             tr = await pg.locator('.rd-track').all_inner_texts()
             check('scorecard line visible under stock sections, with the result once a month has passed', len(tr) >= 3 and any('یک ماه بعد میانگین' in t and 'شاخص کل' in t for t in tr), tr[:3])
             mine = await pg.inner_text('.rd-mine')

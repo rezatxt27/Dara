@@ -34,7 +34,7 @@ const SIG_TIP = {
   volume: 'نمادهایی که امروز دست‌کم ۳ برابر میانهٔ ۲۰ روز معاملهٔ قبلی‌شان معامله شده‌اند و ارزش معاملاتشان قابل‌توجه است. دلیلش می‌تواند خبر، عرضهٔ سنگین یا خرید یک‌باره باشد؛ جهت قیمت امروز را هم ببین.',
   cheap: 'نمادهای پرمعامله و سودده‌ای که P/E آن‌ها حداکثر ۶۰٪ میانهٔ هم‌گروه‌هاست. P/E از سود برآوردی سایت بورس است؛ اگر سود یک‌باره یا رو به کاهش باشد، ارزانی فقط ظاهری است.',
   nearLow: 'تا ۱۰٪ بالای کمترین قیمت یک سال، دست‌کم ۱۵٪ زیر بالاترین قیمت، و هنوز سودده. افت ممکن است دلیل داشته باشد؛ «نزدیک کف» به‌تنهایی یعنی ارزان نیست.',
-  negBubble: 'صندوق‌های قابل معامله‌ای که قیمت پایانی‌شان کمتر از ارزش دارایی‌ها (NAV ابطال همان روز) بوده. فاصله معمولاً کم است و زود بسته می‌شود.',
+  negBubble: 'صندوق‌های قابل معامله‌ای که قیمت پایانی‌شان کمتر از ارزش دارایی‌ها (NAV ابطال همان روز) بوده. فاصله‌های کم (یکی دو درصد) معمولاً زود بسته می‌شوند؛ فاصله‌های بزرگ اغلب نه: صندوقی که سهام بلوکی یا کم‌معامله دارد ممکن است سال‌ها زیر NAV معامله شود.',
   goldBubble: 'سه صندوق طلای پرمعامله با کمترین حباب، یعنی کمترین فاصلهٔ قیمت از ارزش دارایی‌ها در روز NAV. حباب هر روز عوض می‌شود.',
   fixedBeat: 'صندوق‌های درآمد ثابت با دست‌کم یک سال سابقه و اندازهٔ قابل‌توجه که بازدهی ۱۲ ماهشان از سپرده با سود ماهانه بیشتر بوده. بازدهی این صندوق‌ها معمولاً پایدارتر است، ولی تضمینی نیست.',
   topFund: 'دو صندوق با بیشترین بازدهی ۱۲ ماه در هر نوع (سهامی، مختلط، کالایی، شاخصی، بخشی، اهرمی). صندوق‌های اهرمی و بخشی پرریسک‌ترند.',
@@ -218,28 +218,40 @@ function Pulse({ p, s }) {
   </section>`;
 }
 
-/** «ارزان‌ترین راه خرید طلا، امروز»: coins and 18k by their premium over world gold plus buying cost; gold funds by their bubble. */
+/**
+ * «ارزان‌ترین راه خرید طلا، امروز»: in plain terms — how much dearer than the gold inside it each way is (at the world
+ * price), and how many grams of 18k a fixed sum buys after the buying cost. Gold funds apart, by their bubble over NAV.
+ */
 function GoldRoutes({ g, s, openPrice }) {
   const [all, setAll] = useState(false);
   const rows = all ? g.rows : g.rows.slice(0, 4);
   const funds = all ? g.funds : g.funds.slice(0, 3);
-  const max = Math.max(...g.rows.map((r) => Math.abs(r.buy)), 0.01);
-  const fmax = Math.max(...g.funds.map((r) => Math.abs(r.buy)), 0.01);
   const more = g.rows.length > 4 || g.funds.length > 3;
-  const row = (r, mx, sub) => html`<div class=${'rd-grow' + (r.best ? ' best' : '')}>
-      ${r.ref ? html`<button class="rd-name" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos">${r.kind === 'etf' ? 'کم‌حباب‌ترین صندوق' : 'ارزان‌ترین امروز'}</span>`}</button>`
-        : html`<div class="rd-name" style="cursor:default"><b>${r.name}</b>${r.best ? html`<span class="xs pos">ارزان‌ترین امروز</span>` : r.retail ? html`<span class="xs muted">قیمت مغازه</span>` : ''}</div>`}
-      <span class="rd-gbar" aria-hidden="true"><i class=${r.buy < 0 ? 'neg' : ''} style=${`width:${Math.max(3, (Math.abs(r.buy) / mx) * 100)}%`}></i></span>
-      <div class="rd-gnum"><b class="num">${pctTxt(r.buy, 1)}</b><span class="xs muted">${sub}</span></div>
-    </div>`;
+  const m = (v) => money(v, s, { compact: true });
+  const full = (v) => money(Math.round(v / 1e4) * 1e4, s); // to the thousand toman: 18k and its gold differ by little
+  const budget = m(BB.ROUTE_BUDGET);
+  const best = g.rows[0], next = g.rows[1];
+  const gr = (x) => num(x, 2);
+  const pct = (x) => pctTxt(x, 1);
+  const tip = `همه با یک خط‌کش سنجیده می‌شوند: قیمت جهانی طلا (اونس × دلار بازار آزاد). برای هر سکه وزن طلای خالص داخلش (مثلاً سکهٔ امامی ۸٫۱۳۳ گرم با عیار ۹۰۰) به قیمت جهانی حساب می‌شود و قیمت بازارش با آن مقایسه می‌شود؛ اختلاف همان «حباب» است. بعد نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش، تخمینی: ۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکهٔ امامی ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪) که موقع خرید می‌دهی اضافه می‌شود. «با ${budget} می‌گیری» یعنی بعد از این هزینه، چند گرم طلای ۱۸ عیار به قیمت جهانی می‌ارزد؛ عدد بیشتر یعنی طلای بیشتر برای همان پول. قیمت ۱۸ عیار، قیمت آب‌شده بدون اجرت ساخت است. صندوق‌های طلا جدا آمده‌اند: ارزش دارایی صندوق (NAV) با قیمت داخلی آنچه نگه می‌دارد (بیشتر گواهی سکه و شمش) حساب می‌شود، پس حبابشان فقط نسبت به NAV خودشان است. حباب‌ها هر روز عوض می‌شوند.`;
   return html`<section class="rd-sec">
-    <div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4><${Tip} title="ارزان‌ترین راه خرید طلا" text=${`سکه‌ها و طلای ۱۸ عیار با قیمت جهانی طلا (اونس × دلار بازار آزاد) مقایسه می‌شوند: برای هر گرم طلای خالص چند درصد بیشتر یا کمتر از قیمت جهانی می‌پردازی، به‌علاوهٔ نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش) که موقع خرید پرداخت می‌شود. صندوق‌های طلا جدا آمده‌اند، با حبابشان نسبت به NAV: ارزش دارایی صندوق خودش با قیمت داخلی آنچه نگه می‌دارد (بیشتر گواهی سکه و شمش، به سهم‌های متفاوت) حساب می‌شود، پس با این فهرست مستقیم مقایسه‌پذیر نیست. هزینه‌ها تخمینی‌اند (۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکه ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪، صندوق حدود ${num(BB.ROUTE_COST.etf, 1)}٪). حباب‌ها هر روز عوض می‌شوند.`} /><span class="xs muted">هر گرم طلای خالص چقدر گران‌تر از قیمت جهانی، با هزینهٔ خرید</span></div>
+    <div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4><${Tip} title="ارزان‌ترین راه خرید طلا" text=${tip} /><span class="xs muted">کدام راه، برای همان پول طلای بیشتری می‌دهد</span></div>
     <div class="card rd-gold">
-      ${rows.map((r) => row(r, max, `حباب ${pctTxt(r.premium, 1)} + هزینه ${num(r.cost / 2, 2)}٪`))}
-      ${funds.length > 0 && html`<div class="rd-gsub xs muted">صندوق‌های طلا: حباب نسبت به ارزش دارایی‌هایشان (NAV ${fmtJ(funds[0].navDay)})، با هزینهٔ خرید</div>
-        ${funds.map((r) => row(r, fmax, `حباب ${pctTxt(r.bubble, 1)} + هزینه ${num(r.cost / 2, 2)}٪`))}`}
+      ${best && html`<div class="rd-ghero">امروز <b>${best.name}</b> ${best.premium < 0.01 && best.premium > -0.01 ? 'تقریباً هم‌قیمت طلای جهانی است' : `${pct(best.premium)} ${best.premium >= 0 ? 'گران‌تر' : 'ارزان‌تر'} از طلای جهانی است`}: با ${budget} حدود <b class="num">${gr(best.grams18)} گرم</b> طلای ۱۸ عیار می‌گیری${next ? html`؛ با ${next.name} <span class="num">${gr(next.grams18)} گرم</span>` : ''}.</div>`}
+      <div class="rd-gref"><span>قیمت جهانی هر گرم طلای ۱۸ عیار: <b class="num">${money(g.gold.per18, s)}</b></span>
+        <span class="muted">اونس ${num(g.gold.ounce, 0)} دلار × دلار آزاد ${money(g.gold.usd, s)}${g.gold.weekend ? ' · اونس: آخرین قیمت جمعه (بازار جهانی آخر هفته تعطیل است)' : ''}</span></div>
+      <div class="rd-ghead xs muted"><span>روش خرید</span><span>گران‌تر از ارزش طلای داخلش</span><span>با ${budget} می‌گیری</span></div>
+      ${rows.map((r) => html`<div class=${'rd-grow' + (r.best ? ' best' : '')}>
+        <div class="rd-gname"><b>${r.name}</b><span class="xs muted">قیمت ${full(r.price)}${r.retail ? ' (قیمت مغازه)' : ''}</span>${r.best && html`<span class="xs pos sb">بیشترین طلا برای پولت</span>`}</div>
+        <div class="rd-gprem"><b class="num">${pct(r.premium)}</b><span class="xs muted">ارزش طلای داخلش ${full(r.intrinsic)} · هزینهٔ خرید ${num(r.cost / 2, 2)}٪</span></div>
+        <div class="rd-ggram"><b class="num">${gr(r.grams18)} گرم</b><span class="xs muted">طلای ۱۸ عیار</span></div>
+      </div>`)}
+      ${funds.length > 0 && html`<div class="rd-gsub"><b class="small">صندوق‌های طلا</b><span class="xs muted">قیمت هر واحد در برابر ارزش دارایی‌های خود صندوق (NAV ${fmtJ(funds[0].navDay)})، نه طلای جهانی؛ پس با ردیف‌های بالا مستقیم مقایسه نمی‌شوند. کارمزد خرید حدود ${num(BB.ROUTE_COST.etf / 2, 2)}٪</span></div>
+        ${funds.map((r) => html`<div class=${'rd-grow fund' + (r.best ? ' best' : '')}>
+          <button class="rd-name rd-gname" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos sb">کم‌حباب‌ترین صندوق</span>`}</button>
+          <div class="rd-gprem"><b class="num">${pct(r.bubble)}</b><span class="xs muted">${r.bubble >= 0 ? 'بالاتر' : 'پایین‌تر'} از NAV</span></div>
+        </div>`)}`}
       ${more && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همه (${num(g.rows.length + g.funds.length)})`}</button>`}
-      <div class="xs muted">قیمت جهانی هر گرم طلای خالص: ${money(g.gold.price, s)} (اونس × دلار آزاد). حباب یعنی هزینهٔ نگه‌داری طلا در ایران نسبت به قیمت جهانی؛ ممکن است بالا یا پایین برود.</div>
     </div></section>`;
 }
 

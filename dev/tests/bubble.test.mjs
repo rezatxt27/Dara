@@ -248,13 +248,18 @@ test('gold routes: premium over world gold plus the buying half of the round-tri
     { key: 'f2', name: 'صندوق دو', sym: 'طلاب', bubble: 0.02, navDay: '2026-10-03', ref: {} }], now);
   const by = Object.fromEntries(r.rows.map((x) => [x.key, x]));
   const p18 = 96_000_000 / (0.75 * G) - 1;
-  close(by.geram18.premium, p18, 1e-12); close(by.geram18.buy, p18 + 1.5 / 200, 1e-12);
+  close(by.geram18.premium, p18, 1e-12); close(by.geram18.buy, (1 + p18) / (1 - 1.5 / 200) - 1, 1e-12);
+  // what 100 million toman buys, in grams of 18k at the world price, after the buying cost
+  close(by.geram18.grams18, (1e9 * (1 - 1.5 / 200) / 96_000_000) * (0.75 / 0.75), 1e-9);
+  close(by.sekee.grams18, (1e9 * (1 - 2 / 200) / 1_000_000_000) * (8.133 * 0.9 / 0.75), 1e-9);
+  close(r.gold.per18, G * 0.75, 1e-6);
+  assert.ok(r.rows.every((x, i) => !i || r.rows[i - 1].grams18 >= x.grams18)); // cheapest = most gold for the money
   assert.ok(r.rows.every((x) => x.kind !== 'etf'));
   assert.ok(r.rows.every((x, i) => !i || r.rows[i - 1].buy <= x.buy));
   assert.equal(r.rows.filter((x) => x.best).length, 1); assert.equal(r.best, r.rows[0]);
   // funds: their own list, by bubble + buying fee; never «cheapest» against coins (a NAV already carries home prices)
   assert.deepEqual(r.funds.map((f) => f.key), ['etf:f1', 'etf:f2']);
-  close(r.funds[0].buy, -0.01 + 0.3 / 200, 1e-12); assert.ok(r.funds[0].best && !r.funds[1].best);
+  close(r.funds[0].buy, 0.99 / (1 - 0.3 / 200) - 1, 1e-12); assert.ok(r.funds[0].best && !r.funds[1].best);
   // a stale coin is left out; a stale world price gives nothing at all
   const s = base(); s['tgju:rob'] = Q(300_000_000, { at: now - 5 * 864e5, fetchedAt: now - 5 * 864e5 });
   assert.ok(!BB.goldRoutes(s, [], now).rows.some((x) => x.key === 'rob'));

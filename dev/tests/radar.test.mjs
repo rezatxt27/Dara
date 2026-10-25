@@ -673,3 +673,14 @@ test('review fixes: «5 sessions» are the market\'s last 5; the share counts on
   assert.equal(p.pending, 1); assert.equal(p.up + p.down + p.flat, 0); assert.equal(p.flowToday, null);
   assert.equal(RD.SIGNALS.top.t, 'بالاترین امتیاز ترکیبی امروز');
 });
+
+test('a fund deep under its NAV says on its card that such a gap usually lasts', () => {
+  const R = RD.empty(); R.day = DAY0;
+  R.etf = { X: { close: 63, val: 5e9, day: DAY0, hist: { [DAY0]: 63 } }, Y: { close: 98, val: 5e9, day: DAY0, hist: { [DAY0]: 98 } } };
+  const f = (key, ins) => ({ key, name: 'صندوق ' + key, symbol: key, fundType: 21, cancelNav: 100, date: DAY0, size: 5e12, since: '2020-01-01', traded: true, insCode: ins, ret: {}, mix: {} });
+  R.funds = [f('deep', 'X'), f('near', 'Y')];
+  const cards = RD.buildCards(R).cards.filter((c) => c.sig === 'negBubble');
+  const deep = cards.find((c) => c.key === 'deep'), near = cards.find((c) => c.key === 'near');
+  assert.ok(deep.check[0].includes('ماندگار'));
+  assert.ok(!near.check.some((t) => t.includes('ماندگار')));
+});

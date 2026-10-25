@@ -13,6 +13,7 @@ import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
 import * as RD from './lib/radar.js';
+import { riskLevel } from './lib/profile.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir', 'api.bitpin.ir'];
 const REFERERS = {
@@ -496,6 +497,16 @@ async function runRadar({ force = false, batch = 40 } = {}) {
         } catch { /* names are optional */ }
       }
     } catch (e) { radar.error = e.message; }
+    // individual (حقیقی) money in and out of each stock, for the session just scanned: TSETMC lists only the latest session,
+    // so it is gathered once per session (tried again every 20 minutes until it matches that session's volumes)
+    if (tse && radar.day && radar.flowFor !== radar.day && (changed || Date.now() - (radar.flowAt || 0) > 20 * 60e3)) {
+      radar.flowAt = Date.now();
+      try {
+        const n = RD.applyFlows(radar, await P.tsetmcClientTypes(), radar.day);
+        if (n) changed = true;
+        if (n >= 50) radar.flowFor = radar.day;
+      } catch { /* the money flow is optional */ }
+    }
     // the total index and the dollar over the year, once a session — to say how a return compares
     const ixLast = radar.bench?.index?.d?.[radar.bench.index.d.length - 1] || 0;
     const ixLag = radar.day && ixLast < RD.dayNum(radar.day) && Date.now() - (radar.benchAt || 0) > 2 * 3600e3;
@@ -537,7 +548,7 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
     if (changed && radar.day) {
       const depositPct = I.defaultDepositPct({ settings, assets });
-      cards = RD.buildCards(radar, { depositPct }).cards;
+      cards = RD.buildCards(radar, { depositPct, level: riskLevel(settings.profile) || 'mid' }).cards;
       const ids = [...new Set(cards.map(RD.cardKey))];
       // the radar's own track record: what it showed on each complete scan, to say later how it did
       if (!pending) RD.recordTrack(radar, cards);
@@ -549,7 +560,7 @@ async function runRadar({ force = false, batch = 40 } = {}) {
       for (const rule of radarUser.rules || []) {
         // a stock rule waits until every stock is up to date: half-gathered data would make old matches look new
         if (rule.kind === 'stock' && pending) continue;
-        const hits = RD.runRule(radar, rule);
+        const hits = RD.runRule(radar, rule, { level: riskLevel(settings.profile) || 'mid' });
         const { fresh, ids: hitIds } = RD.newHits(radar.ruleHits[rule.id], hits);
         if (rule.notify && radar.ruleHits[rule.id] && fresh.length) notes.push(`«${rule.name}»: ${fresh.slice(0, 4).map((x) => x.sym || x.name).join('، ')}${fresh.length > 4 ? ' و …' : ''}`);
         radar.ruleHits[rule.id] = hitIds;
@@ -588,7 +599,7 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     // a small summary for the menu badge (the scan itself is too large to load on every page)
     const res = radar.results || {};
     // the menu's count: new among the cards shown first (not the long «همه را ببین» lists)
-    const firstIds = new Set(RD.shown(cards || RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }) }).cards).map(RD.cardKey));
+    const firstIds = new Set(RD.shown(cards || RD.buildCards(radar, { depositPct: I.defaultDepositPct({ settings, assets }), level: riskLevel(settings.profile) || 'mid' }).cards).map(RD.cardKey));
     const newCount = res.before?.length ? new Set((res.ids || []).filter((x) => firstIds.has(x) && !res.before.includes(x)).map((x) => x.split('|')[1])).size : 0;
     await store.update('meta', (m) => ({ ...m, radar: { day: radar.day, newCount, pending, at: Date.now() } }));
     // the store is several MB: written only when something changed (closes kept to 8 significant digits)

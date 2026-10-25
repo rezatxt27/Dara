@@ -200,6 +200,47 @@ export function mergeDaily(rec, rows, D) {
   return rec;
 }
 
+/* ------------------------------------ money flow (حقیقی / حقوقی) ------------------------------------ */
+export const FLOW_KEEP = 30; // sessions of individual (حقیقی) money flow kept per stock
+/**
+ * One finished session's buy/sell by individuals and institutions (TSETMC «ClientTypeAll», volumes only) → each stock's
+ * flow list (mutates): rec.fl = [[day number, net individual money (Rial: (buy − sell) × close), buyer power]], the last
+ * FLOW_KEEP sessions. Buyer power = average individual buy ÷ average individual sell (per trader). A row whose volumes don't
+ * add up to the session's volume (a list already reset for the next session, or from another day) is skipped.
+ */
+export function applyFlows(radar, rows, day) {
+  const D = dayNum(day); let n = 0;
+  for (const x of rows || []) {
+    const rec = radar.stocks?.[String(x.insCode)];
+    if (!rec || rec.today?.day !== day || !(rec.today.close > 0) || !(rec.today.vol > 0)) continue;
+    const bI = +x.buy_I_Volume || 0, bN = +x.buy_N_Volume || 0, sI = +x.sell_I_Volume || 0, sN = +x.sell_N_Volume || 0;
+    const tot = bI + bN;
+    if (!(tot > 0) || Math.abs(tot / rec.today.vol - 1) > 0.02 || Math.abs((sI + sN) / rec.today.vol - 1) > 0.02) continue;
+    const net = Math.round((bI - sI) * rec.today.close);
+    const cb = +x.buy_CountI || 0, cs = +x.sell_CountI || 0;
+    const power = cb > 0 && cs > 0 && bI > 0 && sI > 0 ? Math.round(((bI / cb) / (sI / cs)) * 100) / 100 : null;
+    const fl = rec.fl || (rec.fl = []);
+    if (fl.length && fl[fl.length - 1][0] === D) fl[fl.length - 1] = [D, net, power];
+    else if (!fl.length || fl[fl.length - 1][0] < D) fl.push([D, net, power]);
+    if (fl.length > FLOW_KEEP) fl.splice(0, fl.length - FLOW_KEEP);
+    n++;
+  }
+  if (n) radar.flowDays = [...new Set([...(radar.flowDays || []), day])].sort().slice(-FLOW_KEEP);
+  return n;
+}
+/** A stock's individual money flow up to day D: the last 5 sessions (and 20), as money and as a share of the value traded. */
+function flowMetrics(rec, D) {
+  const fl = (rec.fl || []).filter((x) => x[0] <= D && x[0] > D - 45);
+  if (!fl.length) return { flowN: 0, flow5: null, flow20: null, flowShare5: null, flowPos5: null, power: null, flowToday: null };
+  const l5 = fl.slice(-5), l20 = fl.slice(-20);
+  const val = new Map((rec.h || []).map((x) => [x[0], x[2]]));
+  const sum = (l) => l.reduce((a, x) => a + x[1], 0);
+  const v5 = l5.reduce((a, x) => a + (val.get(x[0]) || 0), 0);
+  const last = fl[fl.length - 1];
+  return { flowN: fl.length, flow5: sum(l5), flow20: sum(l20), flowShare5: v5 > 0 ? sum(l5) / v5 : null, flowPos5: l5.filter((x) => x[1] > 0).length,
+    flowToday: last[0] === D ? last[1] : null, power: last[0] === D ? last[2] : null };
+}
+
 /* --------------------------------------- numbers --------------------------------------- */
 const median = (a) => { const s = a.filter(isFinite).sort((x, y) => x - y); if (!s.length) return NaN; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 /** Close on or before day number `t` (null if the series starts later). */
@@ -240,6 +281,7 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
     traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
     peRel: isFinite(rec.pe) && rec.pe > 0 && mPE > 0 ? rec.pe / mPE : null, dayChange: rec.today?.py > 0 ? rec.today.close / rec.today.py - 1 : null,
     dd1y: fullYear && yr.length > 20 ? dd : null, dvol, ey: isFinite(rec.pe) && rec.pe > 0 && rec.eps > 0 ? 1 / rec.pe : null,
+    ...flowMetrics(rec, D),
   };
 }
 /** Median P/E of each sector over its stocks with a positive, sane P/E (a sector needs MIN_SECTOR of them). */
@@ -296,6 +338,103 @@ export function fundMetrics(f, radar, D) {
   return { y1: frac(r.y1), m6: frac(r.m6), m3: frac(r.m3), m1: frac(r.m1), w1: frac(r.w1), ageDays, size: f.size || 0, bubble, etfVal, tradable, navDay, marketPrice: etf?.close || null, gold: isGoldFund(f) };
 }
 
+/* ---------------------------------- the combined score ---------------------------------- */
+// How much each part counts, by the risk the owner accepts (profile): a cautious owner weighs a calm stock more.
+export const SCORE_W = {
+  low: { trend: 20, value: 25, flow: 20, attention: 5, safety: 30 },
+  mid: { trend: 25, value: 20, flow: 25, attention: 10, safety: 20 },
+  high: { trend: 30, value: 15, flow: 30, attention: 15, safety: 10 },
+};
+export const SCORE_PARTS = { trend: 'روند', value: 'ارزش', flow: 'پول حقیقی', attention: 'توجه بازار', safety: 'ریسک کم' };
+export const TOP_MIN = 65; // a stock's score must reach this to be among «برترین‌های امروز»
+export const TOP_N = 10;
+/** Percentile (0…1) of each item's value among the items that have one; ties share their middle place. */
+function ranks(list, get) {
+  const v = []; for (const x of list) { const y = get(x); if (y !== null && y !== undefined && isFinite(y)) v.push([x, y]); }
+  const out = new Map();
+  if (v.length < 2) { for (const [x] of v) out.set(x, 0.5); return out; }
+  const sorted = v.map((o) => o[1]).sort((a, b) => a - b); const n = sorted.length;
+  const lo = (y) => { let a = 0, b = n; while (a < b) { const m = (a + b) >> 1; if (sorted[m] < y) a = m + 1; else b = m; } return a; };
+  const hi = (y) => { let a = 0, b = n; while (a < b) { const m = (a + b) >> 1; if (sorted[m] <= y) a = m + 1; else b = m; } return a; };
+  for (const [x, y] of v) out.set(x, ((lo(y) + hi(y) - 1) / 2) / (n - 1));
+  return out;
+}
+/**
+ * One score (0…100) per liquid, traded stock: where it stands among the others on trend (12- and 3-month return), value
+ * (P/E against its sector; a loss-making company gets nothing), individual money (the last 5 sessions, once 3 are known),
+ * attention (today's volume against its usual) and calm (daily swing and the year's worst fall, inverted). A part that
+ * can't be known for a stock is left out and the others share its weight. list: [{ ins, m }]. Returns Map ins → { score, parts }.
+ */
+export function scoreStocks(list, level = 'mid') {
+  const w = SCORE_W[level] || SCORE_W.mid;
+  const r365 = ranks(list, (s) => s.m.ret365), r91 = ranks(list, (s) => s.m.ret91);
+  const rVal = ranks(list.filter((s) => s.m.eps > 0 && s.m.pe > 0), (s) => (s.m.peRel === null ? null : -s.m.peRel));
+  const rFlow = ranks(list.filter((s) => s.m.flowN >= 3), (s) => s.m.flowShare5);
+  const rAtt = ranks(list, (s) => (s.m.volRatio === null ? null : Math.min(s.m.volRatio, 10)));
+  const rSwing = ranks(list, (s) => s.m.dvol), rFall = ranks(list, (s) => s.m.dd1y);
+  const mean = (a) => { const l = a.filter((x) => x !== undefined && x !== null); return l.length ? l.reduce((t, x) => t + x, 0) / l.length : undefined; };
+  const out = new Map();
+  for (const s of list) {
+    const trend = mean([r365.get(s), r91.get(s)]);
+    if (trend === undefined) continue; // no return to stand on: no score
+    const swing = rSwing.get(s), fall = rFall.get(s);
+    const parts = {
+      trend,
+      value: s.m.eps > 0 && s.m.pe > 0 ? rVal.get(s) : (isFinite(s.m.eps) && s.m.eps !== null && s.m.eps <= 0) || s.m.pe < 0 ? 0 : undefined, // loss-making: nothing; unknown: left out
+      flow: rFlow.get(s),
+      attention: rAtt.get(s),
+      safety: mean([swing === undefined ? undefined : 1 - swing, fall]),
+    };
+    let tw = 0, tv = 0;
+    for (const [k, v] of Object.entries(parts)) if (v !== undefined) { tw += w[k]; tv += w[k] * v; }
+    out.set(s.ins, { score: Math.round((tv / tw) * 100), parts: Object.fromEntries(Object.entries(parts).filter(([, v]) => v !== undefined)) });
+  }
+  return out;
+}
+
+/* ---------------------------------------- the market today ---------------------------------------- */
+/**
+ * «نبض بازار»: the session at a glance — the index today and over a month, how many stocks rose and fell, individual
+ * money in or out (today and the last 5 sessions), the market's middle P/E as an earnings yield against the deposit,
+ * and the dollar over a month. Each part is null when unknown. tone: −2…+2 from breadth and money.
+ */
+export function pulse(radar, { depositPct = 25 } = {}) {
+  if (!radar?.day) return null;
+  const D = dayNum(radar.day);
+  const ix = radar.bench?.index;
+  let indexDay = null;
+  if (ix?.d?.length) { let i = ix.d.length - 1; while (i > 0 && ix.d[i] > D) i--; if (ix.d[i] === D && i > 0 && ix.p[i - 1] > 0) indexDay = ix.p[i] / ix.p[i - 1] - 1; }
+  const m1 = benchRet(radar, 30, D);
+  let up = 0, down = 0, flat = 0; const pes = [];
+  for (const rec of Object.values(radar.stocks || {})) {
+    const t = rec.today;
+    if (t?.day === radar.day && t.close > 0 && t.py > 0 && t.vol > 0) { const c = t.close / t.py - 1; if (c > 0.001) up++; else if (c < -0.001) down++; else flat++; }
+    if (rec.pe > 0 && rec.pe < 100 && rec.eps > 0 && !rec.need) pes.push(rec.pe);
+  }
+  const days = (radar.flowDays || []).map(dayNum).filter((d) => d <= D);
+  const last5 = new Set(days.slice(-5));
+  let flowToday = null, flow5 = null;
+  if (days.length) {
+    flow5 = 0; if (days[days.length - 1] === D) flowToday = 0;
+    for (const rec of Object.values(radar.stocks || {})) for (const [d, net] of rec.fl || []) { if (last5.has(d)) flow5 += net; if (d === D && flowToday !== null) flowToday += net; }
+  }
+  const pe = pes.length >= 20 ? median(pes) : null;
+  const ey = pe ? 1 / pe : null;
+  let tone = 0;
+  if (up + down >= 20) { if (up > down * 1.3) tone++; else if (down > up * 1.3) tone--; }
+  if (flowToday !== null) { if (flowToday > 0) tone++; else if (flowToday < 0) tone--; }
+  return { day: radar.day, indexDay, index1m: m1.index, usd1m: m1.usd, up, down, flat, flowToday, flow5, flowSessions: Math.min(5, days.length), pe, ey,
+    depositPct, eyVsDeposit: ey !== null ? ey - depositPct / 100 : null, tone };
+}
+
+/** Gold funds that trade, with today's bubble (price against the same day's NAV), lowest first — for «ارزان‌ترین راه طلا». */
+export function goldFunds(radar) {
+  if (!radar?.day) return [];
+  const D = dayNum(radar.day);
+  return (radar.funds || []).map((f) => ({ f, m: fundMetrics(f, radar, D) })).filter((x) => x.m.gold && x.m.tradable && x.m.bubble !== null)
+    .sort((a, b) => a.m.bubble - b.m.bubble).map((x) => ({ key: x.f.key, name: x.f.name, sym: x.f.symbol || '', bubble: x.m.bubble, navDay: x.m.navDay, ref: fundRef(x.f) }));
+}
+
 /* ---------------------------------------- cards ---------------------------------------- */
 const P = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : `${x > 0 ? '+' : x < 0 ? '−' : ''}${Math.abs(x * 100).toFixed(d)}٪`);
 const P0 = (x, d = 0) => (x === null || !isFinite(x) ? '—' : `${Math.abs(x * 100).toFixed(d)}٪`);
@@ -303,6 +442,8 @@ const N = (x, d = 1) => (x === null || !isFinite(x) ? '—' : (+x.toFixed(d)).to
 const fa = (s) => String(s).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[c]).replace(/\./g, '٫');
 
 export const SIGNALS = {
+  top: { t: 'برترین‌های امروز (امتیاز ترکیبی)', kind: 'stock' },
+  inflow: { t: 'ورود پول حقیقی', kind: 'stock' },
   momentum12: { t: 'روند قوی، ۱۲ ماه', kind: 'stock' },
   momentum3: { t: 'روند قوی، ۳ ماه', kind: 'stock' },
   volume: { t: 'حجم غیرعادی', kind: 'stock' },
@@ -354,7 +495,7 @@ const fundRef = (f) => (f.traded && f.insCode ? { provider: 'tsetmc', key: f.ins
  * Every card: { id, sig, kind, sym, name, sub, ref, why: [text], check: [text], m }.
  */
 export const SHOW = 6; // cards shown per signal before «همه را ببین»
-export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.round(v)), max = Infinity } = {}) {
+export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.round(v)), max = Infinity, level = 'mid' } = {}) {
   const day = radar.day; if (!day) return { day: null, cards: [], ready: 0, total: 0 };
   const D = dayNum(day);
   const sectors = sectorMedians(radar.stocks);
@@ -364,12 +505,17 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const sname = (rec) => radar.sectors?.[rec.sector] || '';
   const live = stocks.filter((s) => !s.rec.need && s.m.traded);
   const volMed = median(live.filter((s) => s.m.liquid && s.m.dvol !== null).map((s) => s.m.dvol));
+  const scores = scoreStocks(live.filter((s) => s.m.liquid), level);
   // every card knows its place in its signal's list (rank 0 = first): the page shows SHOW of them, then «همه را ببین»
   const nth = {}; const at = (sig) => (nth[sig] = (nth[sig] ?? -1) + 1);
   const push = (sig, s, why) => cards.push({ id: `s:${s.ins}`, sig, rank: at(sig), kind: 'stock', sym: s.rec.sym, name: s.rec.name, sub: [marketOf(s.rec.isin), sname(s.rec)].filter(Boolean).join('، '),
     ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins,
     volRel: volMed > 0 && s.m.dvol !== null ? s.m.dvol / volMed : null });
   const b12 = benchLine(radar, 365, '۱۲ ماه'), b3 = benchLine(radar, 91, '۳ ماه');
+  // 0) the combined score: the best few, whatever brought them up
+  const ranked = live.filter((s) => scores.get(s.ins)?.score >= TOP_MIN).sort((a, b) => scores.get(b.ins).score - scores.get(a.ins).score || a.ins.localeCompare(b.ins));
+  ranked.slice(0, Math.min(TOP_N, max)).forEach((s, i) => { const sc = scores.get(s.ins); push('top', s, [`امتیاز ${fa(sc.score)} از ۱۰۰؛ ${i === 0 ? 'بالاترین' : `رتبهٔ ${fa(i + 1)}`} بین ${fa(scores.size)} نماد پرمعامله`,
+    `قوی‌ترین بخش‌ها: ${Object.entries(sc.parts).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k]) => SCORE_PARTS[k]).join(' و ')}`]); });
   // 1) momentum: the top tenth of liquid stocks by 12- and 3-month return (positive), best first
   const top = (key) => {
     const l = live.filter((s) => s.m.liquid && s.m[key] !== null);
@@ -384,6 +530,11 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   // 2) unusual volume today (at least 3× its usual, and real money)
   live.filter((s) => s.m.volRatio >= 3 && s.rec.today?.val >= LIQ).sort((a, b) => b.m.volRatio - a.m.volRatio).slice(0, max)
     .forEach((s) => push('volume', s, [`حجم امروز ${fa(N(s.m.volRatio))} برابر حجم معمول (میانهٔ ۲۰ روز معاملهٔ قبلی)`, `ارزش معاملات امروز ${money(s.rec.today.val)}؛ تغییر قیمت امروز ${fa(P(s.m.dayChange, 1))}`]));
+  // 2b) individual money coming in: most of the last sessions positive and a real share of what was traded
+  live.filter((s) => s.m.liquid && s.m.flowN >= 3 && s.m.flow5 > 0 && s.m.flowShare5 >= 0.08 && s.m.flowPos5 >= Math.ceil(Math.min(5, s.m.flowN) * 0.6))
+    .sort((a, b) => b.m.flowShare5 - a.m.flowShare5).slice(0, max)
+    .forEach((s) => push('inflow', s, [`ورود پول حقیقی ${money(s.m.flow5)} در ${fa(Math.min(5, s.m.flowN))} جلسهٔ اخیر؛ ${fa(P0(s.m.flowShare5))} ارزش معاملات`,
+      `${fa(s.m.flowPos5)} جلسه از ${fa(Math.min(5, s.m.flowN))} جلسه ورود${s.m.power ? `؛ امروز هر خریدار حقیقی به‌طور میانگین ${fa(N(s.m.power))} برابر هر فروشنده خرید کرد` : ''}`]));
   // 3) cheap against its sector: P/E at most 60% of the sector's median (liquid, profitable)
   live.filter((s) => s.m.peRel !== null && s.m.peRel <= 0.6 && s.m.eps > 0 && s.m.liquid)
     .sort((a, b) => a.m.peRel - b.m.peRel).slice(0, max)
@@ -410,8 +561,11 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     funds.filter((x) => x.f.fundType === t && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 2)
       .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`, b12]));
   }
+  // every stock card carries its score and the other signals it is in
+  const sigsOf = {}; for (const c of cards) if (c.kind === 'stock' && c.sig !== 'top') (sigsOf[c.id] ||= new Set()).add(c.sig);
+  for (const c of cards) if (c.kind === 'stock') { const sc = scores.get(c.ins); if (sc) { c.score = sc.score; c.parts = sc.parts; } c.lit = [...(sigsOf[c.id] || [])]; }
   const count = {}; for (const c of cards) count[c.sig] = (count[c.sig] || 0) + 1;
-  return { day, cards, count, ready, total: stocks.length, funds: funds.length };
+  return { day, cards, count, ready, total: stocks.length, funds: funds.length, scored: scores.size, level: SCORE_W[level] ? level : 'mid' };
 }
 // short lists by design (three gold funds; two per fund type) are never folded
 const NOCAP = new Set(['topFund', 'goldBubble']);
@@ -426,6 +580,8 @@ export const FIELDS = {
     pe: { t: 'P/E', pct: false }, peRel: { t: 'P/E نسبت به میانهٔ گروه', pct: false }, ret30: { t: 'بازدهی ۱ ماه', pct: true }, ret91: { t: 'بازدهی ۳ ماه', pct: true },
     ret365: { t: 'بازدهی ۱۲ ماه', pct: true }, fromHigh: { t: 'فاصله از بالاترین سال', pct: true }, fromLow: { t: 'فاصله از کمترین سال', pct: true },
     volRatio: { t: 'حجم امروز ÷ میانگین', pct: false },
+    score: { t: 'امتیاز ترکیبی (۰ تا ۱۰۰)', pct: false }, flowShare5: { t: 'ورود پول حقیقی ۵ جلسه (٪ ارزش معاملات)', pct: true },
+    power: { t: 'قدرت خریدار حقیقی امروز', pct: false },
   },
   fund: {
     y1: { t: 'بازدهی ۱۲ ماه', pct: true }, m3: { t: 'بازدهی ۳ ماه', pct: true }, m1: { t: 'بازدهی ۱ ماه', pct: true }, bubble: { t: 'حباب (قابل معامله)', pct: true },
@@ -446,13 +602,16 @@ const ruleView = (m) => (m.fullYear ? m : { ...m, fromHigh: null, fromLow: null 
 // best first by the rule's first condition: «≥» → largest first, «≤» → smallest first
 const byFirst = (rule) => { const c = rule.conds[0]; const s = c.op === '>=' ? -1 : 1; return (a, b) => s * (a.m[c.f] - b.m[c.f]); };
 /** All matches of one rule, best first: [{ id, sym, name, ref, m }] — liquid stocks only (a thin stock's numbers mislead). */
-export function runRule(radar, rule) {
+export function runRule(radar, rule, { level = 'mid' } = {}) {
   if (!validRule(rule) || !radar.day) return [];
   const D = dayNum(radar.day);
   if (rule.kind === 'stock') {
     const sectors = sectorMedians(radar.stocks);
-    return Object.entries(radar.stocks).filter(([, r]) => !r.need && (!rule.sector || r.sector === rule.sector))
-      .map(([ins, rec]) => ({ ins, rec, m: ruleView(stockMetrics(rec, D, sectors, radar.sess)) })).filter((s) => s.m.liquid && s.m.traded && test('stock', s.m, rule.conds))
+    const all = Object.entries(radar.stocks).filter(([, r]) => !r.need).map(([ins, rec]) => ({ ins, rec, m: ruleView(stockMetrics(rec, D, sectors, radar.sess)) }));
+    // the score is measured among all liquid stocks (as on the cards), whatever the rule's sector
+    const sc = rule.conds.some((c) => c.f === 'score') ? scoreStocks(all.filter((s) => s.m.liquid && s.m.traded), level) : null;
+    if (sc) for (const s of all) s.m = { ...s.m, score: sc.get(s.ins)?.score ?? null };
+    return all.filter((s) => !rule.sector || s.rec.sector === rule.sector).filter((s) => s.m.liquid && s.m.traded && test('stock', s.m, rule.conds))
       .sort(byFirst(rule)).map((s) => ({ id: `s:${s.ins}`, sym: s.rec.sym, name: s.rec.name, ref: stockRef(s.ins, s.rec), m: s.m }));
   }
   return (radar.funds || []).filter((f) => !rule.ftype || f.fundType === +rule.ftype).map((f) => ({ f, m: fundMetrics(f, radar, D) }))
@@ -671,6 +830,8 @@ export function mine(radar, refs = [], { depositPct = 25, cards = null } = {}) {
       else if (m.fullYear && m.fromLow !== null && m.fromLow <= 0.05 && m.fromHigh <= -0.15) add('low', 'نزدیک کمترین قیمت سال', !sigs.includes('nearLow'));
       if (m.fullYear && m.fromHigh !== null && m.fromHigh > -0.03) add('top', 'نزدیک بالاترین قیمت سال');
       if (m.volRatio >= 3) add('vol', `حجم امروز ${fa(N(m.volRatio))} برابر حجم معمول`);
+      if (m.flowN >= 3 && m.flowShare5 !== null && m.flowShare5 <= -0.08 && m.flowPos5 <= 1) add('outflow', `خروج پول حقیقی: ${fa(P0(-m.flowShare5))} ارزش معاملات ${fa(Math.min(5, m.flowN))} جلسهٔ اخیر`, true);
+      else if (m.flowN >= 3 && m.flowShare5 >= 0.08 && m.flowPos5 >= 3) add('inflow', 'ورود پول حقیقی در جلسه‌های اخیر');
       if (!(m.eps > 0)) add('eps', 'سودده نیست یا P/E ندارد', true);
       else if (m.peRel !== null && m.peRel >= 1.5) add('pe', `P/E ${fa(N(m.peRel))} برابر میانهٔ گروه`, true);
       if (!m.traded) add('idle', 'بیش از یک هفته معامله نشده', true);

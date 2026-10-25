@@ -43,9 +43,21 @@ def fund(key, name, t, y1, m3=5, m1=2, nav=100, ins='', sym='', since='2020-01-0
 funds = [fund('g1', 'صندوق طلای الف', 5, 60, ins='E1', sym='طلاالف'), fund('g2', 'صندوق طلای ب', 5, 55, ins='E2', sym='طلاب'), fund('g3', 'صندوق طلای پ', 5, 52, ins='E3', sym='طلاپ'),
          fund('d1', 'درآمد ثابت برتر', 4, 36), fund('d2', 'درآمد ثابت معمولی', 4, 22), fund('s1', 'سهامی نمونه', 6, 80, ins='E4', sym='سهمی')]
 etf = {k: {'sym': s, 'name': s, 'close': c, 'val': 5e9, 'day': DAY, 'hist': {DAY: c}} for k, s, c in [('E1', 'طلاالف', 97), ('E2', 'طلاب', 100.5), ('E3', 'طلاپ', 101.2), ('E4', 'سهمی', 103)]}
+# individual money over the last 5 sessions (share of each session's value traded; synthetic)
+for i, (k, rec) in enumerate(stocks.items()):
+    if k == 'PEND': continue
+    shares = [0.12, 0.10, -0.02, 0.15, 0.11] if k in ('S3', 'M7') else [-0.2, -0.15, -0.1, 0.01, -0.12] if k == 'LOW' else [((i * 7 + j * 3) % 9 - 4) / 100 for j in range(5)]
+    rec['fl'] = [[D0 - (4 - j), round(sh * rec['h'][-5 + j][2]), 1.4] for j, sh in enumerate(shares)]
+# the radar's own record: what it showed each session from 90 to 31 days ago (synthetic), so the scorecards have something to say
+TRACK = {}
+for k in range(90, 30, -1):
+    dd = (datetime.date(1970, 1, 1) + datetime.timedelta(days=D0 - k)).isoformat()
+    TRACK[dd] = {sig: [[f's:{x}', stocks[x]['p'][365 - k]] for x in ids] for sig, ids in
+                 {'top': [f'M{i}' for i in range(10)], 'momentum12': [f'M{i}' for i in range(10, 20)], 'cheap': [f'S{i}' for i in range(20, 30)], 'inflow': [f'M{i}' for i in range(30, 40)]}.items()}
+FLOW_DAYS = [(datetime.date(1970, 1, 1) + datetime.timedelta(days=D0 - j)).isoformat() for j in range(4, -1, -1)]
 bench_rows = lambda f: {'d': [D0 - 399 + k for k in range(400)], 'p': [f(k) for k in range(400)]}
 radar = {'v': 1, 'bench': {'index': bench_rows(lambda k: 1000 + k), 'usd': bench_rows(lambda k: 500 + k / 4)}, 'day': DAY, 'at': 1, 'stocks': stocks, 'etf': etf, 'funds': funds, 'fundsAt': 9e12, 'sectorsAt': 9e12, 'sectors': {'27': 'فلزات اساسی'},
-         'results': {'day': DAY, 'ids': [], 'before': ['s:S29', 's:S28']}, 'ruleHits': {}, 'error': None}
+         'results': {'day': DAY, 'ids': [], 'before': ['s:S29', 's:S28']}, 'ruleHits': {}, 'error': None, 'flowDays': FLOW_DAYS, 'flowFor': DAY, 'track': TRACK}
 
 async def main():
     async with async_playwright() as p:
@@ -63,6 +75,10 @@ async def main():
         hold = lambda i, name, prov, key, sym: {'id': i, 'code': i, 'name': name, 'category': 'stock' if prov == 'tsetmc' else 'fund', 'mode': 'units', 'quantity': 100, 'unit': 'واحد',
                                                  'price': {'source': 'market', 'ref': {'provider': prov, 'key': key, 'symbol': sym, 'label': sym or name, 'field': 'close' if prov == 'tsetmc' else 'cancelNav'}}}
         seed['assets'] = [a for a in seed['assets'] if not str(a.get('id', '')).startswith('rh')] + [hold('rh1', 'سهم داغ', 'tsetmc', 'HOT', 'داغ'), hold('rh2', 'سهم کف', 'tsetmc', 'LOW', 'کف'), hold('rh3', 'صندوق درآمد ثابت', 'fipiran', 'd2', '')]
+        # the gold yardsticks priced just now (synthetic): ounce, dollar, coins, 18k
+        import time; nowms = int(time.time() * 1000)
+        for k, v in {'ons': 4000, 'price_dollar_rl': 1_000_000, 'sekee': 1_050_000_000, 'nim': 540_000_000, 'rob': 300_000_000, 'retail_gerami': 125_000_000, 'geram18': 99_000_000}.items():
+            seed['quotes']['tgju:' + k] = {'price': v, 'changePct': 0, 'at': nowms, 'fetchedAt': nowms, 'source': 'mock'}
         seed['meta'] = {**seed.get('meta', {}), 'radar': {'day': DAY, 'newCount': 3, 'pending': 1}}
         await boot.evaluate("async (s) => { await chrome.storage.local.clear(); await chrome.storage.local.set(s); }", {**seed, 'radar': radar, 'radarUser': {'rules': [], 'marks': [], 'seenDay': None}})
         await boot.close()
@@ -206,6 +222,40 @@ async def main():
             await pg.screenshot(path=f'{SH}/radar-marks-{THEME}.png', full_page=True)
             await pg.close()
         await step('new', t_new())
+
+        async def t_plus():
+            pg = await newpage('radar')
+            txt = await pg.inner_text('.page')
+            pulse = await pg.inner_text('.rd-pulse')
+            check('market pulse at the top: index, breadth, individual money, market P/E', all(w in pulse for w in ['نبض بازار', 'شاخص کل', 'مثبت / منفی', 'پول حقیقی امروز', 'P/E بازار', 'سپرده']), pulse.replace('\n', ' | ')[:240])
+            order = await pg.evaluate("() => { const a = document.querySelector('.rd-pulse'), b = document.querySelector('.rd-sec'); return !!a && !!b && !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); }")
+            check('…before every section', order)
+            check('section «برترین‌های امروز»', 'برترین‌های امروز' in txt)
+            top = pg.locator('.rd-sec:has(h4:has-text("برترین‌های امروز")) .rd-card')
+            n = await top.count()
+            scores = [int((await top.nth(i).locator('.rd-sc-n b').inner_text()).translate(FA)) for i in range(n)]
+            check('top cards: score ≥ 65, best first, at most 6 before «همه»', n > 0 and n <= 6 and all(x >= 65 for x in scores) and scores == sorted(scores, reverse=True), scores)
+            check('top card shows the five parts as bars', await top.first.locator('.rd-part').count() >= 4)
+            check('other stock cards show their score in one line', await pg.locator('.rd-sec:has(h4:has-text("روند قوی، ۱۲ ماه")) .rd-score:not(.full)').count() > 0)
+            check('section «ورود پول حقیقی» with the steady-inflow stocks', 'ورود پول حقیقی' in txt and await pg.locator('.rd-sec:has(h4:has-text("ورود پول حقیقی")) .rd-card:has-text("نماد3")').count() == 1)
+            check('flow line on stock cards', await pg.locator('.rd-flow').count() > 3)
+            gold = await pg.inner_text('.rd-gold')
+            check('cheapest way to buy gold: ranked, cheapest marked, funds approximate', 'ارزان‌ترین امروز' in gold and 'حدودی' in gold and '۱۸ عیار' in gold, gold.replace('\n', ' | ')[:240])
+            tr = await pg.locator('.rd-track').all_inner_texts()
+            check('scorecard line visible under stock sections, with the result once a month has passed', len(tr) >= 3 and any('یک ماه بعد میانگین' in t and 'شاخص کل' in t for t in tr), tr[:3])
+            mine = await pg.inner_text('.rd-mine')
+            check('a holding on steady outflow gets a warning', 'خروج پول حقیقی' in mine, mine.replace('\n', ' | ')[:200])
+            await pg.screenshot(path=f'{SH}/radar-plus-{THEME}.png', clip={'x': 0, 'y': 0, 'width': 1440, 'height': 2000}, full_page=True)
+            await pg.locator('.rd-sec:has(h4:has-text("ارزان‌ترین راه خرید طلا"))').screenshot(path=f'{SH}/radar-gold-{THEME}.png')
+            await pg.locator('.rd-sec:has(h4:has-text("برترین‌های امروز"))').screenshot(path=f'{SH}/radar-top-{THEME}.png')
+            await pg.locator('.rd-sec:has(h4:has-text("ورود پول حقیقی"))').screenshot(path=f'{SH}/radar-inflow-{THEME}.png')
+            # a rule on the combined score
+            await pg.click('.seg >> text=قاعده‌های من'); await pg.wait_for_timeout(200)
+            await pg.click('text=قاعدهٔ تازه'); await pg.wait_for_timeout(200)
+            opts = await pg.locator('.modal select[aria-label="معیار"] option').all_inner_texts()
+            check('rules can use the score and individual money', any('امتیاز ترکیبی' in o for o in opts) and any('پول حقیقی' in o for o in opts), opts)
+            await pg.close()
+        await step('plus', t_plus())
 
         async def t_narrow():
             pg = await newpage('radar', 420)

@@ -527,3 +527,125 @@ test('price alert levels follow a capital increase since the mark; topFund is ne
   const tf = RD.buildCards(R).cards.filter((c) => c.sig === 'topFund');
   assert.ok(tf.every(RD.isFirst));
 });
+
+/* ---------------------- 1.23: money flow, combined score, market pulse, gold routes ---------------------- */
+// ClientTypeAll rows (synthetic): volumes of individual (I) and institutional (N) buyers and sellers
+const ct = (ins, { bI, bN, sI, sN, cb = 100, cs = 100 }) => ({ insCode: ins, buy_I_Volume: bI, buy_N_Volume: bN, sell_I_Volume: sI, sell_N_Volume: sN, buy_CountI: cb, sell_CountI: cs });
+
+test('money flow: only rows that add up to the session\'s volume; one entry per session; net = (buy − sell) × close', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const vol = R.stocks.S1.today.vol; const px = R.stocks.S1.today.close;
+  const n = RD.applyFlows(R, [
+    ct('S1', { bI: vol * 0.7, bN: vol * 0.3, sI: vol * 0.4, sN: vol * 0.6, cb: 50, cs: 100 }),
+    ct('S2', { bI: vol * 0.3, bN: vol * 0.3, sI: vol * 0.3, sN: vol * 0.3 }),   // doesn't add up (a reset list): skipped
+    ct('NOPE', { bI: 1, bN: 0, sI: 1, sN: 0 }),                                  // not a radar stock
+  ], DAY0);
+  assert.equal(n, 1);
+  const [d, net, power] = R.stocks.S1.fl[0];
+  assert.equal(d, D0); close(net, Math.round(0.3 * vol * px), 1e-6);
+  close(power, Math.round(((0.7 * vol / 50) / (0.4 * vol / 100)) * 100) / 100); // each buyer bought 3.5× what each seller sold
+  assert.ok(!R.stocks.S2.fl);
+  assert.deepEqual(R.flowDays, [DAY0]);
+  // the same session again replaces, never doubles
+  RD.applyFlows(R, [ct('S1', { bI: vol * 0.6, bN: vol * 0.4, sI: vol * 0.5, sN: vol * 0.5 })], DAY0);
+  assert.equal(R.stocks.S1.fl.length, 1);
+  // another day's list (its own stock's session isn't that day) is skipped
+  assert.equal(RD.applyFlows(R, [ct('S1', { bI: vol, bN: 0, sI: 0, sN: vol })], D(-1)), 0);
+});
+
+// seed `days` sessions of individual money into a stock: share of each session's value (val), positive or negative
+function seedFlow(R, ins, shares) {
+  const rec = R.stocks[ins]; const D0 = RD.dayNum(DAY0);
+  const val = new Map(rec.h.map((x) => [x[0], x[2]]));
+  rec.fl = shares.map((sh, i) => { const d = D0 - (shares.length - 1 - i); return [d, Math.round(sh * (val.get(d) || 0)), 1.5]; });
+  R.flowDays = [...new Set([...(R.flowDays || []), ...rec.fl.map(([d]) => RD.isoOf(d))])].sort();
+}
+
+test('inflow: most recent sessions positive and a real share of value traded; a warning for a holder on steady outflow', () => {
+  const R = market();
+  seedFlow(R, 'S3', [0.12, 0.10, -0.02, 0.15, 0.11]);   // in on 4 of 5, ~9% of value
+  seedFlow(R, 'S4', [0.30, -0.10, -0.10, -0.10, 0.02]);  // one big day, then out: 2 of 5 positive
+  seedFlow(R, 'S5', [0.20, 0.20]);                       // only 2 sessions known: too early
+  seedFlow(R, 'S6', [-0.2, -0.15, -0.1, 0.01, -0.12]);
+  const b = RD.buildCards(R, { depositPct: 25, money: (v) => String(Math.round(v / 1e7)) });
+  const inflow = b.cards.filter((c) => c.sig === 'inflow');
+  assert.deepEqual(inflow.map((c) => c.sym), ['S3']);
+  assert.ok(inflow[0].why[0].includes('ورود پول حقیقی') && inflow[0].why[1].includes('۴ جلسه از ۵'));
+  const m3 = RD.stockMetrics(R.stocks.S3, RD.dayNum(DAY0), RD.sectorMedians(R.stocks), R.sess);
+  assert.equal(m3.flowN, 5); assert.equal(m3.flowPos5, 4); close(m3.flowShare5, (0.12 + 0.10 - 0.02 + 0.15 + 0.11) / 5, 1e-6);
+  assert.equal(RD.stockMetrics(R.stocks.S5, RD.dayNum(DAY0), {}, R.sess).flowN, 2);
+  const items = RD.mine(R, [{ provider: 'tsetmc', key: 'S6', label: 'S6', assets: ['a'] }, { provider: 'tsetmc', key: 'S3', label: 'S3', assets: ['b'] }]);
+  const f6 = items.find((x) => x.id === 's:S6').flags.find((f) => f.k === 'outflow');
+  assert.ok(f6 && f6.warn && f6.t.includes('خروج پول حقیقی'));
+  assert.ok(items.find((x) => x.id === 's:S3').flags.some((f) => f.k === 'inflow' && !f.warn));
+});
+
+test('combined score: 0…100 from percentiles; weights follow the risk level; a missing part shares its weight; loss-making gets no value', () => {
+  const R = market();
+  const D0 = RD.dayNum(DAY0); const sec = RD.sectorMedians(R.stocks);
+  const list = Object.entries(R.stocks).map(([ins, rec]) => ({ ins, rec, m: RD.stockMetrics(rec, D0, sec, R.sess) })).filter((s) => s.m.liquid && s.m.traded);
+  const sc = RD.scoreStocks(list, 'mid');
+  assert.ok([...sc.values()].every((x) => x.score >= 0 && x.score <= 100 && Number.isInteger(x.score)));
+  assert.ok(!sc.has('THIN')); // not liquid: not in the list
+  // no money flow known yet: that part is left out, not counted as zero
+  assert.ok([...sc.values()].every((x) => x.parts.flow === undefined));
+  // a cautious owner weighs calm more: the tripled stock (big swings) falls behind a steady one
+  const hot = (lv) => RD.scoreStocks(list, lv).get('HOT').score;
+  assert.ok(hot('high') > hot('low'), `${hot('high')} vs ${hot('low')}`);
+  // a loss-making company scores nothing on value
+  R.stocks.S10.eps = -5; R.stocks.S10.pe = -20;
+  const l2 = list.map((s) => (s.ins === 'S10' ? { ...s, m: RD.stockMetrics(R.stocks.S10, D0, sec, R.sess) } : s));
+  assert.equal(RD.scoreStocks(l2).get('S10').parts.value, 0);
+  // unknown EPS: value left out instead
+  R.stocks.S11.eps = null; R.stocks.S11.pe = NaN;
+  const l3 = list.map((s) => (s.ins === 'S11' ? { ...s, m: RD.stockMetrics(R.stocks.S11, D0, sec, R.sess) } : s));
+  assert.equal(RD.scoreStocks(l3).get('S11').parts.value, undefined);
+});
+
+test('«برترین‌ها»: score at least TOP_MIN, best first; every stock card carries its score and the other lists it is in; a rule on the score', () => {
+  const R = market();
+  for (let i = 0; i < 30; i++) seedFlow(R, 'S' + i, [0.01 * (i % 7), 0.02, 0.01 * (i % 3), 0.03, 0.01]);
+  const b = RD.buildCards(R, { level: 'mid' });
+  const top = b.cards.filter((c) => c.sig === 'top');
+  assert.ok(top.length > 0 && top.length <= RD.TOP_N);
+  assert.ok(top.every((c) => c.score >= RD.TOP_MIN));
+  assert.ok(top.every((c, i) => !i || top[i - 1].score >= c.score));
+  assert.ok(top[0].why[0].includes('امتیاز') && top[0].why[1].includes('قوی‌ترین بخش‌ها'));
+  const stockCards = b.cards.filter((c) => c.kind === 'stock' && c.sym !== 'THIN');
+  assert.ok(stockCards.every((c) => typeof c.score === 'number' && Array.isArray(c.lit)));
+  const hot = b.cards.find((c) => c.sig === 'momentum12' && c.sym === 'HOT');
+  assert.ok(!hot.lit.includes('top') && hot.lit.includes('momentum12'));
+  assert.ok(RD.validRule({ kind: 'stock', conds: [{ f: 'score', op: '>=', v: 70 }] }));
+  const hits = RD.runRule(R, { kind: 'stock', conds: [{ f: 'score', op: '>=', v: 70 }] }, { level: 'mid' });
+  assert.ok(hits.length > 0 && hits.every((h) => h.m.score >= 70));
+  assert.ok(b.cards.every((c) => !/بخر|بفروش/.test([...c.why, ...c.check].join(' '))));
+});
+
+test('market pulse: index today and over a month, breadth, individual money, the market P/E against the deposit', () => {
+  const R = market(); const D0 = RD.dayNum(DAY0);
+  const ix = Array.from({ length: 60 }, (_, k) => ({ date: RD.isoOf(D0 - 59 + k), close: 1000 + k * 10 }));
+  R.bench = { index: RD.benchSeries(ix, D0) };
+  seedFlow(R, 'S3', [0.1, 0.1, 0.1]); seedFlow(R, 'S4', [-0.05, -0.05, -0.3]);
+  const p = RD.pulse(R, { depositPct: 25 });
+  close(p.indexDay, 1590 / 1580 - 1, 1e-9);
+  assert.ok(p.index1m > 0);
+  assert.equal(p.up + p.down + p.flat, Object.values(R.stocks).filter((r) => r.today.vol > 0).length);
+  const v3 = R.stocks.S3.h.at(-1)[2], v4 = R.stocks.S4.h.at(-1)[2];
+  close(p.flowToday, Math.round(0.1 * v3) + Math.round(-0.3 * v4), 1e-9);
+  assert.equal(p.flowSessions, 3);
+  assert.ok(p.pe > 0 && Math.abs(p.ey - 1 / p.pe) < 1e-12); close(p.eyVsDeposit, p.ey - 0.25, 1e-12);
+  // nothing known about flows: null, not zero
+  delete R.flowDays; for (const r of Object.values(R.stocks)) delete r.fl;
+  const q = RD.pulse(R); assert.equal(q.flowToday, null); assert.equal(q.flow5, null);
+  assert.equal(RD.pulse(RD.empty()), null);
+});
+
+test('gold funds for the gold routes: traded gold funds with a same-day bubble, lowest first', () => {
+  const R = RD.empty(); R.day = DAY0;
+  R.etf = { X: { close: 101, val: 5e9, day: DAY0, hist: { [DAY0]: 101 } }, Y: { close: 98, val: 5e9, day: DAY0, hist: { [DAY0]: 98 } }, Z: { close: 90, val: 1e6, day: DAY0, hist: { [DAY0]: 90 } } };
+  const f = (key, ins, sym) => ({ key, name: 'صندوق طلا ' + sym, symbol: sym, fundType: 5, cancelNav: 100, date: DAY0, size: 5e12, since: '2020-01-01', traded: true, insCode: ins, ret: {}, mix: {} });
+  R.funds = [f('x', 'X', 'طلاا'), f('y', 'Y', 'طلاب'), f('z', 'Z', 'طلاج')];
+  const g = RD.goldFunds(R);
+  assert.deepEqual(g.map((x) => x.key), ['y', 'x']); // z barely trades
+  close(g[0].bubble, -0.02); assert.equal(g[0].ref.provider, 'tsetmc');
+});

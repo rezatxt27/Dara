@@ -176,3 +176,30 @@ export function alertBubble(al, quotes = {}, now = Date.now()) {
   const b = refBubble(al.ref, quotes, now);
   return b && !b.stale ? b.bubble : null;
 }
+
+/* ------------------------------ the cheapest way to buy gold, today ------------------------------ */
+// Round-trip cost (buy and later sell, percent of the price) of each way — the same estimates the «where to put it» page
+// uses; an exchange-traded gold fund pays only the broker's fee.
+export const ROUTE_COST = { geram18: 1.5, sekee: 2, sekeb: 2, nim: 2.5, rob: 3, retail_gerami: 6, etf: 0.3 };
+/**
+ * Every way of holding gold priced against the world's gold today: how much more than world gold one pays per gram of pure
+ * gold (the premium), plus half the round-trip cost (the buying side), cheapest first. A gold fund's premium is
+ * approximate: its bubble over NAV on top of the 18k premium (its NAV is valued at the home market's gold price).
+ * funds: from radar.goldFunds — [{ key, name, sym, bubble, navDay, ref }]. Only fresh prices; returns
+ * { rows: [{ key, kind: 'coin'|'ref'|'etf', name, premium, cost, buy, approx, best }], best, gold } or null with no world gold.
+ */
+export function goldRoutes(quotes = {}, funds = [], now = Date.now()) {
+  const cb = coinBubbles(quotes, now);
+  if (!cb.gold || cb.gold.stale) return null;
+  const rows = cb.rows.filter((r) => !r.stale).map((r) => ({ key: r.key, kind: r.kind, name: r.name, premium: r.bubble, cost: ROUTE_COST[r.key] ?? 2, retail: r.retail, approx: false }));
+  const g18 = rows.find((r) => r.key === 'geram18');
+  if (g18) for (const f of funds || []) {
+    if (!(f.bubble > -0.5 && f.bubble < 1)) continue;
+    rows.push({ key: 'etf:' + f.key, kind: 'etf', name: f.sym ? `صندوق ${f.sym}` : f.name, sym: f.sym, ref: f.ref, fundBubble: f.bubble, navDay: f.navDay,
+      premium: (1 + f.bubble) * (1 + g18.premium) - 1, cost: ROUTE_COST.etf, approx: true });
+  }
+  for (const r of rows) r.buy = r.premium + r.cost / 200;
+  rows.sort((a, b) => a.buy - b.buy);
+  if (rows[0]) rows[0].best = true;
+  return { rows, best: rows[0] || null, gold: cb.gold };
+}

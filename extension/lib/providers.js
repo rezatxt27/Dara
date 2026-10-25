@@ -347,6 +347,13 @@ export async function tsetmcMarketWatch(types = [1, 2, 8]) {
   return j.marketwatch;
 }
 /** The day of the latest trading session (from the main index's intraday list): 'YYYY-MM-DD' and the time of its last point. */
+/** The latest session's buy and sell by individuals (حقیقی) and institutions (حقوقی), every instrument: volumes and trader counts. */
+export async function tsetmcClientTypes() {
+  const j = await getJSON('https://cdn.tsetmc.com/api/ClientType/GetClientTypeAll', { timeout: 30000 });
+  const l = j?.clientTypeAllDto;
+  if (!Array.isArray(l)) throw new Error('پاسخ نامعتبر از TSETMC (حقیقی/حقوقی)');
+  return l;
+}
 export async function tsetmcSessionDay() {
   const j = await getJSON('https://cdn.tsetmc.com/api/Index/GetIndexB1LastDay/32097828799138957');
   const l = (j?.indexB1 || []).filter((x) => x.dEven);

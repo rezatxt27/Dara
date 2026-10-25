@@ -27,9 +27,10 @@ def bars():
 async def main():
     async with async_playwright() as p:
         ctx = await p.chromium.launch_persistent_context('/tmp/pwcp', headless=False, args=['--headless=new', f'--disable-extensions-except={EXT}', f'--load-extension={EXT}', '--lang=fa'], viewport={'width': 1440, 'height': 1000})
-        errors = []; asked = []
+        errors = []; asked = []; bp_headers = []
         async def handler(route):
             u = route.request.url; asked.append(u)
+            if 'api.bitpin.ir' in u or 'nobitex' in u: bp_headers.append((u[:40], await route.request.all_headers()))
             J = lambda o: route.fulfill(status=200, content_type='application/json', headers={'Access-Control-Allow-Origin': '*'}, body=json.dumps(o, ensure_ascii=False))
             if 'api.bitpin.ir/api/v1/mkt/tickers' in u: return await J(TICKERS)
             if 'api.bitpin.ir/v1/mkt/currencies' in u: return await J(COINS)
@@ -107,6 +108,12 @@ async def main():
         h = await pg.evaluate("() => new Promise(res => chrome.runtime.sendMessage({type:'history', ref:{provider:'nobitex', key:'nvdax', src:'bitpin'}, days: 30}, res))")
         pts = (h or {}).get('points') or (h or {}).get('rows') or (h or {}).get('history') or []
         check('history: daily closes from Bitpin', len(pts) >= 20, {k: (len(v) if isinstance(v, list) else v) for k, v in (h or {}).items()})
+        bp_h = [h for u, h in bp_headers if 'bitpin' in u]
+        rules = await pg.evaluate("async () => (await chrome.declarativeNetRequest.getSessionRules()).filter(r => (r.condition.requestDomains || []).includes('api.bitpin.ir')).map(r => r.action.requestHeaders)")
+        check('Bitpin is asked like the site itself: no extension Origin, a rule sets its Referer and drops Origin', bool(bp_h) and all('chrome-extension' not in (h.get('origin') or '') for h in bp_h)
+              and any(any(x.get('header') == 'referer' and x.get('value') == 'https://bitpin.ir/' for x in hs) for hs in rules) and any(any(x.get('header') == 'origin' and x.get('operation') == 'remove' for x in hs) for hs in rules), rules)
+        tick = [u for u in asked if 'mkt/tickers' in u]
+        check('the one-click fix asks for prices once, not once per coin', 1 <= len(tick) <= 3, len(tick))
         check('no page errors', not errors, errors[:3])
         await ctx.close()
     print(f'\nSUMMARY: {sum(results)} / {len(results)} passed')

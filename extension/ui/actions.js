@@ -188,7 +188,7 @@ export const act = {
       }
       logEv(st, ev);
     });
-    if (a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key) send('quote', { ref: a.price.ref });
+    if (a.mode === 'units' && a.price?.source === 'market' && a.price.ref?.key && !opts.noQuote) send('quote', { ref: a.price.ref });
     if (a.mode === 'rate' || a.mode === 'loan' || a.interest?.on) await catchUp();
     send('badge');
     return ev;
@@ -225,10 +225,12 @@ export const act = {
       if (!x || x.mode !== 'units') continue;
       const { review, ...rest } = x;
       const sym = String(f.ref.sym || f.ref.key || '').toUpperCase();
-      await act.saveAsset({ ...rest, unit: /[آ-ی]/.test(x.unit || '') || !x.unit || x.unit === 'واحد' ? sym : x.unit, price: { source: 'market', ref: f.ref, adjustPct: 0, factor: 1 } });
+      await act.saveAsset({ ...rest, unit: /[آ-ی]/.test(x.unit || '') || !x.unit || x.unit === 'واحد' ? sym : x.unit, price: { source: 'market', ref: f.ref, adjustPct: 0, factor: 1 } }, { noQuote: true });
       n++;
     }
-    if (n) send('refresh');
+    // their prices now (a cycle already running loaded the assets before the switch); Bitpin's list is fetched once
+    // and shared, so this is one request however many coins there are — then a refresh for the rest
+    if (n) { await Promise.all(fixes.map((f) => send('quote', { ref: f.ref }))); send('refresh'); }
     return n;
   },
 

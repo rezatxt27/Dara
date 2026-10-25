@@ -102,3 +102,23 @@ test('a coin priced by hand on purpose is not switched', () => {
   assert.equal(cryptoFixes([kept], COINS).length, 0);
   assert.equal(cryptoFixes([{ ...kept, review: 'از صفحه ثبت شد' }], COINS).length, 1);
 });
+
+test('a Bitpin request that fails keeps the last good prices for a while', async () => {
+  P.resetBitpinCache();
+  P.setFetch(async (url) => (url.includes('bitpin') ? new Response(JSON.stringify(TICKERS)) : new Response('x', { status: 503 })));
+  assert.equal((await P.bitpinQuotes(['zec'])).quotes.zec.price, 3177281550);
+  // a minute later the list is asked again and the server refuses: the last good list still answers
+  const realNow = Date.now; Date.now = () => realNow() + 2 * 60e3;
+  try {
+    P.setFetch(async () => new Response('blocked', { status: 403 }));
+    const r = await P.bitpinQuotes(['zec']);
+    assert.equal(r.quotes.zec?.price, 3177281550); assert.match(r.quotes.zec.note, /آخرین قیمت/);
+    // the failure is remembered for a minute: nobody asks again meanwhile
+    let asked = 0; P.setFetch(async () => { asked++; return new Response('blocked', { status: 403 }); });
+    await P.bitpinQuotes(['zec']); assert.equal(asked, 0);
+    P.setFetch(async () => new Response('blocked', { status: 403 }));
+    Date.now = () => realNow() + 20 * 60e3; // too old to stand in
+    const r2 = await P.bitpinQuotes(['zec']);
+    assert.ok(r2.errors.zec && !r2.quotes.zec);
+  } finally { Date.now = realNow; }
+});

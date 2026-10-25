@@ -14,10 +14,11 @@ import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
 import * as RD from './lib/radar.js';
 
-const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir'];
+const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir', 'api.bitpin.ir'];
 const REFERERS = {
   'call1.tgju.org': 'https://www.tgju.org/', 'api.tgju.org': 'https://www.tgju.org/',
   'cdn.tsetmc.com': 'https://www.tsetmc.com/', 'www.fipiran.com': 'https://www.fipiran.com/', 'api.nobitex.ir': 'https://nobitex.ir/',
+  'api.bitpin.ir': 'https://bitpin.ir/',
 };
 // Fipiran's fund list is a POST; it is sent with the site's own Origin, exactly like its fund-compare page.
 const ORIGINS = { 'www.fipiran.com': 'https://www.fipiran.com' };

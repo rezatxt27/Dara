@@ -124,12 +124,21 @@ export async function nobitexQuotes(keys) {
 // Coins:   /v1/mkt/currencies/ -> { results: [{ code, title, title_fa, tradable, price_info: { price } }] }
 // Daily:   /v1/mkt/tv/get_bars/?symbol=BTC_IRT&res=1D&from=s&to=s -> [{ close, ts (s, bar start in Tehran) }]
 const BP = 'https://api.bitpin.ir';
-let bpTick = null; // { at, p } — one request serves every coin for a few seconds
+let bpTick = null; // { at, p } — one request serves every coin for a minute
+let bpGood = null; // { at, map } — the last list that came back whole: a failed request falls back to it for 15 minutes
 async function bitpinTickers() {
-  if (bpTick && Date.now() - bpTick.at < 15e3) return bpTick.p;
-  const p = getJSON(`${BP}/api/v1/mkt/tickers/`, { timeout: 20000 }).then((j) => new Map((Array.isArray(j) ? j : []).map((x) => [x.symbol, x])));
+  if (bpTick && Date.now() - bpTick.at < 60e3) return bpTick.p;
+  // a failure is remembered for the same minute too, so a Bitpin that is down isn't asked again by every caller
+  const p = getJSON(`${BP}/api/v1/mkt/tickers/`, { timeout: 20000 }).then((j) => {
+    const m = new Map((Array.isArray(j) ? j : []).map((x) => [x.symbol, x]));
+    if (!m.size) throw new Error('فهرست قیمت‌ها خالی آمد');
+    bpGood = { at: Date.now(), map: m };
+    return { map: m, at: bpGood.at, old: false };
+  }).catch((e) => {
+    if (bpGood && Date.now() - bpGood.at < 15 * 60e3) return { map: bpGood.map, at: bpGood.at, old: true };
+    throw e;
+  });
   bpTick = { at: Date.now(), p };
-  p.catch(() => { bpTick = null; });
   return p;
 }
 /** keys: lowercase symbols (zec, nvdax). Prices in Rial. */
@@ -137,7 +146,7 @@ export async function bitpinQuotes(keys) {
   const out = {}; const errors = {};
   if (!keys.length) return { quotes: out, errors };
   try {
-    const m = await bitpinTickers();
+    const { map: m, at: got, old } = await bitpinTickers();
     for (const k of keys) {
       const row = m.get(`${String(k).toUpperCase()}_IRT`);
       const price = n(row?.price) * 10;
@@ -146,14 +155,15 @@ export async function bitpinQuotes(keys) {
       const dc = n(row.daily_change_price);
       const p = Math.abs(dc) > 100 ? dc / (price / 10 - dc) : dc / 100;
       const ts = n(row.timestamp) * 1000;
-      out[k] = { price, changePct: isFinite(p) ? p : 0, change: isFinite(p) ? price - price / (1 + p) : 0, at: ts > 1e12 && ts <= Date.now() + 6e4 ? ts : Date.now(), source: 'bitpin' };
+      out[k] = { price, changePct: isFinite(p) ? p : 0, change: isFinite(p) ? price - price / (1 + p) : 0, at: ts > 1e12 && ts <= Date.now() + 6e4 ? ts : got, source: 'bitpin',
+        ...(old ? { note: 'بیت‌پین جواب نداد؛ آخرین قیمت چند دقیقه پیش' } : {}) };
     }
   } catch (e) { for (const k of keys) errors[k] = 'بیت‌پین: ' + e.message; }
   return { quotes: out, errors };
 }
 let bpCoins = null; // { at, list }
 /** Tests: forget what was cached. */
-export function resetBitpinCache() { bpTick = null; bpCoins = null; }
+export function resetBitpinCache() { bpTick = null; bpGood = null; bpCoins = null; }
 /** Every coin and token Bitpin trades: [{ key, sym, name (Persian), en }]. Cached for a few hours. */
 export async function bitpinCoins() {
   if (bpCoins && Date.now() - bpCoins.at < 6 * 3600e3) return bpCoins.list;

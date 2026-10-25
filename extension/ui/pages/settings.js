@@ -382,6 +382,14 @@ function Row({ t, d, children }) {
 
 const faVer = (v) => String(v || '').replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
 
+// who made Dara, and where to reach them — public profile links only, opened in a new tab (nothing is sent from here)
+const MAKER = {
+  name: 'رضا افقه',
+  linkedin: 'https://www.linkedin.com/in/reza-afgheh',
+  github: 'https://github.com/rezatxt27',
+  issues: 'https://github.com/rezatxt27/Dara/issues',
+};
+
 /** Settings → «نسخه و به‌روزرسانی»: is this the latest version? What changed? */
 function UpdateCard({ s }) {
   const cur = hasChrome ? chrome.runtime.getManifest().version : '0.0.0';
@@ -508,7 +516,20 @@ export function SettingsPage({ st, pf, s }) {
     <${UpdateCard} s=${s} />
 
     <div class="card"><div class="card-h"><h3><${Icon} n="lock" cls="sm" />حریم خصوصی و درباره</h3><span class="sub num">نسخه ${ver}</span></div>
-      <div class="small ink2" style="line-height:2">همه اطلاعات دارایی‌ها فقط در حافظه همین مرورگر (chrome.storage) ذخیره می‌شود و به هیچ سروری ارسال نمی‌شود. دارا فقط قیمت‌های عمومی را از tgju، TSETMC، فیپیران و نوبیتکس می‌خواند. برای انتقال به دستگاه دیگر از پشتیبان JSON استفاده کن.</div>
+      <div class="small ink2" style="line-height:2">همه اطلاعات دارایی‌ها فقط در حافظه همین مرورگر (chrome.storage) ذخیره می‌شود و به هیچ سروری ارسال نمی‌شود. دارا فقط قیمت‌های عمومی را از tgju، TSETMC، فیپیران، نوبیتکس و بیت‌پین می‌خواند. برای انتقال به دستگاه دیگر از پشتیبان JSON استفاده کن.</div>
+      <hr class="sep" />
+      <div class="maker">
+        <div class="maker-av" aria-hidden="true">ر</div>
+        <div class="grow" style="min-width:0"><div class="sb">${MAKER.name}</div><div class="xs muted">سازندهٔ دارا · رایگان و متن‌باز</div></div>
+        <div class="row wrap" style="gap:6px">
+          <a class="btn sm" href=${MAKER.linkedin} target="_blank" rel="noopener noreferrer">لینکدین<${Icon} n="external" cls="xs" /></a>
+          <a class="btn sm" href=${MAKER.github} target="_blank" rel="noopener noreferrer">گیت‌هاب<${Icon} n="external" cls="xs" /></a>
+        </div>
+      </div>
+      <div class="row between wrap maker-fb">
+        <span class="xs muted">ایرادی دیدی یا پیشنهادی داری؟ هر بازخوردی کمک می‌کند دارا بهتر شود.</span>
+        <a class="btn sm ghost" href=${MAKER.issues} target="_blank" rel="noopener noreferrer"><${Icon} n="message" cls="sm" />ثبت بازخورد</a>
+      </div>
     </div>
     <div class="card danger-zone" id="danger"><div class="card-h"><h3><${Icon} n="alert" cls="sm" />کارهای برگشت‌ناپذیر</h3></div>
       ${st.assets.some((a) => a.sample) && html`<div class="row between" style="gap:16px;margin-bottom:12px"><div><div class="sb">پاک‌کردن داده نمونه</div><div class="xs muted">فقط دارایی‌های نمونه؛ چیزی که خودت اضافه یا ویرایش کرده‌ای می‌ماند</div></div>

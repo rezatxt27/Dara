@@ -61,7 +61,7 @@ async def main():
 
         async def t_totals():
             P = await pf(pg)
-            foot = await pg.inner_text('tfoot')
+            foot = await pg.inner_text('tfoot tr:last-child')
             tot = first_num(next((c for c in foot.split('\t') if 'تومان' in c), foot))
             check('footer total = net worth (to the toman; interest accrues live)', tot is not None and abs(tot * 10 - P['net']) < 1000, (foot.replace('\n', ' | '), P['net'] / 10))
             hdr = await pg.inner_text('tr.grp:has-text("بدهی")')
@@ -75,9 +75,9 @@ async def main():
         async def t_groups():
             await pg.click('.seg >> text=محل نگهداری'); await pg.wait_for_timeout(400)
             P = await pf(pg)
-            hdr = await pg.inner_text('tr.grp:has-text("بانک الف")')
+            hdr = await pg.inner_text('tr.grp:has-text("بانک الف") td.n.num')
             want = (P['rows']['bankA']['s'] + P['rows']['loan']['s']) / 10 / 1e6
-            got = first_num(hdr.split('\n')[-1])
+            got = first_num(hdr)
             check('custodian group nets the loan against the deposit', got is not None and abs(got - want) < 1.0, f'{hdr!r} want≈{want:.1f}M')
             n = await pg.locator('tr.grp:has-text("کارگزاری نمونه")').count()
             check('custodian names with stray spaces form one group', n == 1, n)
@@ -95,8 +95,35 @@ async def main():
             await box.fill(''); await pg.wait_for_timeout(300)
         await step('search', t_search())
 
+        async def t_summary():
+            P = await pf(pg)
+            sm = await pg.inner_text('.as-sum')
+            check('summary on top: net worth, owned and owed, today', 'ارزش خالص' in sm and 'دارایی‌ها' in sm and 'بدهی‌ها' in sm and 'امروز' in sm, sm.replace('\n', ' | ')[:200])
+            segs = await pg.locator('.as-seg').count(); cats = len([c for c in P.get('cats', []) if not c.get('liability') and c.get('value', 0) > 0]) if P.get('cats') else segs
+            check('one bar segment per kind owned', segs >= 3 and segs == cats, (segs, cats))
+            # a click on a bar segment filters to that kind; clicking again shows all
+            await pg.locator('.as-seg').first.click(); await pg.wait_for_timeout(300)
+            on = await pg.locator('.as-li.on').inner_text()
+            n1 = await pg.locator('tbody tr.r').count()
+            await pg.locator('.as-seg').first.click(); await pg.wait_for_timeout(300)
+            n2 = await pg.locator('tbody tr.r').count()
+            check('bar segment filters and toggles back', n1 >= 1 and n2 > n1 and 'همه' in await pg.locator('.as-li.on').inner_text(), (on, n1, n2))
+            # folding a group hides its rows, survives a reload, and a filter to that kind still shows them
+            g = pg.locator('tr.grp').first; gt = (await g.inner_text()).split('\n')[0].strip()
+            before = await pg.locator('tbody tr.r').count()
+            await g.click(); await pg.wait_for_timeout(300)
+            after = await pg.locator('tbody tr.r').count()
+            await pg.reload(); await pg.wait_for_timeout(1200)
+            kept = await pg.locator('tr.grp.folded').count()
+            check('a group folds, and stays folded after a reload', after < before and kept == 1, (gt, before, after, kept))
+            await pg.locator('tr.grp.folded').first.click(); await pg.wait_for_timeout(300)
+            check('…and opens again', await pg.locator('tr.grp.folded').count() == 0 and await pg.locator('tbody tr.r').count() == before)
+            hdr = await pg.inner_text('tr.grp >> nth=0')
+            check('group header: count, share of total and today', 'مورد' in hdr and 'از کل' in hdr, hdr.replace('\n', ' | '))
+        await step('summary', t_summary())
+
         async def t_filters():
-            await pg.click('.chip:has-text("ملک و خودرو")'); await pg.wait_for_timeout(300)
+            await pg.click('.as-li:has-text("ملک و خودرو")'); await pg.wait_for_timeout(300)
             check('category chip filters', await pg.locator('tbody tr.r').count() == 1)
             await pg.click('tr.r:has-text("آپارتمان")'); await pg.wait_for_timeout(400)
             check('house offers «ثبت ارزش جدید» not deposit/withdraw', await pg.locator('tr.xrow button:has-text("ثبت ارزش جدید")').count() == 1 and await pg.locator('tr.xrow button:has-text("واریز یا برداشت")').count() == 0)
@@ -262,7 +289,7 @@ async def main():
         await pg.reload(); await pg.wait_for_timeout(1200)
         await pg.screenshot(path=f'{SH}/assets-after-{THEME}.png', full_page=True)
         P = await pf(pg)
-        foot = await pg.inner_text('tfoot'); tot = first_num(next((c for c in foot.split('\t') if 'تومان' in c), foot))
+        foot = await pg.inner_text('tfoot tr:last-child'); tot = first_num(next((c for c in foot.split('\t') if 'تومان' in c), foot))
         check('after all actions the footer still equals net worth', tot is not None and abs(tot * 10 - P['net']) < 1000, (foot.replace('\n', ' | '), P['net'] / 10))
         check('no page errors', not errors, errors[:4])
         await ctx.close()

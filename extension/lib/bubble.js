@@ -231,7 +231,7 @@ export function goldRoutes(quotes = {}, funds = [], now = Date.now()) {
     skipped.push({ key: k, name: c.name, why: !fresh(q, now) ? (quoteOk(q, now) ? 'old' : 'error') : 'apart', at: qAt(q, now) });
   }
   const fl = (funds || []).filter((f) => f.bubble > -0.5 && f.bubble < 1).map((f) => ({ key: 'etf:' + f.key, kind: 'etf', name: f.sym ? `صندوق ${f.sym}` : f.name, sym: f.sym, ref: f.ref,
-    navDay: f.navDay, bubble: f.bubble, cost: ROUTE_COST.etf, buy: (1 + f.bubble) / (1 - half(ROUTE_COST.etf)) - 1 })).sort((a, b) => a.buy - b.buy);
+    navDay: f.navDay, bubble: f.bubble, nav: f.nav, price: f.price, m1: f.m1, m3: f.m3, y1: f.y1, val: f.val, size: f.size, cost: ROUTE_COST.etf, buy: (1 + f.bubble) / (1 - half(ROUTE_COST.etf)) - 1 })).sort((a, b) => a.buy - b.buy);
   if (fl[0]) fl[0].best = true;
   const ons = quotes['tgju:ons'];
   return { rows, funds: fl, skipped, best: rows[0] || null,

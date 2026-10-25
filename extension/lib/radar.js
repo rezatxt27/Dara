@@ -478,7 +478,8 @@ export function goldFunds(radar) {
   if (!radar?.day) return [];
   const D = dayNum(radar.day);
   return (radar.funds || []).map((f) => ({ f, m: fundMetrics(f, radar, D) })).filter((x) => x.m.gold && x.m.tradable && x.m.bubble !== null)
-    .sort((a, b) => a.m.bubble - b.m.bubble).map((x) => ({ key: x.f.key, name: x.f.name, sym: x.f.symbol || '', bubble: x.m.bubble, navDay: x.m.navDay, ref: fundRef(x.f) }));
+    .sort((a, b) => a.m.bubble - b.m.bubble).map((x) => ({ key: x.f.key, name: x.f.name, sym: x.f.symbol || '', bubble: x.m.bubble, navDay: x.m.navDay, ref: fundRef(x.f),
+      nav: x.f.cancelNav, price: x.f.cancelNav * (1 + x.m.bubble), m1: x.m.m1, m3: x.m.m3, y1: x.m.y1, val: x.m.etfVal, size: x.m.size }));
 }
 
 /* ---------------------------------------- cards ---------------------------------------- */

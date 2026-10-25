@@ -902,7 +902,7 @@ svg.rot { transform: rotate(180deg); }
 .rd-gprem, .rd-ggram { display: flex; flex-direction: column; gap: 2px; }
 .rd-gprem b, .rd-ggram b { font-size: 16px; font-weight: 800; }
 .rd-ggram { align-items: flex-end; }
-.rd-grow.best .rd-ggram b { color: var(--pos); }
+.rd-grow.best:not(.fund) .rd-ggram b { color: var(--pos); }
 .rd-gsub { display: flex; flex-direction: column; gap: 2px; padding: 16px 0 6px; border-bottom: 1px solid var(--line); }
 @media (max-width: 640px) {
   .rd-ghead { display: none; }
@@ -917,3 +917,4 @@ svg.rot { transform: rotate(180deg); }
 .maker .btn .ic { margin-inline-start: 2px; }
 .maker-fb { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); gap: 8px; }
 .rd-gskip { padding: 10px 0 2px; line-height: 1.9; }
+.rd-grow.fund .rd-ggram b.pos { color: var(--pos); } .rd-grow.fund .rd-ggram b.neg { color: var(--neg); } .rd-grow.fund .rd-ggram b { font-size: 15px; }

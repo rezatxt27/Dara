@@ -118,6 +118,61 @@ export async function nobitexQuotes(keys) {
   return { quotes: {}, errors };
 }
 
+/* ------------------------------ Bitpin ------------------------------ */
+// Prices in toman for every market Bitpin lists — coins and tokenized foreign stocks (NVDAX, AMDON…). Public, CORS open.
+// Tickers: /api/v1/mkt/tickers/ -> [{ symbol: 'BTC_IRT', price, daily_change_price (percent), timestamp (s) }]
+// Coins:   /v1/mkt/currencies/ -> { results: [{ code, title, title_fa, tradable, price_info: { price } }] }
+// Daily:   /v1/mkt/tv/get_bars/?symbol=BTC_IRT&res=1D&from=s&to=s -> [{ close, ts (s, bar start in Tehran) }]
+const BP = 'https://api.bitpin.ir';
+let bpTick = null; // { at, p } — one request serves every coin for a few seconds
+async function bitpinTickers() {
+  if (bpTick && Date.now() - bpTick.at < 15e3) return bpTick.p;
+  const p = getJSON(`${BP}/api/v1/mkt/tickers/`, { timeout: 20000 }).then((j) => new Map((Array.isArray(j) ? j : []).map((x) => [x.symbol, x])));
+  bpTick = { at: Date.now(), p };
+  p.catch(() => { bpTick = null; });
+  return p;
+}
+/** keys: lowercase symbols (zec, nvdax). Prices in Rial. */
+export async function bitpinQuotes(keys) {
+  const out = {}; const errors = {};
+  if (!keys.length) return { quotes: out, errors };
+  try {
+    const m = await bitpinTickers();
+    for (const k of keys) {
+      const row = m.get(`${String(k).toUpperCase()}_IRT`);
+      const price = n(row?.price) * 10;
+      if (!(price > 0)) { errors[k] = 'در بیت‌پین پیدا نشد'; continue; }
+      // a percent (‑1.23 = ‑1.23%); a value past ±100 would be an amount in toman, read as such
+      const dc = n(row.daily_change_price);
+      const p = Math.abs(dc) > 100 ? dc / (price / 10 - dc) : dc / 100;
+      const ts = n(row.timestamp) * 1000;
+      out[k] = { price, changePct: isFinite(p) ? p : 0, change: isFinite(p) ? price - price / (1 + p) : 0, at: ts > 1e12 && ts <= Date.now() + 6e4 ? ts : Date.now(), source: 'bitpin' };
+    }
+  } catch (e) { for (const k of keys) errors[k] = 'بیت‌پین: ' + e.message; }
+  return { quotes: out, errors };
+}
+let bpCoins = null; // { at, list }
+/** Tests: forget what was cached. */
+export function resetBitpinCache() { bpTick = null; bpCoins = null; }
+/** Every coin and token Bitpin trades: [{ key, sym, name (Persian), en }]. Cached for a few hours. */
+export async function bitpinCoins() {
+  if (bpCoins && Date.now() - bpCoins.at < 6 * 3600e3) return bpCoins.list;
+  const j = await getJSON(`${BP}/v1/mkt/currencies/`, { timeout: 30000 });
+  const list = (j?.results || []).filter((c) => c?.code && c.code !== 'IRT' && c.tradable !== false && !c.for_test && n(c.price_info?.price) > 0)
+    .map((c) => ({ key: String(c.code).toLowerCase(), sym: String(c.code).toUpperCase(), name: String(c.title_fa || c.title || c.code).trim(), en: String(c.title || '').trim() }));
+  bpCoins = { at: Date.now(), list };
+  return list;
+}
+/** Daily closes in Rial: [{date, close}] ascending. */
+export async function bitpinHistory(key, days = 365) {
+  const to = Math.floor(Date.now() / 1000), from = to - Math.min(days, 1000) * 86400;
+  const j = await getJSON(`${BP}/v1/mkt/tv/get_bars/?symbol=${encodeURIComponent(String(key).toUpperCase())}_IRT&res=1D&from=${from}&to=${to}`, { timeout: 20000 });
+  const byDay = new Map();
+  for (const b of Array.isArray(j) ? j : []) { const c = n(b.close) * 10; const ts = n(b.ts); if (c > 0 && ts > 0) byDay.set(new Date(ts * 1000 + 3.5 * 3600e3 + 3600e3).toISOString().slice(0, 10), c); }
+  return [...byDay].map(([date, close]) => ({ date, close })).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const faFold = (x) => String(x || '').replace(/[\s\u200c]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').toLowerCase();
 const cryptoMeta = (r) => ({ tgju: r.tgju || NOBITEX_BY_KEY[r.key]?.tgju, cg: r.cg || NOBITEX_BY_KEY[r.key]?.cg });
 
 /** Crypto via tgju: USD price × dollar rate (works outside Iran too). refs: [{key, tgju?}] */
@@ -171,19 +226,26 @@ export async function coingeckoHistory(id, days = 365) {
   return [...byDay].map(([date, close]) => ({ date, close })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
-/** Coin search: catalog first (Persian names), then CoinGecko for everything else. */
+/** Coin search: catalog first (Persian names), then Bitpin (Persian names, tokenized stocks too), then CoinGecko. */
 export async function cryptoSearch(q) {
   const t = String(q || '').trim().toLowerCase();
   const local = NOBITEX.filter((c) => !t || c.key.includes(t) || c.sym.toLowerCase().includes(t) || c.name.includes(q.trim()) || (c.cg || '').includes(t))
     .map((c) => ({ key: c.key, sym: c.sym, name: c.name, cg: c.cg, tgju: c.tgju, catalog: true }));
-  if (!t || /[\u0600-\u06FF]/.test(t)) return { items: local, error: null };
+  if (!t) return { items: local, error: null };
+  let bp = [];
+  try {
+    const fa = faFold(q);
+    bp = (await bitpinCoins()).filter((c) => !local.some((l) => l.key === c.key) && (c.key === t || c.key.startsWith(t) || c.en.toLowerCase().includes(t) || faFold(c.name).includes(fa)))
+      .sort((a, b) => (b.key === t) - (a.key === t) || a.key.length - b.key.length).slice(0, 20).map((c) => ({ ...c, src: 'bitpin' }));
+  } catch { /* Bitpin unreachable: CoinGecko still answers */ }
+  if (/[\u0600-\u06FF]/.test(t)) return { items: [...local, ...bp], error: null };
   let remote = []; let error = null;
   try {
     const j = await getJSON(`${CG}/search?query=${encodeURIComponent(t)}`);
     remote = (j?.coins || []).slice(0, 20).map((c) => ({ key: String(c.symbol || '').toLowerCase(), sym: String(c.symbol || '').toUpperCase(), name: c.name, cg: c.id, rank: c.market_cap_rank }))
-      .filter((c) => c.key && !local.some((l) => l.cg === c.cg));
+      .filter((c) => c.key && !local.some((l) => l.cg === c.cg) && !bp.some((b) => b.key === c.key));
   } catch (e) { error = e.message; }
-  return { items: [...local, ...remote], error };
+  return { items: [...local, ...bp, ...remote], error };
 }
 
 /* ------------------------------ TSETMC ------------------------------ */
@@ -406,18 +468,38 @@ export async function fetchAll(refs, enabled = {}) {
     for (const [k, v] of Object.entries(res.errors)) if (k !== '_board' && !quotes[`${prov}:${k}`]) errors[`${prov}:${k}`] = v;
   };
   const jobs = [];
+  let viaBp = []; let bpRes = null;
   if (groups.tgju) jobs.push(tgjuQuotes(groups.tgju.map((r) => r.key), new Set(groups.tgju.filter((r) => r.boardOnly).map((r) => r.key))).then((r) => merge('tgju', r)));
   if (groups.nobitex) {
+    // Coins bought on Bitpin are priced by Bitpin first (the same price the owner sees there); a coin Nobitex also
+    // knows is asked of it too, so Bitpin being down costs nothing. (The price is per coin: one quote per symbol.)
+    viaBp = [...new Set(groups.nobitex.filter((r) => r.src === 'bitpin').map((r) => r.key))];
+    if (viaBp.length) jobs.push(bitpinQuotes(viaBp).then((r) => { bpRes = r; }));
+    const rest = groups.nobitex.filter((r) => !viaBp.includes(r.key) || NOBITEX_BY_KEY[r.key]);
     // Catalog coins in one request; coins added from search go separately so one unknown symbol can't fail the rest.
-    const known = groups.nobitex.filter((r) => NOBITEX_BY_KEY[r.key]).map((r) => r.key);
-    const extra = groups.nobitex.filter((r) => !NOBITEX_BY_KEY[r.key]).map((r) => r.key);
+    const known = rest.filter((r) => NOBITEX_BY_KEY[r.key]).map((r) => r.key);
+    const extra = rest.filter((r) => !NOBITEX_BY_KEY[r.key]).map((r) => r.key);
     if (known.length) jobs.push(nobitexQuotes(known).then((r) => merge('nobitex', r)));
     if (extra.length) jobs.push(nobitexQuotes(extra).then((r) => merge('nobitex', r)));
   }
   if (groups.tsetmc) jobs.push(tsetmcQuotes(groups.tsetmc).then((r) => merge('tsetmc', r)));
   if (groups.fipiran) jobs.push(fipiranQuotes(groups.fipiran).then((r) => merge('fipiran', r)));
   await Promise.allSettled(jobs);
-  // Crypto fallback: anything Nobitex couldn't price → tgju USD × dollar → CoinGecko USD × dollar
+  if (bpRes) merge('nobitex', bpRes); // Bitpin's price wins for what was bought there
+  // Crypto fallback: anything Nobitex couldn't price → Bitpin (toman) → tgju USD × dollar → CoinGecko USD × dollar
+  {
+    const failed = [...new Set((groups.nobitex || []).filter((r) => !quotes[`nobitex:${r.key}`]).map((r) => r.key))].filter((k) => !viaBp.includes(k));
+    if (failed.length) {
+      try {
+        const res = await bitpinQuotes(failed);
+        for (const [k, v] of Object.entries(res.quotes)) {
+          const bp = (groups.nobitex || []).some((r) => r.key === k && r.src === 'bitpin');
+          quotes[`nobitex:${k}`] = bp ? v : { ...v, note: NOBITEX_BY_KEY[k] ? 'نوبیتکس در دسترس نبود؛ قیمت از بیت‌پین' : 'قیمت از بیت‌پین' };
+          delete errors[`nobitex:${k}`];
+        }
+      } catch { /* next source */ }
+    }
+  }
   const usdQ = quotes['tgju:price_dollar_rl'];
   for (const via of [cryptoViaTgju, cryptoViaCoingecko]) {
     const failed = (groups.nobitex || []).filter((r) => !quotes[`nobitex:${r.key}`]);
@@ -450,7 +532,11 @@ export async function refHistory(ref, days = 400) {
   if (ref.provider === 'tsetmc' && ref.key) return tsetmcHistory(ref.key, days);
   if (ref.provider === 'nobitex') {
     const { tgju: slug, cg } = cryptoMeta(ref);
-    if (!slug && !cg) return [];
+    // Bitpin first for coins bought there, and for anything without a global source (tokenized stocks…)
+    if (ref.src === 'bitpin' || (!slug && !cg)) {
+      try { const h = await bitpinHistory(ref.key, days); if (h.length) return h; } catch { /* fall through */ }
+      if (!slug && !cg) return [];
+    }
     let c = [];
     if (slug) { try { c = await tgjuHistory(slug, days); } catch { c = []; } }
     if (!c.length && cg) c = await coingeckoHistory(cg, days);

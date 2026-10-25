@@ -625,6 +625,7 @@ const handlers = {
     if (provider === 'tsetmc') return { items: (await P.tsetmcSearch(q)).slice(0, 25) };
     if (provider === 'fipiran') return { items: await P.fipiranSearch(q) };
     if (provider === 'crypto') return P.cryptoSearch(q);
+    if (provider === 'bitpinCoins') { try { return { items: await P.bitpinCoins() }; } catch (e) { return { items: [], error: e.message }; } }
     return { items: [] };
   },
   async history({ ref, days = 60 }) {

@@ -217,6 +217,21 @@ export const act = {
     return ev;
   },
 
+  /** Coins with a hand-typed price → online prices: [{ id, ref }]. Each is a logged correction (not a market move). */
+  async priceCrypto(fixes) {
+    let n = 0;
+    for (const f of fixes) {
+      const x = (await store.load('assets')).assets.find((y) => y.id === f.id);
+      if (!x || x.mode !== 'units') continue;
+      const { review, ...rest } = x;
+      const sym = String(f.ref.sym || f.ref.key || '').toUpperCase();
+      await act.saveAsset({ ...rest, unit: /[آ-ی]/.test(x.unit || '') || !x.unit || x.unit === 'واحد' ? sym : x.unit, price: { source: 'market', ref: f.ref, adjustPct: 0, factor: 1 } });
+      n++;
+    }
+    if (n) send('refresh');
+    return n;
+  },
+
   /** Apply reviewed page-capture rows: [{assetId, field, value}] and new assets */
   async applyCapture(rows, newAssets = [], source = '') {
     let ev = null;

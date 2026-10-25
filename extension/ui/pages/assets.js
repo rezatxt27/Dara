@@ -3,7 +3,7 @@ import { html, useOnce, useState, useMemo, useRef, useEffect, Icon, Money, Delta
 // a row that is fine says so quietly; a coloured pill is kept for what needs a look (stale, error, matured)
 const QUIET = { live: 'آنلاین', auto: 'خودکار', manual: 'دستی', settled: 'تسویه شده' };
 import * as I from '../../lib/insights.js';
-import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY } from '../../lib/catalog.js';
+import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY, unpricedCrypto, cryptoFixes } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
 import { ago, parseNum, groupTyping, getDigits, toEnDigits, hasWords } from '../../lib/format.js';
 import { act, doneToast } from '../actions.js';
@@ -33,7 +33,7 @@ function SourceLine({ r }) {
   if (a.price?.source === 'market') {
     const ref = a.price.ref || {};
     const pending = ref.provider === 'tsetmc' && !ref.key;
-    return html`<div class="src" title=${r.error || r.note || ''}><${Icon} n=${r.status === 'error' ? 'wifi' : 'live'} cls="sm" />${providerName(ref.provider)}، ${refLabel(ref)}${a.price.adjustPct ? html` <span class="ltr">(${a.price.adjustPct > 0 ? '+' : ''}${num(a.price.adjustPct, 2)}٪)</span>` : ''}${pending ? '، در انتظار شناسایی نماد' : ''}${r.note ? html`، <span class="approx" title=${r.note}>${r.quote?.approx ? 'تقریبی' : r.note}</span>` : ''}</div>`;
+    return html`<div class="src" title=${r.error || r.note || ''}><${Icon} n=${r.status === 'error' ? 'wifi' : 'live'} cls="sm" />${providerName(ref)}، ${refLabel(ref)}${a.price.adjustPct ? html` <span class="ltr">(${a.price.adjustPct > 0 ? '+' : ''}${num(a.price.adjustPct, 2)}٪)</span>` : ''}${pending ? '، در انتظار شناسایی نماد' : ''}${r.note ? html`، <span class="approx" title=${r.note}>${r.quote?.approx ? 'تقریبی' : r.note}</span>` : ''}</div>`;
   }
   return html`<div class="src"><${Icon} n="edit" cls="sm" />قیمت دستی، ${ago(r.at)}</div>`;
 }
@@ -243,7 +243,7 @@ function Expanded({ st, r, s, pf, open, onModal, openPrice }) {
   const paid = bub ? BB.buyBubble(a, st.events, st.quotes) : null;
   const showChart = !loan && (isMarket || valueSeries.length >= 2);
   const facts = loan ? [] : [
-    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref.provider)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : E.APPRAISED.has(a.category) ? 'برآورد دستی' : a.interest?.on ? 'مانده دستی + سود خودکار' : 'مانده دستی'],
+    ['منبع ارزش', a.mode === 'units' ? (isMarket ? `${providerName(a.price.ref)}، ${refLabel(a.price.ref)}` : 'قیمت دستی') : a.mode === 'rate' ? 'سود روزشمار' : E.APPRAISED.has(a.category) ? 'برآورد دستی' : a.interest?.on ? 'مانده دستی + سود خودکار' : 'مانده دستی'],
     [r.status === 'matured' ? 'سررسید' : 'آخرین به‌روزرسانی', r.status === 'auto' ? 'هر لحظه (خودکار)' : r.status === 'matured' ? fmtJ(a.rate.maturity) : r.at ? `${fmtJ(isoFromDate(new Date(r.at)))}، ${ago(r.at)}` : '—'],
     ...(a.mode === 'units' ? [['مقدار', `${num(a.quantity, 'auto')} ${a.unit || ''}`], ['قیمت واحد', html`<${Money} v=${r.unitPrice} s=${s} />`]] : []),
     ...(bub ? [[html`<span class="row" style="gap:2px">حباب امروز${T(bub.kind === 'fund' ? 'bubbleFund' : 'bubble')}</span>`, html`<span class="row" style="gap:6px;flex-wrap:wrap"><${BubblePill} b=${bub} stat=${bstat} />${bub.amount !== null && bub.amount > 0 ? html`<span class="xs muted">≈ <${Money} v=${bub.amount} s=${s} compact /> از ارزش</span>` : ''}</span>
@@ -299,6 +299,29 @@ function Expanded({ st, r, s, pf, open, onModal, openPrice }) {
   </div></div>`;
 }
 
+/** Coins and tokens with a hand-typed price (usually 0, from a page capture): find their online price in one go. */
+function CryptoPriceFix({ st }) {
+  const list = unpricedCrypto(st.assets);
+  const [busy, setBusy] = useState(false);
+  const [left, setLeft] = useState(null); // names nothing could price, after a try
+  const zero = list.filter((a) => !(+a.price?.value > 0)).length;
+  if (!list.length) return null;
+  const run = async () => {
+    setBusy(true);
+    const r = await send('search', { provider: 'bitpinCoins' });
+    const fixes = cryptoFixes(st.assets, r?.items || []);
+    const n = fixes.length ? await act.priceCrypto(fixes) : 0;
+    setBusy(false);
+    const miss = list.filter((a) => !fixes.some((f) => f.id === a.id)).map((a) => a.name);
+    setLeft(miss);
+    toast(n ? `${num(n)} مورد به قیمت آنلاین وصل شد${miss.length ? `؛ ${num(miss.length)} مورد پیدا نشد` : ''}` : r?.error ? 'بیت‌پین در دسترس نبود؛ کمی بعد دوباره امتحان کن' : 'قیمت آنلاینی برای این‌ها پیدا نشد');
+  };
+  return html`<div class="callout warn" style="margin-bottom:12px;align-items:center"><${Icon} n="alert" cls="sm" />
+    <div class="grow">${num(list.length)} رمزارز قیمت آنلاین ندارند${zero ? html` و ارزش <b>${num(zero)}</b> تای آن‌ها صفر حساب می‌شود` : ''}. دارا قیمتشان را از نوبیتکس یا بیت‌پین (رمزارزها و سهام توکنی خارجی) پیدا می‌کند.
+      ${left?.length > 0 && html`<div class="xs" style="margin-top:4px">پیدا نشد: ${left.slice(0, 6).join('، ')}${left.length > 6 ? '…' : ''} — برای این‌ها مداد را بزن و منبع قیمت را خودت انتخاب کن.</div>`}</div>
+    <button class="btn sm primary" disabled=${busy} onClick=${run}><${Icon} n=${busy ? 'refresh' : 'live'} cls=${'sm' + (busy ? ' spin' : '')} />${busy ? 'در حال پیدا کردن…' : 'وصل کردن به قیمت آنلاین'}</button></div>`;
+}
+
 export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const [cat, setCat] = useState(route.q.cat || 'all');
   const [group, setGroup] = useState('cat');
@@ -351,6 +374,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
         </select>
       </div>
     </div>
+    <${CryptoPriceFix} st=${st} />
     <div class="card" style="padding:6px 6px 2px">
       ${rows.length ? html`<table class="tbl assets">
         <thead><tr><th>دارایی</th><th class="n c-qty">مقدار</th><th class="n c-price">قیمت واحد</th><th class="n">ارزش امروز</th><th class="n c-today">امروز</th>${hasPnl && html`<th class="n c-pnl">سود / زیان</th>`}<th class="c-status">وضعیت</th><th></th></tr></thead>

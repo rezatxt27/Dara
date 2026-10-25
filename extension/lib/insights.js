@@ -57,7 +57,7 @@ const basisName = (b) => (b === 'actual' ? 'طول واقعی سال شمسی' :
 
 export function refText(ref) {
   if (!ref) return '';
-  const p = PROVIDERS[ref.provider]?.name || ref.provider;
+  const p = ref.provider === 'nobitex' && ref.src === 'bitpin' ? 'بیت‌پین' : PROVIDERS[ref.provider]?.name || ref.provider;
   const name = ref.provider === 'tgju' ? TGJU_BY_KEY[ref.key]?.name || ref.key
     : ref.provider === 'nobitex' ? NOBITEX_BY_KEY[ref.key]?.name || ref.name || String(ref.sym || ref.key).toUpperCase()
     : ref.label || ref.symbol || ref.name || ref.key;
@@ -440,7 +440,11 @@ export function attentionItems(st, pf, today = todayIso(), now = Date.now()) {
   const bk = st.meta?.backup;
   if (bk?.error && (st.settings?.backup?.freq ?? 'weekly') !== 'off') items.push({ tone: 'warn', text: 'پشتیبان خودکار ساخته نشد؛ در تنظیمات ببین', href: '#/settings', rank: 2 });
   for (const r of by('error')) items.push({ tone: 'warn', text: r.asset.mode === 'units' ? `قیمت «${r.asset.name}» دریافت نشد` : `«${r.asset.name}»: ${r.error || 'نیاز به بررسی'}`, assetId: r.asset.id, rank: 2 });
-  const stale = by('stale');
+  // a quantity with no price at all (a capture that found no source): worth 0 until a price is set
+  const noPrice = st.assets.filter((a) => !a.archived && a.mode === 'units' && a.price?.source !== 'market' && !(+a.price?.value > 0) && +a.quantity > 0);
+  if (noPrice.length === 1) items.push({ tone: 'warn', text: `«${noPrice[0].name}» قیمت ندارد؛ ارزشش صفر حساب می‌شود`, assetId: noPrice[0].id, rank: 2 });
+  else if (noPrice.length > 1) items.push({ tone: 'warn', text: `${num(noPrice.length)} دارایی قیمت ندارند؛ ارزششان صفر حساب می‌شود`, href: '#/assets', rank: 2, n: noPrice.length });
+  const stale = by('stale').filter((r) => !noPrice.some((a) => a.id === r.asset.id)); // said once, above
   if (stale.length === 1) {
     const r = stale[0]; const d = r.at ? Math.floor((now - r.at) / DAY_MS) : null;
     items.push({ tone: 'warn', text: d ? `«${r.asset.name}» ${num(d)} روز است به‌روز نشده` : `«${r.asset.name}» به‌روز نشده`, assetId: r.asset.id, rank: 3 });

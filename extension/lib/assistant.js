@@ -6,7 +6,7 @@ import * as AI from './ai.js';
 import * as BB from './bubble.js';
 import * as RD from './radar.js';
 import * as K from './calc.js';
-import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY, fxKeyOf } from './catalog.js';
+import { CAT, CATEGORIES, EXPOSURES, TGJU, TGJU_BY_KEY, NOBITEX, NOBITEX_BY_KEY, fxKeyOf, cryptoRefFor } from './catalog.js';
 import { fmtJ, todayIso, addDaysIso, isoFromDate } from './jalali.js';
 import { uid } from './format.js';
 import { thinPoints } from './chats.js';
@@ -641,11 +641,13 @@ ${JSON.stringify(list)}
 - type: یکی از stock (سهم یا صندوق بورسی/ETF)، gold، coin، metal، crypto، fx، cash (مانده نقد، قدرت خرید، کیف پول)، deposit، other
 - symbol: نماد معاملاتی دقیقاً همان‌طور که در صفحه آمده (برای سهام، صندوق بورسی و رمزارز)، وگرنه null
 - avg_cost: قیمت سربه‌سر یا میانگین قیمت خرید «هر واحد» اگر در صفحه آمده، وگرنه null (به همان واحد پول صفحه)
+- value: ارزش کل همین ردیف به پول صفحه (تومان یا ریال) اگر در صفحه آمده، وگرنه null — برای ردیف‌های quantity
+- در صرافی رمزارز، توکن سهام خارجی (مثل NVDAX، AMDON، TSLAX) هم crypto است، نه stock
 - match_id: شناسه دارایی متناظر از فهرست بالا یا null — اگر نماد یا نام با symbol یا name یک دارایی یکی است، حتماً همان را بده
 - confidence: ۰ تا ۱
 همه ردیف‌های پرتفوی را برگردان، حتی آن‌هایی که در فهرست بالا نیستند (برای آن‌ها match_id را null بگذار).
 اگر برای یک دارایی هم مقدار و هم ارزش ریالی آمده، برای دارایی‌های واحددار مقدار (quantity) را برگردان.
-خروجی فقط JSON: {"site":"نام کوتاه سایت یا کارگزاری","currency_unit":"rial|toman|unknown","items":[{"label":"...","kind":"quantity","amount":0,"unit":"...","type":"stock","symbol":"...","avg_cost":null,"match_id":null,"confidence":0.9}]}
+خروجی فقط JSON: {"site":"نام کوتاه سایت یا کارگزاری","currency_unit":"rial|toman|unknown","items":[{"label":"...","kind":"quantity","amount":0,"unit":"...","type":"stock","symbol":"...","avg_cost":null,"value":null,"match_id":null,"confidence":0.9}]}
 
 متن صفحه:
 """
@@ -710,14 +712,16 @@ export function captureProposals(json, assets, quotes, settings) {
     }
     const pageMoney = cu === 'toman' ? 10 : 1;
     const avgCost = isFinite(+it.avg_cost) && +it.avg_cost > 0 ? +it.avg_cost * pageMoney : null;
+    // what the page says the row is worth: a price to fall back on when nothing online prices it
+    const pageValue = cu !== 'unknown' && isFinite(+it.value) && +it.value > 0 ? +it.value * pageMoney : null;
     return { key: i, label: it.label, kind: it.kind, amount: amt, unit: it.unit, moneyUnit, confidence: +it.confidence || 0, assetId: a?.id || null, field, value, current,
-      type, symbol, avgCost, category: categoryOf(type, symbol, it.unit),
+      type, symbol, avgCost, pageValue, category: categoryOf(type, symbol, it.unit),
       changed: field ? Math.abs(value - current) > Math.max(1e-9, Math.abs(current) * 1e-6) : true };
   });
 }
 
 /** A new asset from a captured row: priced automatically when the row names something we can price. */
-export function newAssetFromCapture(r, { site = '', category, now = Date.now(), id } = {}) {
+export function newAssetFromCapture(r, { site = '', host = '', category, now = Date.now(), id, coins = [] } = {}) {
   const c = CAT[category] || CAT.other;
   const base = { id, custodian: site, category: c.id, liquidity: c.liquidity, createdAt: now, updatedAt: now };
   const isMoney = r.kind !== 'quantity';
@@ -733,9 +737,13 @@ export function newAssetFromCapture(r, { site = '', category, now = Date.now(), 
     price = { source: 'market', ref: { provider: 'tsetmc', key: '', symbol: sym, label: sym, field: 'close' }, adjustPct: 0, factor: 1 };
     if (/سهم|واحد|share|unit/i.test(unit) === false) unit = 'سهم';
   } else if (c.id === 'crypto') {
-    const k = normSym(sym);
-    const coin = NOBITEX.find((x) => x.key === k || x.sym.toLowerCase() === k);
-    if (coin) price = { source: 'market', ref: { provider: 'nobitex', key: coin.key }, adjustPct: 0, factor: 1 };
+    const ref = cryptoRefFor({ sym: normSym(r.symbol || ''), unit: normSym(unit), name: r.label, custodian: `${site} ${host}` }, coins)
+      // Bitpin's list unreachable: try the symbol anyway (Nobitex, then Bitpin, then global prices are asked)
+      || (!coins?.length && /^[a-z0-9]{2,12}$/.test(normSym(r.symbol || '')) ? { provider: 'nobitex', key: normSym(r.symbol), sym: String(r.symbol).toUpperCase(), name: r.label } : null);
+    if (ref) {
+      price = { source: 'market', ref, adjustPct: 0, factor: 1 };
+      if (/[آ-ی]/.test(unit) || unit === 'واحد') unit = String(ref.sym || NOBITEX_BY_KEY[ref.key]?.sym || ref.key).toUpperCase();
+    }
   } else if ((c.id === 'gold' || c.id === 'gold_online') && /گرم|gram/i.test(unit)) {
     price = { source: 'market', ref: { provider: 'tgju', key: 'geram18' }, adjustPct: 0, factor: 1 };
   } else if (c.id === 'fx') {
@@ -744,8 +752,8 @@ export function newAssetFromCapture(r, { site = '', category, now = Date.now(), 
   }
   const name = c.id === 'stock' && r.symbol ? sym : r.label;
   return { ...base, name, mode: 'units', quantity: qty, unit, costBasis,
-    price: price || { source: 'manual', value: r.avgCost || 0, updatedAt: now },
-    ...(price ? {} : { review: 'از صفحه ثبت شد؛ منبع قیمت را تنظیم کن' }) };
+    price: price || { source: 'manual', value: (r.pageValue > 0 && qty > 0 ? r.pageValue / qty : 0) || r.avgCost || 0, updatedAt: now },
+    ...(price ? {} : { review: r.pageValue > 0 ? 'از صفحه ثبت شد؛ قیمت آنلاین پیدا نشد و ارزش همان صفحه گذاشته شد. منبع قیمت را تنظیم کن' : 'از صفحه ثبت شد؛ منبع قیمت را تنظیم کن' }) };
 }
 
 /* ---------------- natural-language scenario ---------------- */

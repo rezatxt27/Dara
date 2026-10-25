@@ -37,7 +37,7 @@ export function TickerSearch({ provider, s, isOn, onPick }) {
   </div>`;
 }
 
-/** Cryptocurrencies: the built-in list filters instantly; Latin text also searches CoinGecko (any coin). */
+/** Cryptocurrencies: the built-in list filters instantly; then Bitpin's list (Persian names, tokenized stocks) and, for Latin text, CoinGecko (any coin). */
 export function CryptoPicker({ st, s, isOn, onPick, autoFocus = true }) {
   const [q, setQ] = useState('');
   const [remote, setRemote] = useState(null);
@@ -49,7 +49,7 @@ export function CryptoPicker({ st, s, isOn, onPick, autoFocus = true }) {
   const seq = useRef(0);
   const run = async (text) => {
     const my = ++seq.current;
-    if (!text || /[؀-ۿ]/.test(text)) { setRemote(null); setErr(''); setLoading(false); return; }
+    if (!text) { setRemote(null); setErr(''); setLoading(false); return; }
     setLoading(true);
     const r = await send('search', { provider: 'crypto', q: text });
     if (my !== seq.current) return; // an older search answering late doesn't replace a newer one
@@ -59,20 +59,21 @@ export function CryptoPicker({ st, s, isOn, onPick, autoFocus = true }) {
   };
   const onInput = (v) => { setQ(v); clearTimeout(timer.current); timer.current = setTimeout(() => run(v.trim().toLowerCase()), 450); };
   const row = (c, extra) => {
-    const ref = { provider: 'nobitex', key: c.key, ...(extra ? { name: c.name, sym: c.sym, cg: c.cg } : {}) };
+    const ref = { provider: 'nobitex', key: c.key, ...(extra ? (c.src === 'bitpin' ? { name: c.name, sym: c.sym, src: 'bitpin' } : { name: c.name, sym: c.sym, cg: c.cg }) : {}) };
     const on = isOn(ref); const qv = st.quotes['nobitex:' + c.key];
     return html`<div class=${'opt' + (on ? ' on' : '')} onClick=${() => !on && onPick(ref)}>
-      <span class="grow"><span class="sb">${c.name}</span> <span class="xs muted ltr latin">${c.sym}</span>${extra && c.rank ? html` <span class="xs muted">رتبه ${c.rank}</span>` : ''}</span>
+      <span class="grow"><span class="sb">${c.name}</span> <span class="xs muted ltr latin">${c.sym}</span>${extra && c.src === 'bitpin' && c.en && c.en !== c.name ? html` <span class="xs muted latin">${c.en}</span>` : ''}${extra && c.rank ? html` <span class="xs muted">رتبه ${c.rank}</span>` : ''}</span>
       <span class="small num">${qv?.price ? html`<${Money} v=${qv.price} s=${s} />` : ''}</span>
       ${on ? html`<${Icon} n="check" cls="sm" />` : html`<${Icon} n="plus" cls="sm" />`}</div>`;
   };
   return html`<div class="col" style="gap:8px">
     <label class="isearch"><${Icon} n=${loading ? 'refresh' : 'search'} cls=${loading ? 'sm spin' : 'sm'} />
-      <input class="input" autoFocus=${autoFocus} placeholder="نام یا نماد: بیت‌کوین، ETH، shiba، pepe…" value=${q} onInput=${(e) => onInput(e.target.value)} /></label>
+      <input class="input" autoFocus=${autoFocus} placeholder="نام یا نماد: بیت‌کوین، ETH، مونرو، NVDAX…" value=${q} onInput=${(e) => onInput(e.target.value)} /></label>
     <div class="picker"><div class="scroll">
       ${local.map((c) => row(c, false))}
-      ${remote && remote.length > 0 && html`<div class="opt muted xs" style="cursor:default">نتایج جهانی (CoinGecko)؛ قیمت از نوبیتکس یا دلاری × نرخ دلار</div>${remote.map((c) => row(c, true))}`}
-      ${!local.length && (!remote || !remote.length) && html`<div class="opt muted">${loading ? 'در حال جست‌وجو…' : /[؀-ۿ]/.test(t) ? 'برای رمزارزهای دیگر نام یا نماد انگلیسی را بنویس' : 'نتیجه‌ای پیدا نشد'}</div>`}
+      ${remote && remote.some((c) => c.src === 'bitpin') && html`<div class="opt muted xs" style="cursor:default">از بیت‌پین؛ قیمت تومانی خود بیت‌پین (رمزارزها و سهام توکنی خارجی)</div>${remote.filter((c) => c.src === 'bitpin').map((c) => row(c, true))}`}
+      ${remote && remote.some((c) => c.src !== 'bitpin') && html`<div class="opt muted xs" style="cursor:default">نتایج جهانی (CoinGecko)؛ قیمت از نوبیتکس یا دلاری × نرخ دلار</div>${remote.filter((c) => c.src !== 'bitpin').map((c) => row(c, true))}`}
+      ${!local.length && (!remote || !remote.length) && html`<div class="opt muted">${loading ? 'در حال جست‌وجو…' : /[؀-ۿ]/.test(t) ? 'پیدا نشد؛ نام یا نماد انگلیسی را هم امتحان کن' : 'نتیجه‌ای پیدا نشد'}</div>`}
     </div></div>
     ${err && html`<div class="xs muted"><${Icon} n="wifi" cls="sm" /> جست‌وجوی آنلاین در دسترس نبود (${err})؛ فهرست داخلی نمایش داده شد.</div>`}
   </div>`;

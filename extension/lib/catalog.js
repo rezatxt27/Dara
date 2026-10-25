@@ -162,7 +162,7 @@ export const PROVIDERS = {
   tgju: { name: 'بازار آزاد', title: 'طلا، سکه، ارز و فلزات (tgju)' },
   tsetmc: { name: 'بورس تهران', title: 'بورس تهران (TSETMC)' },
   fipiran: { name: 'فیپیران', title: 'صندوق‌های سرمایه‌گذاری (فیپیران)' },
-  nobitex: { name: 'نوبیتکس', title: 'رمزارز (نوبیتکس + پشتیبان tgju)' },
+  nobitex: { name: 'نوبیتکس', title: 'رمزارز (نوبیتکس و بیت‌پین، با پشتیبان tgju)' },
 };
 
 /** Always-fetched refs: denominators (USD, gold), the price board and the popup. */
@@ -193,3 +193,33 @@ export const SCENARIOS = [
   // shown only when coins or gold funds are held
   { id: 'bubblepop', name: 'تخلیه حباب سکه و صندوق طلا', shocks: { bubble: -1 }, needs: 'bubble' },
 ];
+
+const foldName = (x) => String(x || '').replace(/[\s‌\-_.]/g, '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').toLowerCase();
+/** True for an exchange account at Bitpin (custodian or page name). */
+export const isBitpin = (x) => /bitpin|بیت\s*‌?پین/i.test(String(x || ''));
+/**
+ * A price for a coin or token someone holds: the built-in list by symbol, else Bitpin's list (coins: from
+ * P.bitpinCoins()) by symbol or Persian name. Held at Bitpin → priced by Bitpin. null when nothing matches.
+ */
+export function cryptoRefFor({ sym, unit, name, custodian } = {}, coins = []) {
+  const atBp = isBitpin(custodian);
+  const keys = [...new Set([sym, unit].map((x) => String(x || '').trim().toLowerCase()).filter((k) => /^[a-z0-9]{2,15}$/.test(k)))];
+  const onBp = (k) => (coins || []).find((c) => c.key === k);
+  const fromCatalog = (c) => ({ provider: 'nobitex', key: c.key, ...(atBp && onBp(c.key) ? { src: 'bitpin' } : {}) });
+  const fromBp = (c) => ({ provider: 'nobitex', key: c.key, sym: c.sym, name: c.name, src: 'bitpin' });
+  for (const k of keys) { const c = NOBITEX.find((x) => x.key === k || x.sym.toLowerCase() === k); if (c) return fromCatalog(c); }
+  for (const k of keys) { const c = onBp(k); if (c) return fromBp(c); }
+  const f = foldName(name);
+  if (f) {
+    const c = NOBITEX.find((x) => foldName(x.name) === f); if (c) return fromCatalog(c);
+    const b = (coins || []).find((x) => foldName(x.name) === f || foldName(x.en) === f); if (b) return fromBp(b);
+  }
+  return null;
+}
+
+/** Coins and tokens held with a hand-typed price (often 0, from a page capture) that an online price can now value. */
+// (a coin priced by hand on purpose — a non-zero price, not flagged by a capture — is left alone)
+export const unpricedCrypto = (assets) => (assets || []).filter((a) => !a.archived && a.category === 'crypto' && a.mode === 'units' && a.price?.source !== 'market' && (!(+a.price?.value > 0) || !!a.review));
+export function cryptoFixes(assets, coins) {
+  return unpricedCrypto(assets).map((a) => ({ id: a.id, name: a.name, ref: cryptoRefFor({ sym: a.unit, unit: a.unit, name: a.name, custodian: a.custodian }, coins) })).filter((x) => x.ref);
+}

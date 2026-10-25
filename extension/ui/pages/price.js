@@ -91,7 +91,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
           ${usdNative ? html`<b class="num ltr pd-big">$${num(q?.price || 0, 2)}</b>` : html`<${Money} v=${price} s=${s} cls="pd-big" />`}
           <span class="small"><${Delta} p=${q?.changePct} showAbs=${false} /> <span class="xs muted">امروز</span></span>
         </div>
-        <span class="xs muted" style="text-align:left">${providerName(ref.provider)}<br />${q?.at ? (Date.now() - q.at < DAY ? `ساعت ${timeHM(q.at || q.fetchedAt)}` : ago(q.at)) : ''}${stale && price ? html`<br /><span class="warn">قیمت به‌روز نیست</span>` : ''}</span>
+        <span class="xs muted" style="text-align:left">${providerName(ref)}<br />${q?.at ? (Date.now() - q.at < DAY ? `ساعت ${timeHM(q.at || q.fetchedAt)}` : ago(q.at)) : ''}${stale && price ? html`<br /><span class="warn">قیمت به‌روز نیست</span>` : ''}</span>
       </div>
 
       <div class="pd-ctl">
@@ -146,7 +146,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         <button class="chip" onClick=${() => setAlertOpen(true)}><${Icon} n="bell" cls="sm" />هشدار قیمت</button>
         <${AskBtn} q=${`درباره «${name}» توضیح بده: روند قیمتش در ماه‌های اخیر${pos ? ' و وضع دارایی من در آن' : ''} چطور بوده؟`} label="از دستیار بپرس" />
       </div>
-      <div class="xs muted">قیمت پایانی هر روز از ${providerName(ref.provider)}${view === 'usd' && canDollar && !usdNative ? '؛ دلار آزاد از tgju' : ''}. داده روزانه است، نه لحظه‌ای.</div>
+      <div class="xs muted">قیمت پایانی هر روز از ${providerName(ref)}${view === 'usd' && canDollar && !usdNative ? '؛ دلار آزاد از tgju' : ''}. داده روزانه است، نه لحظه‌ای.</div>
     </div>
     ${alertOpen && html`<${AlertModal} s=${s} st=${st} init=${{ ref, price: q?.price }} onClose=${() => setAlertOpen(false)} />`}
   </${Drawer}>`;

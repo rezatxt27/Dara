@@ -10,14 +10,19 @@ import { act, doneToast } from '../actions.js';
 const hostOf = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch { return ''; } };
 
 /** One line under a new row: how the new asset will be valued. */
-function newHint(r) {
-  const n = A.newAssetFromCapture(r, { category: r.category });
+function newHint(r, site, coins) {
+  const n = A.newAssetFromCapture(r, { category: r.category, site, host: site, coins });
   const ref = n.price?.ref;
   if (n.mode === 'balance') return 'به‌صورت مانده ثبت می‌شود';
   if (ref?.provider === 'tsetmc') return `قیمت خودکار از بورس، نماد «${ref.symbol}»${r.avgCost ? '؛ قیمت سربه‌سر هم ثبت می‌شود' : ''}`;
+  if (ref?.provider === 'nobitex' && ref.src === 'bitpin') return `قیمت خودکار از بیت‌پین (${String(ref.sym || ref.key).toUpperCase()})`;
   if (ref) return 'قیمت خودکار از بازار';
+  if (n.price?.value > 0) return 'قیمت آنلاین پیدا نشد؛ ارزش همین صفحه به‌عنوان قیمت دستی گذاشته می‌شود';
   return 'قیمت دستی؛ بعداً می‌توانی منبع قیمت را تنظیم کنی';
 }
+
+/** Crypto exchanges: a Latin ticker there is a coin or a tokenized stock, never a Tehran share. */
+const CRYPTO_SITE = /bitpin|nobitex|wallex|ramzinex|exir|abantether|tabdeal|ompfinex|excoino|bit24|arzdigital|بیت\s*\u200c?پین|نوبیتکس|والکس|رمزینکس/i;
 
 function guessCategory(unit, site) {
   const u = String(unit || '');
@@ -54,6 +59,9 @@ export function CapturePage({ st, s }) {
   const [trust, setTrust] = useState(false);
   const conns = AI.orderedConnections(st.ai);
   const site = page ? hostOf(page.url) : '';
+  // Bitpin's list of coins and tokens, so new rows find their price (fetched once; empty if Bitpin can't be reached)
+  const [coins, setCoins] = useState([]);
+  useEffect(() => { send('search', { provider: 'bitpinCoins' }).then((r) => setCoins(r?.items || [])); }, []);
   const masked = useMemo(() => (page ? AI.maskSensitive(page.text) : ''), [page]);
   const assets = st.assets.filter((a) => !a.archived);
 
@@ -72,7 +80,9 @@ export function CapturePage({ st, s }) {
       // Matched rows with a change are pre-selected; holdings not yet in Dara are pre-selected as new assets.
       const props = A.captureProposals(res.json, assets, st.quotes, s).map((p) => {
         const create = !p.assetId && p.confidence >= 0.7 && p.amount > 0;
-        return { ...p, create, on: p.assetId ? p.changed && p.confidence >= 0.5 : create, category: p.category || guessCategory(p.unit, site + ' ' + page.title) };
+        let category = p.category || guessCategory(p.unit, site + ' ' + page.title);
+        if (category === 'stock' && CRYPTO_SITE.test(site + ' ' + (res.json.site || '')) && /^[A-Za-z0-9]{2,15}$/.test(p.symbol || '')) category = 'crypto';
+        return { ...p, create, on: p.assetId ? p.changed && p.confidence >= 0.5 : create, category };
       });
       setRows(props); setMeta({ conn: res.conn.name, model: res.model, site: res.json.site, unit: res.json.currency_unit });
       setState('done');
@@ -104,7 +114,7 @@ export function CapturePage({ st, s }) {
     const updates = chosen.filter((r) => !r.create);
     const where = meta?.site && !/^https?:/.test(meta.site) ? meta.site : site;
     // numbers picked by hand are in the unit the app shows (toman or rial)
-    const news = chosen.filter((r) => r.create).map((r) => A.newAssetFromCapture(r.manual && !r.moneyUnit ? { ...r, moneyUnit: s.currency === 'rial' ? 'rial' : 'toman' } : r, { site: where, category: r.category, id: uid('a') }));
+    const news = chosen.filter((r) => r.create).map((r) => A.newAssetFromCapture(r.manual && !r.moneyUnit ? { ...r, moneyUnit: s.currency === 'rial' ? 'rial' : 'toman' } : r, { site: where, host: site, category: r.category, id: uid('a'), coins }));
     const ev = await act.applyCapture(updates, news, where);
     await chrome.storage.session.remove('capture');
     const priced = news.filter((n) => n.price?.source === 'market').length;
@@ -160,7 +170,7 @@ export function CapturePage({ st, s }) {
                 <option value="__new">＋ افزودن به‌عنوان دارایی جدید</option>
               </select>
               ${r.create && html`<select class="input" value=${r.category} onChange=${(e) => setRow(r.key, { category: e.target.value })}>${Object.values(CAT).map((c) => html`<option value=${c.id}>${c.name}</option>`)}</select>
-                <span class="xs muted">${newHint(r)}</span>`}
+                <span class="xs muted">${newHint(r, meta?.site || site, coins)}</span>`}
               ${r.manual && a && a.mode === 'units' && html`<select class="input" value=${r.field} onChange=${(e) => setRow(r.key, { field: e.target.value })}><option value="quantity">مقدار</option>${a.price?.source !== 'market' ? html`<option value="unit_price">قیمت واحد</option>` : ''}</select>`}
             </div>
             <span class="small">${r.create ? html`<span class="muted">جدید</span>` : fmtV(r.current)}</span>

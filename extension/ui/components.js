@@ -137,7 +137,8 @@ export function refLabel(ref) {
   if (ref.provider === 'fipiran') return ref.label || ref.name || ref.key;
   return ref.key;
 }
-export const providerName = (p) => PROVIDERS[p]?.name || p;
+/** The source's name; pass the ref itself to tell a coin priced by Bitpin. */
+export const providerName = (p) => (p && typeof p === 'object' ? (p.provider === 'nobitex' && p.src === 'bitpin' ? 'بیت‌پین' : PROVIDERS[p.provider]?.name || p.provider) : PROVIDERS[p]?.name || p);
 
 /** A submit that runs once: a double-click (or Enter twice) can't record the same deposit or purchase twice. */
 export function useOnce() {

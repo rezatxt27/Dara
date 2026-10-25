@@ -155,7 +155,7 @@ export function MarketPage({ st, pf, s, openPrice }) {
     <div class="grid-ov" style="align-items:start">
       <div class="col" style="gap:18px">
         ${groupCard('طلا و فلزات', 'بازار آزاد، ' + (s.currency === 'rial' ? 'ریال' : 'تومان'), TGJU.filter((t) => t.group === 'gold' || t.group === 'metal' || t.group === 'global').map((t) => Cell({ ref: { provider: 'tgju', key: t.key }, name: t.name, unit: t.unit, usd: t.usd })))}
-        ${groupCard('رمزارز', 'نوبیتکس', coinRows.map(({ ref, kind }) => Cell({ ref, name: refLabel(ref), unit: NOBITEX_BY_KEY[ref.key]?.sym || String(ref.sym || ref.key).toUpperCase(),
+        ${groupCard('رمزارز', 'نوبیتکس و بیت‌پین', coinRows.map(({ ref, kind }) => Cell({ ref, name: refLabel(ref), unit: NOBITEX_BY_KEY[ref.key]?.sym || String(ref.sym || ref.key).toUpperCase(),
           tag: kind === 'held' ? 'در پرتفوی' : '', onRemove: kind === 'watch' ? () => unwatch(ref) : null })),
           html`<button class="btn sm" onClick=${() => setWatchFor('crypto')}><${Icon} n="plus" cls="sm" />رمزارز دیگر</button>`)}
       </div>

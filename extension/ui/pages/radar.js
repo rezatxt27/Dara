@@ -250,11 +250,14 @@ function GoldRoutes({ g, s, openPrice }) {
       </div>`)}
       ${g.skipped?.length > 0 && html`<div class="xs muted rd-gskip">در این مقایسه نیامده: ${g.skipped.map((x) => `${x.name} (${SKIP_WHY[x.why]}${x.at && x.why !== 'missing' && x.why !== 'error' ? `، آخرین قیمت ${ago(x.at)}` : ''})`).join('؛ ')}. با به‌روز شدن قیمت‌ها اضافه می‌شوند.</div>`}
       ${funds.length > 0 && html`<div class="rd-gsub"><b class="small">صندوق‌های طلا</b><span class="xs muted">قیمت هر واحد در برابر ارزش دارایی‌های خود صندوق (NAV ${fmtJ(funds[0].navDay)})، نه طلای جهانی؛ پس با ردیف‌های بالا مستقیم مقایسه نمی‌شوند. کارمزد خرید حدود ${num(BB.ROUTE_COST.etf / 2, 2)}٪</span></div>
-        <div class="rd-ghead xs muted"><span>صندوق</span><span>حباب نسبت به NAV</span><span>بازدهی و معاملات</span></div>
+        <div class="rd-ghead xs muted"><span>صندوق</span><span>حباب نسبت به NAV</span><span></span></div>
         ${funds.map((r) => html`<div class=${'rd-grow fund' + (r.best ? ' best' : '')}>
           <button class="rd-name rd-gname" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos sb">کم‌حباب‌ترین صندوق</span>`}</button>
           <div class="rd-gprem"><b class="num">${pct(r.bubble)}</b><span class="xs muted">${r.bubble >= 0 ? 'بالاتر' : 'پایین‌تر'} از NAV${r.price > 0 && r.nav > 0 ? ` · قیمت ${full1(r.price)}، NAV ${full1(r.nav)}` : ''}</span></div>
-          <div class="rd-ggram">${r.m3 !== null && r.m3 !== undefined ? html`<b class=${'num ' + (r.m3 > 0 ? 'pos' : r.m3 < 0 ? 'neg' : '')}>${pctTxt(r.m3, 0)}</b><span class="xs muted">بازدهی ۳ ماه${r.m1 !== null && r.m1 !== undefined ? ` · ۱ ماه ${pctTxt(r.m1, 0)}` : ''}</span>` : ''}${r.val > 0 ? html`<span class="xs muted">معاملات آخرین جلسه ${m(r.val)}</span>` : ''}</div>
+          <div class="rd-fstats">
+            ${[['بازدهی ۱ ماه', r.m1], ['بازدهی ۳ ماه', r.m3]].map(([t, v]) => html`<div><span class="xs muted">${t}</span><b class=${'num ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : '')}>${v === null || v === undefined ? '—' : pctTxt(v, 0)}</b></div>`)}
+            <div><span class="xs muted" title="ارزش معاملات آخرین جلسهٔ بورس">ارزش معاملات</span><b class="num">${r.val > 0 ? m(r.val) : '—'}</b></div>
+          </div>
         </div>`)}`}
       ${more && html`<button class="btn sm ghost" style="align-self:center" onClick=${() => setAll(!all)}>${all ? 'کمتر' : `همهٔ صندوق‌های طلا (${num(g.funds.length)})`}</button>`}
     </div></section>`;

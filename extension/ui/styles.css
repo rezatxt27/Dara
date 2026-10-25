@@ -918,3 +918,7 @@ svg.rot { transform: rotate(180deg); }
 .maker-fb { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); gap: 8px; }
 .rd-gskip { padding: 10px 0 2px; line-height: 1.9; }
 .rd-grow.fund .rd-ggram b.pos { color: var(--pos); } .rd-grow.fund .rd-ggram b.neg { color: var(--neg); } .rd-grow.fund .rd-ggram b { font-size: 15px; }
+.rd-fstats { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 18px; justify-self: end; text-align: center; }
+.rd-fstats > div { display: flex; flex-direction: column; gap: 2px; align-items: center; }
+.rd-fstats b { font-size: 14.5px; font-weight: 800; white-space: nowrap; } .rd-fstats b.pos { color: var(--pos); } .rd-fstats b.neg { color: var(--neg); }
+@media (max-width: 640px) { .rd-grow.fund .rd-fstats { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; grid-template-columns: repeat(3, 1fr); } }

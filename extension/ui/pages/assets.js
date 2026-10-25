@@ -414,7 +414,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   return html`<div class="page">
     ${pf.rows.length > 0 && html`<${AssetsSummary} st=${st} pf=${pf} s=${s} cat=${fCat} onCat=${setCat} att=${fAtt} onAtt=${setOnlyAtt} />`}
     <div class="row wrap between">
-      <span class="xs muted">${fCat !== 'all' || fAtt ? html`فیلتر: ${[fCat !== 'all' && CAT[fCat]?.short, fAtt && 'نیاز به توجه'].filter(Boolean).join('، ')} <button class="btn sm ghost" onClick=${() => { setCat('all'); setOnlyAtt(false); }}><${Icon} n="x" cls="sm" />برداشتن</button>` : ''}</span>
+      <div class="row xs muted" style="gap:6px;min-width:0">${fCat !== 'all' || fAtt ? html`<span>فیلتر: ${[fCat !== 'all' && CAT[fCat]?.short, fAtt && 'نیاز به توجه'].filter(Boolean).join('، ')}</span><button class="btn sm ghost" onClick=${() => { setCat('all'); setOnlyAtt(false); }}><${Icon} n="x" cls="sm" />برداشتن فیلتر</button>` : ''}</div>
       <div class="row">
         <${Seg} value=${group} onChange=${setGroup} options=${[['cat', 'دسته'], ['cust', 'محل نگهداری'], ['none', 'بدون گروه']]} />
         <select class="input" style="width:160px;height:34px" value=${sort} onChange=${(e) => setSort(e.target.value)}>

@@ -954,3 +954,4 @@ svg.rot { transform: rotate(180deg); }
 .tbl tfoot tr.sub td { padding: 8px 12px; color: var(--muted); font-size: 13px; border-bottom: 0; }
 .as-att > .grow { flex: 1 1 160px; min-width: 140px; }
 @media (max-width: 640px) { .as-net b { font-size: 22px; } .as-sum { padding: 14px; } }
+@media (max-width: 640px) { .as-legend { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -14px; padding-inline: 14px; } .as-legend::-webkit-scrollbar { display: none; } .as-li { flex: none; } }

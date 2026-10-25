@@ -448,6 +448,31 @@ export function pulse(radar, { depositPct = 25 } = {}) {
     depositPct, eyVsDeposit: ey !== null ? ey - depositPct / 100 : null, tone };
 }
 
+/**
+ * Exchange-traded funds whose NAV (from Fipiran, usually a day behind) is for a day the radar has no market close of —
+ * missed while the browser was off, or before the radar's first scan. Their closes come from each one's daily list
+ * (fillEtf). Gold funds first, then the largest; each NAV day is tried once. Returns [insCode].
+ */
+export function etfGaps(radar, max = 40) {
+  if (!radar?.day) return [];
+  const D = dayNum(radar.day);
+  return (radar.funds || []).filter((f) => {
+    const e = f.insCode && radar.etf?.[f.insCode]; const nd = String(f.date || '').slice(0, 10);
+    return e && nd && nd <= radar.day && dayNum(nd) >= D - 10 && !(nd in (e.hist || {})) && e.tried !== nd;
+  }).sort((a, b) => isGoldFund(b) - isGoldFund(a) || (b.size || 0) - (a.size || 0)).slice(0, max).map((f) => f.insCode);
+}
+/** Merge a fund's real daily closes (providers.tsetmcDaily rows) into its few kept days; mark its NAV day as tried. */
+export function fillEtf(radar, ins, rows, navDay, failed = false) {
+  const e = radar.etf?.[ins]; if (!e) return;
+  // a list that didn't come is tried again on the next runs, three times at most for the same NAV day
+  if (failed) { e.fails = e.failFor === navDay ? (e.fails || 0) + 1 : 1; e.failFor = navDay; if (e.fails >= 3) e.tried = navDay; return; }
+  const hist = { ...(e.hist || {}) };
+  for (const r of rows || []) if (r.date && r.date <= radar.day && (r.raw ?? r.close) > 0) hist[r.date] = r.raw ?? r.close;
+  const keep = Object.keys(hist).sort().slice(-7);
+  e.hist = Object.fromEntries(keep.map((k) => [k, hist[k]]));
+  if (navDay) e.tried = navDay;
+}
+
 /** Gold funds that trade, with today's bubble (price against the same day's NAV), lowest first — for «ارزان‌ترین راه طلا». */
 export function goldFunds(radar) {
   if (!radar?.day) return [];

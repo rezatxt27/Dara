@@ -198,6 +198,7 @@ export function alertBubble(al, quotes = {}, now = Date.now()) {
 // Round-trip cost (buy and later sell, percent of the price) of each way — the same estimates the «where to put it» page
 // uses; an exchange-traded gold fund pays only the broker's fee.
 export const ROUTE_COST = { geram18: 1.5, sekee: 2, sekeb: 2, nim: 2.5, rob: 3, retail_gerami: 6, etf: 0.3 };
+const ALWAYS_PRICED = new Set(['sekee', 'nim', 'rob', 'geram18']); // Dara always fetches these (catalog CORE_REFS)
 export const ROUTE_BUDGET = 1e9; // «با ۱۰۰ میلیون تومان»: the sum each way is shown buying (Rial)
 /**
  * Gold in hand (coins, 18k) against the world's gold today. For each way: its market price, the gold inside it valued at
@@ -221,10 +222,18 @@ export function goldRoutes(quotes = {}, funds = [], now = Date.now()) {
   });
   rows.sort((a, b) => a.buy - b.buy);
   if (rows[0]) rows[0].best = true;
+  // the ways left out, and why — so the page can say it instead of a row silently missing
+  const skipped = [];
+  for (const k of [...COIN_KEYS, ...Object.keys(GOLD_REF)]) {
+    const c = COINS[k] || GOLD_REF[k]; const q = quotes['tgju:' + k];
+    if (!(q?.price > 0)) { if (ALWAYS_PRICED.has(k)) skipped.push({ key: k, name: c.name, why: 'missing' }); continue; } // others are priced only when held
+    if (rows.some((r) => r.key === k)) continue;
+    skipped.push({ key: k, name: c.name, why: !fresh(q, now) ? (quoteOk(q, now) ? 'old' : 'error') : 'apart', at: qAt(q, now) });
+  }
   const fl = (funds || []).filter((f) => f.bubble > -0.5 && f.bubble < 1).map((f) => ({ key: 'etf:' + f.key, kind: 'etf', name: f.sym ? `صندوق ${f.sym}` : f.name, sym: f.sym, ref: f.ref,
     navDay: f.navDay, bubble: f.bubble, cost: ROUTE_COST.etf, buy: (1 + f.bubble) / (1 - half(ROUTE_COST.etf)) - 1 })).sort((a, b) => a.buy - b.buy);
   if (fl[0]) fl[0].best = true;
   const ons = quotes['tgju:ons'];
-  return { rows, funds: fl, best: rows[0] || null,
+  return { rows, funds: fl, skipped, best: rows[0] || null,
     gold: { ...cb.gold, per18: cb.gold.price * 0.75, ounceAt: qAt(ons, now), weekend: worldClosedBetween(qAt(ons, now), now) && now - qAt(ons, now) > 12 * 3600000 } };
 }

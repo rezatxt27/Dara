@@ -520,6 +520,18 @@ async function runRadar({ force = false, batch = 40 } = {}) {
       try { radar.funds = (await P.fipiranFunds(10 * 60e3)).map(RD.slimFund); radar.fundsAt = Date.now(); changed = true; }
       catch (e) { radar.error = radar.error || `صندوق‌ها: فیپیران فعلاً جواب نداد (${e.message})؛ چند دقیقهٔ دیگر خودکار دوباره امتحان می‌شود. سهام جدا بررسی می‌شوند.`; }
     }
+    // 2b) exchange-traded funds whose NAV is for a day the radar has no close of (Fipiran is usually a day behind): their
+    // own short daily lists, so the bubble (price ÷ NAV of the same day) can be told — gold funds first
+    if (tse && radar.day) {
+      const gaps = RD.etfGaps(radar, 40);
+      const navOf = new Map((radar.funds || []).map((f) => [f.insCode, String(f.date || '').slice(0, 10)]));
+      for (let i = 0; i < gaps.length; i += 4) {
+        await Promise.all(gaps.slice(i, i + 4).map(async (ins) => {
+          try { RD.fillEtf(radar, ins, await P.tsetmcDaily(ins, 8, { allowEmpty: true }), navOf.get(ins)); } catch { RD.fillEtf(radar, ins, null, navOf.get(ins), true); }
+        }));
+        changed = true;
+      }
+    }
     // 3) a batch of stock histories (a stock whose list keeps failing is left as it is after 3 tries, till the next session)
     const todo = tse && radar.day ? RD.nextToFetch(radar, batch) : [];
     let fails = 0;

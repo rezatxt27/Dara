@@ -218,6 +218,7 @@ function Pulse({ p, s }) {
   </section>`;
 }
 
+const SKIP_WHY = { apart: 'قیمتش با دلار و اونس هم‌زمان نیست', old: 'قیمتش قدیمی است', error: 'قیمتش دریافت نشد', missing: 'قیمتش در دارا نیست' };
 /**
  * «ارزان‌ترین راه خرید طلا، امروز»: in plain terms — how much dearer than the gold inside it each way is (at the world
  * price), and how many grams of 18k a fixed sum buys after the buying cost. Gold funds apart, by their bubble over NAV.
@@ -246,6 +247,7 @@ function GoldRoutes({ g, s, openPrice }) {
         <div class="rd-gprem"><b class="num">${pct(r.premium)}</b><span class="xs muted">ارزش طلای داخلش ${full(r.intrinsic)} · هزینهٔ خرید ${num(r.cost / 2, 2)}٪</span></div>
         <div class="rd-ggram"><b class="num">${gr(r.grams18)} گرم</b><span class="xs muted">طلای ۱۸ عیار</span></div>
       </div>`)}
+      ${g.skipped?.length > 0 && html`<div class="xs muted rd-gskip">در این مقایسه نیامده: ${g.skipped.map((x) => `${x.name} (${SKIP_WHY[x.why]}${x.at && x.why !== 'missing' && x.why !== 'error' ? `، آخرین قیمت ${ago(x.at)}` : ''})`).join('؛ ')}. با به‌روز شدن قیمت‌ها اضافه می‌شوند.</div>`}
       ${funds.length > 0 && html`<div class="rd-gsub"><b class="small">صندوق‌های طلا</b><span class="xs muted">قیمت هر واحد در برابر ارزش دارایی‌های خود صندوق (NAV ${fmtJ(funds[0].navDay)})، نه طلای جهانی؛ پس با ردیف‌های بالا مستقیم مقایسه نمی‌شوند. کارمزد خرید حدود ${num(BB.ROUTE_COST.etf / 2, 2)}٪</span></div>
         ${funds.map((r) => html`<div class=${'rd-grow fund' + (r.best ? ' best' : '')}>
           <button class="rd-name rd-gname" onClick=${() => openPrice(r.ref)}><b>${r.name}</b>${r.best && html`<span class="xs pos sb">کم‌حباب‌ترین صندوق</span>`}</button>

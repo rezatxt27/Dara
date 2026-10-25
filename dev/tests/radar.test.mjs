@@ -684,3 +684,19 @@ test('a fund deep under its NAV says on its card that such a gap usually lasts',
   assert.ok(deep.check[0].includes('ماندگار'));
   assert.ok(!near.check.some((t) => t.includes('ماندگار')));
 });
+
+test('a NAV a day behind the radar\'s closes: the missing close is fetched once (gold funds first), then the bubble shows', () => {
+  const R = RD.empty(); R.day = DAY0;
+  R.etf = { G: { close: 101, val: 5e9, day: DAY0, hist: { [DAY0]: 101 } }, S: { close: 50, val: 5e9, day: DAY0, hist: { [DAY0]: 50 } } };
+  const f = (key, ins, sym, t, size) => ({ key, name: 'صندوق ' + sym, symbol: sym, fundType: t, cancelNav: 100, date: D(-1), size, since: '2020-01-01', traded: true, insCode: ins, ret: {}, mix: {} });
+  R.funds = [f('s', 'S', 'سهمی', 6, 9e12), f('g', 'G', 'عیار', 5, 1e12)];
+  assert.equal(RD.goldFunds(R).length, 0); // yesterday's NAV, no close of yesterday: no bubble yet
+  assert.deepEqual(RD.etfGaps(R), ['G', 'S']); // gold first
+  RD.fillEtf(R, 'G', [{ date: D(-2), raw: 97, close: 97 }, { date: D(-1), raw: 99, close: 99 }, { date: DAY0, raw: 101, close: 101 }], D(-1));
+  const g = RD.goldFunds(R);
+  assert.equal(g.length, 1); close(g[0].bubble, -0.01);
+  assert.deepEqual(RD.etfGaps(R), ['S']);
+  // a list that keeps failing is given up for that NAV day after three tries
+  for (let i = 0; i < 3; i++) RD.fillEtf(R, 'S', null, D(-1), true);
+  assert.deepEqual(RD.etfGaps(R), []);
+});

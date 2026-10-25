@@ -916,3 +916,4 @@ svg.rot { transform: rotate(180deg); }
   background: linear-gradient(140deg, var(--violet) 10%, var(--cyan) 120%); box-shadow: 0 6px 14px rgba(110,75,242,.28); }
 .maker .btn .ic { margin-inline-start: 2px; }
 .maker-fb { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); gap: 8px; }
+.rd-gskip { padding: 10px 0 2px; line-height: 1.9; }

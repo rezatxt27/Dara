@@ -281,3 +281,14 @@ test('weekend: the ounce\'s Friday close still counts on a Tehran Saturday/Sunda
   const m = { ...q }; for (const k of Object.keys(m)) if (k !== 'tgju:ons') m[k] = Q(m[k].price, { at: mon, fetchedAt: mon });
   assert.ok(BB.coinBubble('sekee', m, mon + 60000).stale);
 });
+
+test('gold routes say which ways were left out and why', () => {
+  const q = base();
+  q['tgju:sekee'] = Q(1_000_000_000, { at: now - 20 * 3600000, fetchedAt: now - 60000 }); // priced long before the dollar
+  q['tgju:rob'] = Q(300_000_000, { at: now - 5 * 864e5, fetchedAt: now - 5 * 864e5 });    // days old
+  delete q['tgju:nim'];
+  const r = BB.goldRoutes(q, [], now);
+  const why = Object.fromEntries(r.skipped.map((x) => [x.key, x.why]));
+  assert.equal(why.sekee, 'apart'); assert.equal(why.rob, 'old'); assert.equal(why.nim, 'missing');
+  assert.ok(!r.rows.some((x) => ['sekee', 'rob', 'nim'].includes(x.key)));
+});

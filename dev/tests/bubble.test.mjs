@@ -261,3 +261,18 @@ test('gold routes: premium over world gold plus the buying half of the round-tri
   const t = base(); t['tgju:ons'] = Q(4000, { at: now - 5 * 864e5, fetchedAt: now - 5 * 864e5 });
   assert.equal(BB.goldRoutes(t, [], now), null);
 });
+
+test('weekend: the ounce\'s Friday close still counts on a Tehran Saturday/Sunday; not once the world market has reopened', () => {
+  // tgju stamps the Friday close as Saturday 00:00 Tehran (Fri 20:30 UTC); coins trade on Sunday afternoon
+  const fri = Date.UTC(2026, 9, 23, 20, 30), sun = Date.UTC(2026, 9, 25, 16, 30), mon = Date.UTC(2026, 9, 26, 9, 0);
+  assert.ok(BB.worldClosedBetween(fri, sun));
+  assert.ok(!BB.worldClosedBetween(fri, mon));
+  assert.ok(!BB.worldClosedBetween(Date.UTC(2026, 9, 22, 12), Date.UTC(2026, 9, 23, 12))); // Thu → Fri: open
+  const q = { ...base(), 'tgju:ons': Q(4000, { at: fri, fetchedAt: sun }) };
+  for (const k of ['tgju:price_dollar_rl', 'tgju:sekee', 'tgju:geram18', 'tgju:nim', 'tgju:rob', 'tgju:retail_gerami']) q[k] = Q(q[k].price, { at: sun, fetchedAt: sun });
+  const r = BB.goldRoutes(q, [], sun + 60000);
+  assert.ok(r && r.rows.length >= 4, r && r.rows.length);
+  // on Monday the ounce must be Monday's again
+  const m = { ...q }; for (const k of Object.keys(m)) if (k !== 'tgju:ons') m[k] = Q(m[k].price, { at: mon, fetchedAt: mon });
+  assert.ok(BB.coinBubble('sekee', m, mon + 60000).stale);
+});

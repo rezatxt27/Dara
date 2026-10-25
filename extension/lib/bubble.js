@@ -33,6 +33,22 @@ export function purePerGram(quotes = {}, now = Date.now()) {
     at: Math.min(qAt(ons, now), qAt(usd, now)), stale: !fresh(ons, now) || !fresh(usd, now) };
 }
 
+/**
+ * The world gold market is shut from Friday evening to Sunday evening (UTC): the ounce's last price then is still today's,
+ * while Tehran trades on Saturday and Sunday. True when no world trading happened between two times — both inside the
+ * same weekend shut (Fri 20:00 → Sun 22:00 UTC; tgju stamps the Friday close as Saturday 00:00 Tehran).
+ */
+export function worldClosedBetween(a, b) {
+  if (!(a > 0) || !(b > 0)) return false;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const d = new Date(lo); const dow = d.getUTCDay(); // 5 Fri, 6 Sat, 0 Sun
+  const back = dow === 5 ? 0 : dow === 6 ? 1 : dow === 0 ? 2 : -1;
+  if (back < 0) return false;
+  const fri = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - back);
+  const shut = fri + 20 * 3600000, open = fri + (2 * 24 + 22) * 3600000;
+  return lo >= shut && hi <= open;
+}
+
 /** One coin (or the 18k reference). null when a price is missing. */
 export function coinBubble(key, quotes = {}, now = Date.now()) {
   const c = COINS[key] || GOLD_REF[key]; const q = quotes['tgju:' + key]; const g = purePerGram(quotes, now);
@@ -40,7 +56,8 @@ export function coinBubble(key, quotes = {}, now = Date.now()) {
   const pure = c.gross * c.fine; const intrinsic = pure * g.price;
   // the coin must be priced at about the same time as the ounce and the dollar (a day-old coin price against today's
   // dollar is not a bubble, it's the dollar's move)
-  const apart = Math.abs(qAt(q, now) - qAt(quotes['tgju:ons'], now)) > 12 * 3600000 || Math.abs(qAt(q, now) - qAt(quotes['tgju:price_dollar_rl'], now)) > 12 * 3600000;
+  const tq = qAt(q, now), to = qAt(quotes['tgju:ons'], now);
+  const apart = (Math.abs(tq - to) > 12 * 3600000 && !worldClosedBetween(to, tq)) || Math.abs(tq - qAt(quotes['tgju:price_dollar_rl'], now)) > 12 * 3600000;
   return { kind: COINS[key] ? 'coin' : 'ref', key, name: c.name, short: c.short, price: q.price, intrinsic, pure, retail: !!c.retail,
     bubble: q.price / intrinsic - 1, perPure: q.price / pure, at: Math.min(qAt(q, now), g.at), stale: g.stale || !fresh(q, now) || apart };
 }

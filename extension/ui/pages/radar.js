@@ -131,7 +131,8 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
       ${ORDER.map((sig) => {
-        if (sig === 'gold') return only !== 'stock' && gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />` : null;
+        if (sig === 'gold') return only === 'stock' ? null : gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />`
+          : html`<section class="rd-sec"><div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4></div><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div></section>`;
         const all = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
         if (!all.length) return null;
         const list = showAll[sig] ? all : all.filter(RD.isFirst);

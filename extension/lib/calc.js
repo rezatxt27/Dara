@@ -16,7 +16,7 @@ export const itemById = (id) => ITEMS.find((x) => x.id === id) || null;
 function priceOf(item, quotes, now) {
   const q = quotes?.[E.quoteId(item.ref)];
   const price = q?.price > 0 ? q.price : null;
-  return { price, stale: !price || !!q?.error || now - (q?.at || q?.fetchedAt || 0) > 3 * DAY };
+  return { price, stale: !price || !E.quoteOk(q, now) || now - (q?.at || q?.fetchedAt || 0) > 3 * DAY };
 }
 
 /**

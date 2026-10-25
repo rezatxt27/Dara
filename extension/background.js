@@ -232,6 +232,8 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     let autos, pf, snapshots, quotes, fired, meta, events;
     await store.mutate(['assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings'], (cur) => {
       quotes = E.mergeQuotes(cur.quotes, fresh, errors);
+      // a price that failed this time but came in within the last few hours isn't counted as missing
+      for (const k of Object.keys(relErrors)) if (quotes[k]?.price > 0 && Date.now() - (quotes[k].fetchedAt || 0) < 3 * 3600000) delete relErrors[k];
       // a damaged row must not stop prices, the snapshot and alerts: automations run on a copy, and if they fail the
       // stored assets stay as they were (the error is shown) while everything else still saves
       let autoError;

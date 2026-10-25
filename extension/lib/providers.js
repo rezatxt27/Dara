@@ -30,6 +30,10 @@ const arabicize = (s) => String(s).replace(/ی/g, 'ي').replace(/ک/g, 'ك');
 export const persianize = (s) => String(s ?? '').replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/‌/g, ' ').trim();
 
 export const quoteId = (ref) => `${ref.provider}:${ref.key}${ref.field ? ':' + ref.field : ''}`;
+/** One failed refresh after a good price within the last 3 hours: the price still counts as current (one rule everywhere). */
+export const isBlip = (q, now = Date.now()) => !!q && !!q.error && q.price > 0 && now - (q.fetchedAt || 0) < 3 * 3600000;
+/** A usable price: there, and either no error or only a recent blip. */
+export const quoteOk = (q, now = Date.now()) => !!q && q.price > 0 && (!q.error || isBlip(q, now));
 export const isUsdRef = (ref) => !!ref && ref.provider === 'tgju' && !!TGJU_BY_KEY[ref.key]?.usd;
 
 /** End of a Tehran calendar day ("2026/09/30" or "2026-09-30") in ms */
@@ -461,7 +465,7 @@ export async function fipiranQuotes(refs) {
 
 /* ------------------------------ Orchestrator ------------------------------ */
 /** Fetch all refs. Returns { quotes: {quoteId: quote}, errors: {quoteId: msg} } */
-export async function fetchAll(refs, enabled = {}) {
+export async function fetchAll(refs, enabled = {}, { retry = true } = {}) {
   const groups = {}; const seen = new Set();
   for (const r of refs) {
     if (!r || !r.provider || !r.key) continue;
@@ -522,8 +526,24 @@ export async function fetchAll(refs, enabled = {}) {
       }
     } catch { /* next source */ }
   }
+  // Iranian price sites often drop a request now and then: what failed is asked once more, a moment later
+  // (not the optional extra currencies, and not crypto, which already went through its other sources)
+  // only network trouble is worth a second try (a symbol that doesn't exist fails the same way again); Fipiran
+  // already retries inside its own fetch
+  const flaky = (msg) => /مهلت|اتصال برقرار|خطای سرور|پاسخ نامعتبر/.test(String(msg || ''));
+  const again = retry ? [...new Map(refs.filter((r) => r?.provider && r.key && !r.boardOnly && r.provider !== 'nobitex' && r.provider !== 'fipiran' && enabled[r.provider] !== false
+    && flaky(errors[quoteId(r)]) && !quotes[quoteId(r)]).map((r) => [quoteId(r), r])).values()] : [];
+  if (again.length) {
+    await new Promise((res) => setTimeout(res, RETRY_MS));
+    const r2 = await fetchAll(again, enabled, { retry: false });
+    for (const [k, v] of Object.entries(r2.quotes)) { quotes[k] = v; delete errors[k]; }
+    for (const [k, v] of Object.entries(r2.errors)) if (!quotes[k]) errors[k] = v;
+  }
   return { quotes, errors };
 }
+let RETRY_MS = 1500;
+/** Tests: no waiting before the second try. */
+export function setRetryDelay(ms) { RETRY_MS = ms; }
 
 /* ------------------------------ History (for charts & backfill) ------------------------------ */
 /** The Tehran total index (TEDPIX, dividends included), daily, ascending: [{date, close}] for the last `days`. */

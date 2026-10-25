@@ -112,7 +112,7 @@ export function compareOptions(st, pf, { amount, sourceId = 'new', a, b, months 
     } else {
       const q = quotes[E.quoteId(choice.ref)];
       o.price = q?.price > 0 ? q.price : null;
-      o.stale = !o.price || !!q?.error || now - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
+      o.stale = !o.price || !E.quoteOk(q, now) || now - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
       o.cost = Math.max(0, Math.min(50, spec.costPct ?? choice.cost)) / 100;
       o.costAmount = P * o.cost;
       o.final = P * (1 - o.cost);                            // price unchanged: only the round-trip cost is lost

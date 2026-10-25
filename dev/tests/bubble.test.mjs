@@ -42,9 +42,12 @@ test('stale or failing quotes are flagged, never silently treated as today', () 
   const q = base();
   q['tgju:sekee'] = Q(1e9, { at: now - 4 * 86400000 });
   assert.equal(BB.coinBubble('sekee', q, now).stale, true, 'coin 4 days old');
-  const q2 = base(); q2['tgju:ons'] = Q(4000, { error: 'x' });
+  // an ounce that has failed for hours is stale; one failed refresh after a good price minutes ago is not
+  const q2 = base(); q2['tgju:ons'] = Q(4000, { error: 'x', fetchedAt: now - 5 * 3600000 });
   assert.equal(BB.coinBubble('sekee', q2, now).stale, true, 'ounce with an error');
   assert.equal(BB.purePerGram(q2, now).stale, true);
+  const q3 = base(); q3['tgju:ons'] = Q(4000, { error: 'x', fetchedAt: now - 10 * 60000 });
+  assert.equal(BB.purePerGram(q3, now).stale, false, 'a recent blip');
 });
 
 test('cheapest gram of pure gold and how much dearer each is', () => {

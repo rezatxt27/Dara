@@ -2,7 +2,7 @@
 //   coin:  intrinsic = pure gold grams × (ounce in USD × free-market dollar ÷ 31.1035)   bubble = price ÷ intrinsic − 1
 //   fund:  bubble = market price ÷ redemption NAV (NAV ابطال) − 1
 // Pure functions over the stored quotes (Rial); no storage, no network.
-import { quoteId } from './providers.js';
+import { quoteId, quoteOk } from './providers.js';
 
 export const OUNCE_G = 31.1034768;
 const DAY = 86400000;
@@ -23,7 +23,7 @@ export const pureGrams = (key) => { const c = COINS[key] || GOLD_REF[key]; retur
 
 const qAt = (q) => q.at || q.fetchedAt || 0;
 /** Usable for today's comparison: has a price, no fetch error, not older than 3 days. */
-const fresh = (q, now) => !!q && q.price > 0 && !q.error && now - qAt(q, now) <= 3 * DAY;
+const fresh = (q, now) => quoteOk(q, now) && now - qAt(q, now) <= 3 * DAY;
 
 /** Rial price of one gram of pure gold at the global rate (ounce × free-market dollar). null if either is missing. */
 export function purePerGram(quotes = {}, now = Date.now()) {

@@ -122,3 +122,25 @@ test('a Bitpin request that fails keeps the last good prices for a while', async
     assert.ok(r2.errors.zec && !r2.quotes.zec);
   } finally { Date.now = realNow; }
 });
+
+test('a price site that drops one request is asked once more', async () => {
+  P.setRetryDelay(0);
+  let n = 0;
+  P.setFetch(async (url) => {
+    if (url.includes('GetClosingPriceInfo')) { n++; return n === 1 ? new Response('busy', { status: 503 }) : new Response(JSON.stringify({ closingPriceInfo: { pClosing: 5120, pDrCotVal: 5130, priceYesterday: 5000, dEven: 20261025, hEven: 122959 } })); }
+    return new Response('x', { status: 503 });
+  });
+  const { quotes, errors } = await P.fetchAll([{ provider: 'tsetmc', key: '123', field: 'close' }], { tgju: false });
+  assert.equal(n, 2); assert.equal(quotes['tsetmc:123:close'].price, 5120); assert.equal(errors['tsetmc:123:close'], undefined);
+  P.setRetryDelay(1500);
+});
+
+test('one failed refresh after a recent good price is not «قیمت قدیمی»', async () => {
+  const E = await import('../../extension/lib/engine.js');
+  const a = { id: 'x', name: 'فزر', category: 'stock', mode: 'units', quantity: 10, price: { source: 'market', ref: { provider: 'tsetmc', key: '1', field: 'close' } } };
+  const now = Date.now();
+  const q = (fetchedAgo) => ({ 'tsetmc:1:close': { price: 100, at: now - 3600e3, fetchedAt: now - fetchedAgo, error: 'خطای سرور (503)', errorAt: now } });
+  const v1 = E.valueOf(a, q(10 * 60e3), {}, now);
+  assert.equal(v1.status, 'live'); assert.match(v1.note, /همان قیمت قبلی/);
+  assert.equal(E.valueOf(a, q(5 * 3600e3), {}, now).status, 'delayed');
+});

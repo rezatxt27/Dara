@@ -71,7 +71,7 @@ export function PriceDetail({ st, s, refOf, onClose }) {
   // opened from the radar, a price may not be one Dara fetches: the last close of its history (or its NAV) stands in
   const lastPt = hist?.points?.length ? hist.points[hist.points.length - 1] : null;
   const price = q?.price > 0 ? (usdNative ? q.price * (rate || 0) : q.price) : lastPt ? lastPt[1] : rep?.kind === 'fund' ? rep.nav || null : rep?.kind === 'stock' ? rep.m.close || null : null; // in Rial
-  const stale = !price || !!q?.error || Date.now() - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
+  const stale = !price || !E.quoteOk(q) || Date.now() - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
   const name = refLabel(ref);
   // what's special about this price
   const coin = BB.isCoinRef(ref) ? BB.coinBubble(ref.key, st.quotes) : null;

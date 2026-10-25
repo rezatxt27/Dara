@@ -1,12 +1,12 @@
 // Valuation + automation + analytics engine. Pure functions shared by the service worker and the UI.
 // All money is Rial. Dates are ISO 'YYYY-MM-DD' (local calendar day); Jalali is used for schedules.
 import { CAT, CATEGORIES, EXPOSURES, GOLD_ETFS, TGJU_BY_KEY } from './catalog.js';
-import { quoteId, isUsdRef } from './providers.js';
+import { quoteId, isUsdRef, isBlip, quoteOk } from './providers.js';
 import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
 import { uid, num } from './format.js';
 import * as BB from './bubble.js';
 
-export { quoteId, isUsdRef, addDaysIso };
+export { quoteId, isUsdRef, isBlip, quoteOk, addDaysIso };
 const DAY = 86400000;
 
 export const isLiability = (a) => !!CAT[a.category]?.liability;
@@ -282,9 +282,11 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
         at = q.at || q.fetchedAt;
         // how old: the source's own time, else when it was fetched (a quote with neither counts as old, never as live)
         const age = now - (q.at || q.fetchedAt || 0);
-        status = q.error ? 'delayed' : age > 3 * DAY ? 'delayed' : 'live';
+        // one failed refresh after a good price a little while ago is not news: the price is still current
+        const blip = isBlip(q, now);
+        status = (q.error && !blip) || age > 3 * DAY ? 'delayed' : 'live';
         error = q.error || null;
-        note = q.note || (q.approx ? 'قیمت تقریبی' : null);
+        note = q.note || (q.approx ? 'قیمت تقریبی' : blip ? 'به‌روزرسانی آخر نشد؛ همان قیمت قبلی' : null);
         // today's move: the quote's own change (and, for dollar-priced metals, the dollar's), only if it is today's
         let cp = age > 2 * DAY ? 0 : q.changePct || 0;
         if (u.usd && cp > -1) { const uq = quotes['tgju:price_dollar_rl'] || quotes['nobitex:usdt']; const cu = uq && now - (uq.at || uq.fetchedAt || 0) <= 2 * DAY ? +uq.changePct || 0 : 0; cp = (1 + cp) * (1 + cu) - 1; }

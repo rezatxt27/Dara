@@ -41,7 +41,7 @@ const has = (s, ...words) => words.some((w) => String(s || '').toLowerCase().inc
 const clean = (s) => String(s || '').replace(/[ \t]+/g, ' ').trim();
 const norm = (s) => String(s || '').replace(/‌/g, ' ').replace(/\s+/g, ' ').trim();
 
-const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گوهر', 'آلتون', 'نفیس', 'لیان', 'تابان', 'زرفام', 'جواهر', 'گنج', 'قیراط', 'درخشان', 'ناب', 'زرین', 'رز', 'آتش', 'نهال'];
+const GOLD_ETFS = ['عیار', 'طلا', 'کهربا', 'مثقال', 'زر', 'گوهر', 'آلتون', 'نفیس', 'لیان', 'تابان', 'زرفام', 'جواهر', 'گنج', 'قیراط', 'درخشان', 'ناب', 'زرین', 'رز', 'آتش', 'نهال', 'زمرد', 'امرالد', 'ریتون', 'گلدیس', 'جام', 'درنا', 'قلک', 'میراث', 'نگین'];
 
 export function detectCategory(catText, name, holder) {
   const t = norm(catText);

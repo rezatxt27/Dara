@@ -326,22 +326,20 @@ function CryptoPriceFix({ st }) {
  * The page's summary: net worth and today's change, what is owned and owed, the mix as one bar (a click filters the table
  * to that kind), and what needs a look — prices that didn't refresh, with one button to fetch them all again.
  */
-function AssetsSummary({ st, pf, s, cat, onCat, att, onAtt }) {
+function AssetsSummary({ pf, mv, s, cat, onCat, att, onAtt }) {
   const [busy, setBusy] = useState(false);
   const owned = pf.cats.filter((c) => !c.liability && c.value > 0);
   const owed = pf.cats.filter((c) => c.liability && c.value > 0);
   const staleN = pf.attention.filter((r) => r.status === 'stale' || r.status === 'error' || r.status === 'delayed').length;
   const maturedN = pf.attention.filter((r) => r.status === 'matured').length;
   const refresh = async () => { setBusy(true); const r = await send('refresh'); setBusy(false); toast(r?.ok ? (r.errors ? `قیمت‌ها به‌روز شد؛ ${num(r.errors)} قیمت دریافت نشد` : 'همه قیمت‌ها به‌روز شد') : 'به‌روزرسانی انجام نشد'); };
-  // the same «today» as the sidebar and the overview: price moves and interest since yesterday, money moved left out
-  const mv = useMemo(() => I.marketMove(st, pf, 1), [st.assets, st.quotes, st.snapshots, st.events, pf]);
   const dc = mv?.abs ?? pf.dayChange, dp = mv?.pct ?? pf.dayChangePct;
   const lbl = mv?.stale ? `از ${fmtJ(mv.from, 'dm')}` : 'امروز';
   const pick = (id) => onCat(cat === id ? 'all' : id);
   return html`<section class="card as-sum">
     <div class="as-head">
       <div class="as-net"><span class="xs muted">ارزش خالص</span><b><${Money} v=${pf.net} s=${s} compact /></b>
-        <span class=${'small ' + (dc > 0 ? 'pos' : dc < 0 ? 'neg' : 'muted')} title="تغییر قیمت‌ها و سودها؛ پول جابه‌جاشده حساب نشده">${Math.abs(dc) >= 1 ? html`${lbl} <${Money} v=${dc} s=${s} compact sign /> <span class="ltr num">(${pct(dp)})</span>` : `${lbl} بدون تغییر`}</span></div>
+        <span class=${'small ' + (dc > 0 ? 'pos' : dc < 0 ? 'neg' : 'muted')} title="تغییر ارزش از آخرین ثبتِ روز قبل: تغییر قیمت و سود؛ پولی که جابه‌جا یا اضافه کرده‌ای و اصلاح‌های دستی مقدار و مانده حساب نمی‌شوند">${Math.abs(dc) >= 1 ? html`${lbl} <${Money} v=${dc} s=${s} compact sign /> <span class="ltr num">(${pct(dp)})</span>` : `${lbl} بدون تغییر`}</span></div>
       ${pf.debt > 0 && html`<div class="as-split">
         <div><span class="xs muted">دارایی‌ها</span><b class="num"><${Money} v=${pf.gross} s=${s} compact /></b></div>
         <span class="as-op" aria-hidden="true">−</span>
@@ -376,6 +374,14 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const [modal, setModal] = useState(null);
   const [openId, setOpenId] = useState(null);
   const [folded, setFolded] = useState(loadFolded);
+  // «today», one definition everywhere (summary, rows, groups, footer, the sidebar and the overview): each asset's change
+  // in value since yesterday's last record, prices and interest, money moved in or out and corrections left out
+  const mv = useMemo(() => I.marketMove(st, pf, 1), [st.assets, st.quotes, st.snapshots, st.events, pf]);
+  const todayOf = useMemo(() => (mv?.at?.rows ? new Map(mv.at.rows.filter((x) => !x.removed).map((x) => [x.id, x.market])) : null), [mv]);
+  const gone = mv?.at?.rows ? mv.at.rows.filter((x) => x.removed).reduce((t, x) => t + x.market, 0) : 0;
+  const tc = (r) => (todayOf ? todayOf.get(r.asset.id) ?? 0 : r.dayChange || 0);
+  const todayLbl = mv?.stale ? `از ${fmtJ(mv.from, 'dm')}` : 'امروز';
+  const todayTip = 'تغییر ارزش از آخرین ثبتِ روز قبل: تغییر قیمت و سود؛ پولی که جابه‌جا یا اضافه کرده‌ای و اصلاح‌های دستی مقدار و مانده حساب نمی‌شوند';
   const gKey = (g) => `${group}:${g.key}`;
   // a filter or a search shows what it found, folded groups or not
   const isFolded = (g) => !!g.title && fCat === 'all' && !fAtt && !term && folded.has(gKey(g));
@@ -391,7 +397,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const term = norm(q);
   let rows = pf.rows.filter((r) => (fCat === 'all' || r.asset.category === fCat) && (!fAtt || E.needsAttention(r.status)) &&
     (!term || [r.asset.name, r.asset.custodian, r.asset.code, r.asset.note, r.cat.name, r.cat.short, r.asset.unit, r.asset.price?.ref?.symbol, r.asset.price?.ref?.label, r.asset.price?.ref?.name, r.asset.price?.ref?.sym].some((x) => norm(x).includes(term))));
-  const sorter = { value: (a, b) => Math.abs(b.value) - Math.abs(a.value), name: (a, b) => a.asset.name.localeCompare(b.asset.name, 'fa'), change: (a, b) => Math.abs(b.dayChange) - Math.abs(a.dayChange), updated: (a, b) => (a.at || 0) - (b.at || 0) }[sort];
+  const sorter = { value: (a, b) => Math.abs(b.value) - Math.abs(a.value), name: (a, b) => a.asset.name.localeCompare(b.asset.name, 'fa'), change: (a, b) => Math.abs(tc(b)) - Math.abs(tc(a)), updated: (a, b) => (a.at || 0) - (b.at || 0) }[sort];
   // paid-off loans and closed items go to the end of their group
   const settled = (r) => (r.asset.mode === 'loan' && E.loanState(r.asset.loan).done ? 1 : 0);
   rows = rows.slice().sort((a, b) => settled(a) - settled(b) || sorter(a, b));
@@ -412,7 +418,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   }
 
   return html`<div class="page">
-    ${pf.rows.length > 0 && html`<${AssetsSummary} st=${st} pf=${pf} s=${s} cat=${fCat} onCat=${setCat} att=${fAtt} onAtt=${setOnlyAtt} />`}
+    ${pf.rows.length > 0 && html`<${AssetsSummary} pf=${pf} mv=${mv} s=${s} cat=${fCat} onCat=${setCat} att=${fAtt} onAtt=${setOnlyAtt} />`}
     <div class="row wrap between">
       <div class="row xs muted" style="gap:6px;min-width:0">${fCat !== 'all' || fAtt ? html`<span>فیلتر: ${[fCat !== 'all' && CAT[fCat]?.short, fAtt && 'نیاز به توجه'].filter(Boolean).join('، ')}</span><button class="btn sm ghost" onClick=${() => { setCat('all'); setOnlyAtt(false); }}><${Icon} n="x" cls="sm" />برداشتن فیلتر</button>` : ''}</div>
       <div class="row">
@@ -425,7 +431,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
     <${CryptoPriceFix} st=${st} />
     <div class="card" style="padding:6px 6px 2px">
       ${rows.length ? html`<table class="tbl assets">
-        <thead><tr><th>دارایی</th><th class="n c-qty">مقدار</th><th class="n c-price">قیمت واحد</th><th class="n">ارزش امروز</th><th class="n c-today">امروز</th>${hasPnl && html`<th class="n c-pnl">سود / زیان</th>`}<th class="c-status">وضعیت</th><th></th></tr></thead>
+        <thead><tr><th>دارایی</th><th class="n c-qty">مقدار</th><th class="n c-price">قیمت واحد</th><th class="n">ارزش امروز</th><th class="n c-today" title=${todayTip}>${todayLbl}</th>${hasPnl && html`<th class="n c-pnl">سود / زیان</th>`}<th class="c-status">وضعیت</th><th></th></tr></thead>
         <tbody>${groups.map((g) => html`
           ${g.title && ((isF, gc) => html`<tr class=${'grp' + (isF ? ' folded' : '')} tabindex="0" aria-expanded=${isF ? 'false' : 'true'} title=${isF ? 'باز کردن گروه' : 'جمع کردن گروه'}
               onClick=${() => fold(gKey(g))} onKeyDown=${(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); fold(gKey(g)); } }}>
@@ -433,7 +439,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
               <span class="muted xs num">${num(g.rows.length)} مورد${!g.cat?.liability && pf.gross && g.owned ? ' · ' + pct(g.owned / pf.gross, { sign: false }) + ' از کل' : ''}</span></span></td><td class="c-price"></td>
             <td class="n num"><${Money} v=${g.total} s=${s} compact cls=${g.cat?.liability || g.total < 0 ? 'debt' : ''} /></td>
             <td class="n small c-today">${Math.abs(gc) >= 1 ? html`<${Money} v=${gc} s=${s} compact sign unit=${false} cls=${gc > 0 ? 'pos' : 'neg'} />${Math.abs(g.total - gc) > 0 ? html`<div class="xs"><${Delta} p=${gc / Math.abs(g.total - gc)} showAbs=${false} /></div>` : ''}` : html`<span class="faint">—</span>`}</td>
-            <td colspan=${hasPnl ? 3 : 2}></td></tr>`)(isFolded(g), g.rows.reduce((x, r) => x + (r.dayChange || 0), 0))}
+            <td colspan=${hasPnl ? 3 : 2}></td></tr>`)(isFolded(g), g.rows.reduce((x, r) => x + tc(r), 0))}
           ${(isFolded(g) ? [] : g.rows).map((r) => {
             const a = r.asset; const liab = r.cat.liability; const isOpen = openId === a.id;
             const share = !liab && pf.gross ? r.value / pf.gross : 0;
@@ -447,7 +453,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
               <td class="n small c-price">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.unitPrice, 'قیمت ثبت شد'), await act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } }))}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
               <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.value, 'ثبت شد'), await act.patchAsset(a.id, { balance: v, balanceAt: Date.now() }))}><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></${InlineMoney}>` : html`<${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} />`}</div>
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
-              <td class="n small c-today">${Math.abs(r.dayChange) >= 1 ? html`<${Money} v=${r.dayChange} s=${s} compact sign unit=${false} cls=${r.dayChange > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`}</td>
+              <td class="n small c-today">${((d) => Math.abs(d) >= 1 ? html`<${Money} v=${d} s=${s} compact sign unit=${false} cls=${d > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`)(tc(r))}</td>
               ${hasPnl && html`<td class="n small c-pnl">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>`}
               <td class="c-status">${E.needsAttention(r.status) ? html`<${StatusPill} status=${r.status} at=${r.at} title=${r.error || ''} />` : html`<span class="xs muted" title=${r.error || ''}>${QUIET[r.status] || ''}</span>`}<div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
               <td onClick=${(e) => e.stopPropagation()}><div class="row" style="gap:2px;justify-content:flex-end">
@@ -458,12 +464,14 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
             ${isOpen && html`<tr class="xrow"><td colspan=${hasPnl ? 8 : 7}><${Expanded} st=${st} r=${r} s=${s} pf=${pf} open=${open} onModal=${setModal} openPrice=${openPrice} /></td></tr>`}`;
           })}`)}
         </tbody>
-        <tfoot>${fCat === 'all' && !fAtt && !term && pf.debt > 0 && html`
+        <tfoot>${fCat === 'all' && !fAtt && !term && Math.abs(gone) >= 1 && html`
+          <tr class="sub"><td colspan="4">دارایی‌هایی که از دیروز حذف یا بایگانی شدند</td><td class="n small c-today"><${Money} v=${gone} s=${s} compact sign unit=${false} cls=${gone > 0 ? 'pos' : 'neg'} /></td><td colspan=${hasPnl ? 3 : 2}></td></tr>`}
+          ${fCat === 'all' && !fAtt && !term && pf.debt > 0 && html`
           <tr class="sub"><td colspan="3">جمع دارایی‌ها</td><td class="n num"><${Money} v=${pf.gross} s=${s} /></td><td colspan=${hasPnl ? 4 : 3}></td></tr>
           <tr class="sub"><td colspan="3">منهای بدهی‌ها</td><td class="n num"><${Money} v=${-pf.debt} s=${s} cls="debt" /></td><td colspan=${hasPnl ? 4 : 3}></td></tr>`}
           <tr><td class="b" style="padding:14px 12px">${fCat !== 'all' || fAtt || term ? 'جمع فیلترشده' : 'ارزش خالص'}</td><td class="c-qty"></td><td class="c-price"></td>
           <td class="n b" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + r.signedValue, 0)} s=${s} /></td>
-          <td class="n small c-today" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + r.dayChange, 0)} s=${s} compact sign /></td><td colspan=${hasPnl ? 3 : 2}></td></tr></tfoot>
+          <td class="n small c-today" style="padding:14px 12px"><${Money} v=${rows.reduce((x, r) => x + tc(r), 0) + (fCat === 'all' && !fAtt && !term ? gone : 0)} s=${s} compact sign /></td><td colspan=${hasPnl ? 3 : 2}></td></tr></tfoot>
       </table>` : html`<div class="empty"><div class="ico"><${Icon} n="assets" /></div>${pf.rows.length ? 'موردی با این فیلتر پیدا نشد.' : 'هنوز دارایی‌ای ثبت نشده.'}
         <div class="row" style="margin-top:10px;justify-content:center">${pf.rows.length > 0 && (fCat !== 'all' || fAtt) && html`<button class="btn" onClick=${() => { setCat('all'); setOnlyAtt(false); }}>نمایش همه</button>`}<button class="btn primary" onClick=${() => open(null)}><${Icon} n="plus" />افزودن دارایی</button></div></div>`}
     </div>

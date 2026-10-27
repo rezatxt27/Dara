@@ -98,8 +98,16 @@ async def main():
         async def t_summary():
             P = await pf(pg)
             sm = await pg.inner_text('.as-sum')
-            check('summary on top: net worth, owned and owed, today', 'ارزش خالص' in sm and 'دارایی‌ها' in sm and 'بدهی‌ها' in sm and 'امروز' in sm, sm.replace('\n', ' | ')[:200])
+            check('summary on top: net worth, owned and owed, today', 'ارزش خالص' in sm and 'دارایی‌ها' in sm and 'بدهی‌ها' in sm and ('امروز' in sm or 'از ' in sm), sm.replace('\n', ' | ')[:200])
             segs = await pg.locator('.as-seg').count(); cats = len([c for c in P.get('cats', []) if not c.get('liability') and c.get('value', 0) > 0]) if P.get('cats') else segs
+            # one «today» everywhere: the summary's change = the footer's = the sum the rows add up to
+            sm_today = (await pg.locator('.as-net .small .money').first.inner_text()).strip()
+            ft_today = (await pg.locator('tfoot tr:last-child td.c-today').inner_text()).strip()
+            rows_sum = await pg.evaluate("""async () => { const m = await import(chrome.runtime.getURL('lib/engine.js')); const I = await import(chrome.runtime.getURL('lib/insights.js'));
+              const st = await chrome.storage.local.get(['assets','quotes','settings','snapshots','events']); const pf = m.portfolio(st.assets, st.quotes, st.settings);
+              const mv = I.marketMove({ assets: st.assets, quotes: st.quotes, settings: st.settings, snapshots: st.snapshots || {}, events: st.events || [] }, pf, 1);
+              return mv ? [mv.abs, (mv.at?.rows || []).reduce((t, r) => t + r.market, 0)] : null; }""")
+            check('today: summary = footer = the rows', sm_today == ft_today and (rows_sum is None or abs(rows_sum[0] - rows_sum[1]) < 1), (sm_today, ft_today, rows_sum))
             check('one bar segment per kind owned', segs >= 3 and segs == cats, (segs, cats))
             # a click on a bar segment filters to that kind; clicking again shows all
             await pg.locator('.as-seg').first.click(); await pg.wait_for_timeout(300)

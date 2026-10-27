@@ -45,9 +45,9 @@ test('money added mid-way goes into each market on its own day', () => {
   const gold = R.rows.find((r) => r.id === 'gold');
   close(gold.end, 2200, 1e-6); close(gold.diff, -200, 1e-6);
   assert.deepEqual(R.missing, ['نقره', 'بیت‌کوین', 'شاخص کل بورس'], 'markets without a history are named');
-  // 100% Rial at the start, and gold did better: said why
-  assert.ok(R.why && R.why.exposure === 'rial' && R.why.share > 0.99);
-  assert.match(R.why.text, /ریالی/);
+  // all of it was cash in an account (earning nothing, not a deposit), and gold did better: said why
+  assert.ok(R.why && R.why.exposure === 'cash' && R.why.share > 0.99);
+  assert.match(R.why.text, /حساب بانکی/);
 });
 
 test('your own target mix and the simple mix; costs come off the markets, not off you', () => {
@@ -74,4 +74,16 @@ test('a live price in another unit than the series is not used', () => {
   assert.equal(I.priceOn([[D(-2), 100], [D(-1), 101]], 103, today)(today), 103);
   assert.equal(I.priceOn([], null, today)(today), null);
   assert.equal(I.ranking({ assets: [], quotes: {}, settings: {}, snapshots: {}, events: [] }, 30, { today }), null);
+});
+
+test('a market whose history starts after the period begins is left out, not measured over less', () => {
+  const assets = [{ id: 'g', name: 'طلا', category: 'gold', mode: 'units', quantity: 10, price: { source: 'market', ref: goldRef } }];
+  const st = { assets, quotes, settings: {}, snapshots: snaps({ g: 1000 }, 1000), events: [] };
+  const late = [[D(-10), 10], [D(-1), 13]];
+  const R = I.ranking(st, 30, { today, series: { ...series, silver: late } });
+  assert.equal(R.rows.find((r) => r.id === 'silver'), undefined);
+  assert.ok(R.missing.includes('نقره'));
+  // a few days late (a holiday) is fine
+  const R2 = I.ranking(st, 30, { today, series: { ...series, silver: [[D(-27), 10], [D(-1), 13]] } });
+  assert.ok(R2.rows.find((r) => r.id === 'silver'));
 });

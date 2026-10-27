@@ -82,7 +82,9 @@ export function makeTools(ctx) {
   // silver, bitcoin and the stock index over the period (cached by the worker), for «رتبه بین بازارها»
   const rankSeries = async (days) => {
     if (!ctx.history) return {};
-    const span = days && days <= 365 ? 400 : 1500;
+    const whole = Object.keys(st().snapshots || {}).sort()[0];
+    const need = days || (whole ? Math.round((Date.now() - Date.parse(whole)) / 864e5) : 400);
+    const span = [400, 1500, 3700].find((n) => n >= need + 30) || 3700;
     const refs = { silver: { provider: 'tgju', key: 'silver_999' }, btc: { provider: 'nobitex', key: 'btc' }, index: { provider: 'tsetmc', key: 'index' } };
     const got = await Promise.all(Object.entries(refs).map(async ([k, ref]) => { try { const r = await ctx.history(ref, span); return [k, r?.points?.length ? r.points : null]; } catch { return [k, null]; } }));
     return Object.fromEntries(got);

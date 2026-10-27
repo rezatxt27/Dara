@@ -6,6 +6,7 @@ import * as AI from '../../lib/ai.js';
 import * as A from '../../lib/assistant.js';
 import * as store from '../../lib/store.js';
 import { ago, parseNum } from '../../lib/format.js';
+import { daysBetween, todayIso } from '../../lib/jalali.js';
 import { act } from '../actions.js';
 import { T as TT, L } from '../tips.js';
 import { Builder } from '../builder.js';
@@ -45,8 +46,10 @@ const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲�
 // markets whose past comes from outside (the rest are in Dara's own daily records)
 const RANK_REFS = { silver: { provider: 'tgju', key: 'silver_999' }, btc: { provider: 'nobitex', key: 'btc' }, index: { provider: 'tsetmc', key: 'index' } };
 const RANK_NAMES = { silver: 'نقره', btc: 'بیت‌کوین', index: 'شاخص بورس' };
-function useRankSeries(days) {
-  const span = days && days <= 365 ? 400 : 1500; // two cache sizes, so switching periods doesn't refetch
+/** How far back to fetch: a few fixed sizes (so switching periods doesn't refetch), enough for the whole period. */
+export const rankSpan = (days, st) => { const whole = Object.keys(st.snapshots || {}).sort()[0]; const need = days || (whole ? daysBetween(whole, todayIso()) : 400); return [400, 1500, 3700].find((n) => n >= need + 30) || 3700; };
+function useRankSeries(days, st) {
+  const span = rankSpan(days, st);
   const [ser, setSer] = useState({ loading: true });
   useEffect(() => {
     let alive = true; setSer((x) => ({ ...x, loading: true }));
@@ -101,8 +104,8 @@ function Performance({ st, pf, s }) {
   const [costs, setCosts] = useState(false);
   const dep = I.defaultDepositPct(st);
   const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep, s.inflationPct]);
-  const ser = useRankSeries(days);
-  const R = useMemo(() => (r ? I.ranking(st, days, { depositPct: dep, pf, series: ser, costs }) : null), [r, ser, costs, s.targets]);
+  const ser = useRankSeries(days, st);
+  const R = useMemo(() => (r ? I.ranking(st, days, { depositPct: dep, pf, series: ser, costs }) : null), [r, ser, costs, s.targets, dep, s.inflationPct]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
     <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} سبد من بین بازارها چه رتبه‌ای داشت؟ با طلا، سکه، دلار، سپرده، تورم و ترکیب هدف خودم مقایسه کن و بگو کجا جلو یا عقب بودم و چرا.`} label="از دستیار بپرس" />`}
@@ -149,7 +152,7 @@ function Performance({ st, pf, s }) {
         <div class="rk-h xs muted"><span>رتبه بین بازارها${T('rank')}</span><span>با همان پول و همان روزها</span></div>
         ${R ? html`<${Ranking} R=${R} st=${st} s=${s} />` : ''}
         ${ser.loading ? html`<div class="xs muted" style="margin-top:6px">در حال گرفتن سابقه نقره، بیت‌کوین و شاخص بورس…</div>`
-          : R?.missing?.length ? html`<div class="xs muted" style="margin-top:6px">سابقه ${R.missing.join('، ')} دریافت نشد؛ ${R.missing.length > 1 ? 'این ردیف‌ها' : 'این ردیف'} فعلاً در جدول نیست.</div>` : ''}
+          : R?.missing?.length ? html`<div class="xs muted" style="margin-top:6px">سابقه ${R.missing.join('، ')} دریافت نشد یا به اول این دوره نمی‌رسد؛ ${R.missing.length > 1 ? 'این ردیف‌ها' : 'این ردیف'} فعلاً در جدول نیست.</div>` : ''}
         <label class="row xs muted rk-cost"><input type="checkbox" checked=${costs} onChange=${(e) => setCosts(e.target.checked)} />با هزینه معمول خرید و فروش${T('rankCost')}</label>
         <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه${T('deposit')}:
           <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>

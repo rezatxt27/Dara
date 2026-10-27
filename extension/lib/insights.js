@@ -6,7 +6,7 @@
 //  - critiqueFacts: percent-only facts for the AI portfolio review
 import * as E from './engine.js';
 import { CAT, EXPOSURES, LIQUIDITY, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from './catalog.js';
-import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
+import { todayIso, daysBetween, isoFromDate, fmtJ, addDaysIso } from './jalali.js';
 import { num, pct, qName } from './format.js';
 
 /**
@@ -272,9 +272,12 @@ export function priceOn(points, now = null, today = todayIso()) {
   const pts = (points || []).filter((p) => p && p[1] > 0);
   // a live price far from the series' last one is in another unit (or wrong): the series is trusted
   if (now > 0 && pts.length && Math.abs(now / pts[pts.length - 1][1] - 1) > 0.3) now = null;
+  // a day before the series begins has no price (a week's slack: holidays, a first record a few days late) — a market
+  // measured over a shorter stretch than the others would be ranked unfairly
+  const first = pts.length ? addDaysIso(pts[0][0], -7) : null;
   return (iso) => {
     if (now > 0 && iso >= today) return now;
-    if (!pts.length) return null;
+    if (!pts.length || iso < first) return null;
     let lo = 0, hi = pts.length - 1, ans = -1;
     while (lo <= hi) { const m = (lo + hi) >> 1; if (pts[m][0] <= iso) { ans = m; lo = m + 1; } else hi = m - 1; }
     return ans >= 0 ? pts[ans][1] : pts[0][1];
@@ -288,6 +291,8 @@ const MARKETS = [
 /** Which market stands for each kind of asset in a mix (property and «other» have none). */
 const CAT_MARKET = { gold: 'gold', gold_online: 'gold', fx: 'usd', crypto: 'btc', stock: 'index', private: 'index', metal: 'silver', bank: 'deposit', fixed: 'deposit', receivable: 'deposit' };
 const EXP_MARKET = { rial: 'deposit', gold: 'gold', fx: 'usd', equity: 'index', crypto: 'btc', commodity: 'silver' };
+// Rial in an account without day-count interest: it earned nothing, unlike a deposit
+const isCash = (a) => a.category === 'bank' && !(a.mode === 'balance' && a.interest?.on);
 
 /**
  * «رتبهٔ تو بین بازارها»: the same money, on the same days, in each market — against what your mix really did.
@@ -306,7 +311,9 @@ export function ranking(st, days, { depositPct = 25, inflationPct = defaultInfla
   const denom = dietzBase(at, today, entries);
   if (!(denom > 0)) return null;
   const rates = E.denomRates(st.quotes);
-  const snapRate = (field, now) => (iso) => (iso >= today && now > 0 ? now : rateAt(st.snapshots, keys, field, iso));
+  // the same for Dara's own records: a rate only from the first saved day that has it
+  const firstWith = (field) => keys.find((k) => st.snapshots[k]?.[field] > 0) || null;
+  const snapRate = (field, now) => { const f0 = firstWith(field); return (iso) => (iso >= today && now > 0 ? now : !f0 || iso < addDaysIso(f0, -7) ? null : rateAt(st.snapshots, keys, field, iso)); };
   const liveQ = (id) => { const q = st.quotes?.[id]; return q?.price > 0 && !q.error ? q.price : null; };
   const price = {
     gold: rates.gold ? snapRate('gold', rates.gold) : null,
@@ -331,14 +338,16 @@ export function ranking(st, days, { depositPct = 25, inflationPct = defaultInfla
   const rows = [];
   const add = (id, name, g, kind, extra = {}) => {
     const end0 = replay(g);
-    if (!isFinite(end0)) return;
+    if (!isFinite(end0)) return false;
     const cost = costs && extra.cost ? extra.cost / 100 : 0;
     const end = end0 - Math.max(0, end0) * cost;
     const own = g(at.from, today);
     rows.push({ id, name, kind, end, ret: (end - at.base - moneyIn) / denom, own: own !== null ? own - 1 : null, diff: pf.net - end, g, ...extra });
+    return true;
   };
-  for (const [id, name] of MARKETS) if (growth[id]) add(id, id === 'deposit' ? `سپرده ${num(depositPct, 1)}٪` : name, growth[id], 'market', { cost: MARKET_COST[id] });
-  const missing = MARKETS.filter(([id]) => !growth[id]).map(([, n]) => n);
+  // a market without a history, or whose history doesn't reach back to the start, is named instead of ranked
+  const missing = [];
+  for (const [id, name] of MARKETS) if (!growth[id] || !add(id, id === 'deposit' ? `سپرده ${num(depositPct, 1)}٪` : name, growth[id], 'market', { cost: MARKET_COST[id] })) { missing.push(name); delete growth[id]; }
   // the owner's own target mix (kinds with no market — property, «other» — left out and said)
   const tg = Object.entries(st.settings?.targets || {}).filter(([k, v]) => +v > 0 && CAT[k] && !CAT[k].liability);
   let targetNote = null;
@@ -368,16 +377,21 @@ export function ranking(st, days, { depositPct = 25, inflationPct = defaultInfla
   let why = null;
   const byId = Object.fromEntries((st.assets || []).map((a) => [a.id, a]));
   const ex = {}; let g0 = 0;
-  for (const [id, v] of Object.entries(at.snap?.v || {})) { const a = byId[id]; if (!a || !(v > 0) || E.isLiability(a)) continue; const e = E.exposureOf(a); ex[e] = (ex[e] || 0) + v; g0 += v; }
+  for (const [id, v] of Object.entries(at.snap?.v || {})) { const a = byId[id]; if (!a || !(v > 0) || E.isLiability(a)) continue; const e = isCash(a) ? 'cash' : E.exposureOf(a); ex[e] = (ex[e] || 0) + v; g0 += v; }
   for (const above of ranked.slice(0, rank - 1).reverse().filter((r) => r.kind === 'market' && r.own !== null)) {
     let best = null;
     for (const [e, v] of Object.entries(ex)) {
-      const m = EXP_MARKET[e]; const r = m ? rows.find((x) => x.id === m) : null;
+      const m = EXP_MARKET[e]; const r = e === 'cash' ? { id: 'cash', name: 'حساب بانکی', own: 0 } : m ? rows.find((x) => x.id === m) : null;
       if (!r || r.id === above.id || r.own === null) continue;
       const cost = (v / g0) * (above.own - r.own);
       if (cost > 0 && (!best || cost > best.cost)) best = { exposure: e, share: v / g0, market: r, cost };
     }
-    if (best && best.share >= 0.1) { why = { above, ...best, text: `در شروع دوره ${pct(best.share, { sign: false, digits: 0 })} سبدت ${EXPOSURES[best.exposure]?.name || best.exposure} بود؛ در این مدت ${best.market.name} ${pct(best.market.own, { digits: 0 })} تغییر کرد و ${above.name} ${pct(above.own, { digits: 0 })}.` }; break; }
+    if (best && best.share >= 0.1) {
+      const sh = pct(best.share, { sign: false, digits: 0 });
+      const text = best.exposure === 'cash' ? `در شروع دوره ${sh} سبدت نقد در حساب بانکی بود که سودی نگرفت؛ در این مدت ${above.name} ${pct(above.own, { digits: 0 })} تغییر کرد.`
+        : `در شروع دوره ${sh} سبدت ${EXPOSURES[best.exposure]?.name || best.exposure} بود؛ در این مدت ${best.market.name} ${pct(best.market.own, { digits: 0 })} تغییر کرد و ${above.name} ${pct(above.own, { digits: 0 })}.`;
+      why = { above, ...best, text }; break;
+    }
   }
   return { from: at.from, days: T, partial: P.partial, est: at.est, rows, rank, of: ranked.length, you, missing, why,
     aboveInflation: infl ? you.ret >= infl.ret : null, vsTarget: target ? you.ret - target.ret : null, vsBalanced: balanced ? you.ret - balanced.ret : null,

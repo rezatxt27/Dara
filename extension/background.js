@@ -284,7 +284,7 @@ async function monthlySummary() {
   const R = I.ranking(st, 30, { depositPct: I.defaultDepositPct(st) });
   await store.update('meta', (m) => ({ ...m, monthly: key }));
   if (!R) return;
-  const bits = [`بازده سبدت در ماه گذشته ${pct(R.you.ret)} بود`,
+  const bits = [`بازده سبدت در ۳۰ روز گذشته ${pct(R.you.ret)} بود`,
     R.aboveInflation === null ? null : R.aboveInflation ? 'بالای تورم' : 'زیر تورم',
     R.vsBalanced === null ? null : R.vsBalanced >= 0 ? 'جلوتر از سبد ساده' : 'عقب‌تر از سبد ساده',
     R.vsTarget === null ? null : `${R.vsTarget >= 0 ? 'جلوتر از' : 'عقب‌تر از'} هدف خودت`].filter(Boolean);

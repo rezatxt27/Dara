@@ -16,6 +16,8 @@ import * as CMP from '../../lib/compare.js';
 const TIPS = {
   perf: ['واقعاً پولدارتر شدم؟', 'نشان می‌دهد دارایی‌هایت در این دوره واقعاً چقدر رشد کرده‌اند. پولی که خودت اضافه کرده‌ای (مثل حقوق یا واریز) سود حساب نمی‌شود. بعد همان پول، با همان تاریخ‌ها، در سه حالت دیگر هم حساب می‌شود: اگر همه را طلا، دلار یا سپرده نگه داشته بودی. «جلوتری» یعنی ترکیب دارایی‌هایت از آن حالت بهتر عمل کرده.', 'اگر طلا در این مدت ۲۰٪ رشد کرده و دارایی تو ۱۵٪، از «طلا» عقب‌تری.'],
   equity: ['بازده سرمایه خودت و بازده دارایی‌ها', 'وقتی بدهی داری، دو عدد فرق می‌کنند. «بازده دارایی‌ها» می‌گوید خود دارایی‌هایت چقدر رشد کردند. «بازده سرمایه خودت» همان سود را بر پولی که مال خودت است (دارایی منهای بدهی) تقسیم می‌کند؛ پس با بدهی بزرگ‌تر دیده می‌شود، هم در سود و هم در زیان. سود بدهی هم از آن کم شده.', 'دارایی ۱۰۰۰ با بدهی ۵۰۰: اگر دارایی‌ها ۱۰٪ رشد کنند (۱۰۰)، سرمایه خودت (۵۰۰) ۲۰٪ رشد کرده.'],
+  rank: ['رتبه بین بازارها', 'همان پولی که اول دوره داشتی، و هر پولی که وسط دوره اضافه یا برداشت کردی، در همان روزها در هر بازار فرض می‌شود و ارزش امروزش با ارزش واقعی سبد تو مقایسه می‌شود. «ترکیب هدف خودت» یعنی اگر دقیقاً طبق هدفی که در «تخصیص هدف» گذاشته‌ای خریده بودی؛ «سبد ساده» یک‌سوم طلا، یک‌سوم دلار، یک‌سوم سپرده است. خط تورم بازار نیست: هر چه زیرش باشد قدرت خرید از دست داده. روی هر ردیف بزن تا مسیرش را در طول دوره کنار سبد خودت ببینی.'],
+  rankCost: ['هزینه خرید و فروش', 'هزینهٔ معمول یک بار خرید و یک بار فروش از ارزش پایانی هر بازار کم می‌شود: طلای ۱۸ حدود ۱٫۵٪، سکه ۲٪، دلار ۱٪، نقره ۳٪، بیت‌کوین ۰٫۵٪ و بورس حدود ۱٫۲۵٪. سبد خودت تغییری نمی‌کند، چون هزینه‌هایی که واقعاً داده‌ای در عددهایش هست.'],
   real: ['بازده بعد از تورم', 'بازده‌ای که پس از کم کردن تورم همان مدت می‌ماند: قدرت خریدت واقعاً چقدر بیشتر یا کمتر شد. اگر منفی است، پولت از تورم عقب مانده، حتی اگر عدد تومانی‌اش بالا رفته باشد.'],
   inflation: ['تورم سالانه برای مقایسه', 'پیش‌فرض، تورم سالانه (میانگین ۱۲ ماهه) شهریور ۱۴۰۵ مرکز آمار است: ۷۳٫۶٪. می‌توانی عدد دیگری بگذاری، مثلاً تورمی که خودت در هزینه‌هایت حس می‌کنی.'],
   deposit: ['نرخ سپرده برای مقایسه', 'سود سالانه‌ای که بانک یا صندوق درآمد ثابت واقعاً به تو می‌دهد. برای مقایسه منصفانه، نرخی را بگذار که خودت به آن دسترسی داری. این نرخ مثل سپرده بانکی حساب می‌شود: سود هر ماه دوباره سپرده می‌شود؛ پس سپرده ۲۵٪ در عمل حدود ۲۸٪ در سال رشد می‌کند. بازدهی که صندوق‌ها «سالانه مؤثر» اعلام می‌کنند از قبل همین را دارد.'],
@@ -40,20 +42,80 @@ const unitOf = (s) => (s.currency === 'rial' ? 'ریال' : 'تومان');
 const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(c)).replace(/[٫,]/g, '.'));
 
 /* ---------------- «واقعاً پولدارتر شدم؟» ---------------- */
+// markets whose past comes from outside (the rest are in Dara's own daily records)
+const RANK_REFS = { silver: { provider: 'tgju', key: 'silver_999' }, btc: { provider: 'nobitex', key: 'btc' }, index: { provider: 'tsetmc', key: 'index' } };
+const RANK_NAMES = { silver: 'نقره', btc: 'بیت‌کوین', index: 'شاخص بورس' };
+function useRankSeries(days) {
+  const span = days && days <= 365 ? 400 : 1500; // two cache sizes, so switching periods doesn't refetch
+  const [ser, setSer] = useState({ loading: true });
+  useEffect(() => {
+    let alive = true; setSer((x) => ({ ...x, loading: true }));
+    Promise.all(Object.entries(RANK_REFS).map(([k, ref]) => send('history', { ref, days: span }).then((r) => [k, r?.ok && r.points?.length ? r.points : null]).catch(() => [k, null])))
+      .then((list) => { if (alive) setSer({ ...Object.fromEntries(list), loading: false }); });
+    return () => { alive = false; };
+  }, [span]);
+  return ser;
+}
+/** Your net worth and the same money in one market, through the period (two lines). */
+function TwoLines({ pts, s, name }) {
+  const W = 320, H = 92, pad = 4;
+  const vals = pts.flatMap((p) => [p.mine, p.alt]);
+  const lo = Math.min(...vals), hi = Math.max(...vals), k = hi > lo ? (H - 2 * pad) / (hi - lo) : 0;
+  const x = (i) => pad + (W - 2 * pad) * i / (pts.length - 1);
+  const y = (v) => H - pad - (v - lo) * k;
+  const path = (f) => pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(f(p)).toFixed(1)}`).join('');
+  const last = pts[pts.length - 1];
+  return html`<div class="rk-chart">
+    <svg viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" dir="ltr" role="img" aria-label=${`سبد تو در برابر ${name}`}>
+      <path d=${path((p) => p.alt)} class="alt" /><path d=${path((p) => p.mine)} class="mine" /></svg>
+    <div class="rk-leg xs"><span><i class="mine"></i>سبد تو: <${Money} v=${last.mine} s=${s} compact /></span><span><i class="alt"></i>اگر در ${name} بود: <${Money} v=${last.alt} s=${s} compact /></span>
+      <span class="muted">${fmtJ(pts[0].date, 'dm')} تا امروز</span></div>
+  </div>`;
+}
+function Ranking({ R, st, s }) {
+  const [open, setOpen] = useState(null);
+  const max = Math.max(0.0001, ...R.rows.map((x) => Math.abs(x.ret)));
+  // all above zero: bars start at the edge and use the whole width; otherwise they grow both ways from the middle
+  const both = R.rows.some((x) => x.ret < 0);
+  let n = 0;
+  return html`<div class="rk" role="list">${R.rows.map((x) => {
+    const rank = x.kind === 'line' ? null : ++n;
+    const isOpen = open === x.id && x.kind !== 'you';
+    const pts = isOpen ? I.rankingPath(R, x.id, st) : null;
+    const w = Math.abs(x.ret) / max * (both ? 50 : 100);
+    return html`<div class=${'rk-row ' + x.kind + (isOpen ? ' open' : '')} role="listitem">
+      <button class="rk-main" disabled=${x.kind === 'you'} aria-expanded=${x.kind === 'you' ? undefined : isOpen ? 'true' : 'false'} onClick=${() => setOpen(isOpen ? null : x.id)}
+        title=${x.kind === 'you' ? '' : 'مسیر در طول دوره'}>
+        <span class="rk-n num">${rank ? num(rank) : ''}</span>
+        <span class="rk-name" title=${x.note || ''}><span>${x.name}</span>${x.kind === 'market' && x.own !== null && Math.abs(x.own - x.ret) >= 0.005 ? html`<span class="xs muted">خود بازار <span class="ltr">${pct(x.own, { digits: 0 })}</span></span>` : x.note ? html`<span class="xs muted">${x.note}</span>` : ''}</span>
+        <span class=${'rk-bar' + (both ? ' both' : '')} dir="ltr"><b style=${`${!both ? 'left:0' : x.ret >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${Math.max(1, w)}%`}></b></span>
+        <span class=${'rk-ret num ltr ' + (x.ret >= 0 ? 'pos' : 'neg')}>${pct(x.ret, { digits: 1 })}</span>
+        <span class="rk-diff xs">${x.kind === 'you' ? html`<b>همین سبد</b>` : Math.abs(x.diff) < 1 ? 'برابر' : html`<span class=${x.diff >= 0 ? 'pos' : 'neg'}><${Money} v=${Math.abs(x.diff)} s=${s} compact /></span> ${x.diff >= 0 ? 'جلوتری' : 'عقب‌تری'}`}</span>
+      </button>
+      ${isOpen && (pts ? html`<${TwoLines} pts=${pts} s=${s} name=${x.name} />` : html`<div class="xs muted rk-chart">برای این دوره روزهای کافی ذخیره نشده.</div>`)}
+    </div>`;
+  })}</div>`;
+}
 function Performance({ st, pf, s }) {
   const [days, setDays] = useState(90);
+  const [costs, setCosts] = useState(false);
   const dep = I.defaultDepositPct(st);
   const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep, s.inflationPct]);
+  const ser = useRankSeries(days);
+  const R = useMemo(() => (r ? I.ranking(st, days, { depositPct: dep, pf, series: ser, costs }) : null), [r, ser, costs, s.targets]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
-    <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="از دستیار بپرس" />`}
+    <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} سبد من بین بازارها چه رتبه‌ای داشت؟ با طلا، سکه، دلار، سپرده، تورم و ترکیب هدف خودم مقایسه کن و بگو کجا جلو یا عقب بودم و چرا.`} label="از دستیار بپرس" />`}
     <${Seg} value=${days} onChange=${setDays} options=${[[30, 'ماه'], [90, '۳ ماه'], [365, 'سال'], [0, 'از ابتدا']]} /></div></div>`;
   if (!r) return html`<div class="card" id="perf">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این مقایسه تاریخچه ارزش دارایی لازم است. نمودار از امروز خودکار پر می‌شود، یا همین حالا یک سال گذشته را بازسازی کن.</div><${BackfillButton} st=${st} /></div></div>`;
-  const ahead = r.bench.filter((b) => b.diff >= 0).map((b) => b.short);
-  const behind = r.bench.filter((b) => b.diff < 0).map((b) => b.short);
-  const verdict = !r.bench.length ? '' : !behind.length ? `از نگه‌داشتن ${ahead.join('، ')} جلوتری.` : !ahead.length ? `از نگه‌داشتن ${behind.join('، ')} عقب‌تری.` : `از ${ahead.join(' و ')} جلوتری، ولی از ${behind.join(' و ')} عقب‌تری.`;
-  const max = Math.max(1, ...r.bench.map((b) => Math.abs(b.diff)));
   const short = r.partial;
+  // the one-line answer: rank, inflation, the simple mix, your own target
+  const parts = R ? [
+    R.aboveInflation === null ? null : R.aboveInflation ? 'بالای تورم' : 'زیر تورم',
+    R.vsBalanced === null ? null : R.vsBalanced >= 0 ? 'جلوتر از سبد ساده' : 'عقب‌تر از سبد ساده',
+    R.vsTarget === null ? null : Math.abs(R.vsTarget) < 0.005 ? 'هم‌پای هدف خودت' : `${num(Math.abs(R.vsTarget) * 100, 1)} واحد درصد ${R.vsTarget > 0 ? 'جلوتر از' : 'عقب‌تر از'} هدف خودت`,
+  ].filter(Boolean) : [];
+  const verdict = R ? `رتبه ${num(R.rank)} از ${num(R.of)}${parts.length ? `: ${parts.join('، ')}` : ''}.` : '';
   return html`<div class="card" id="perf">${head}
     <div class="perf">
       <div>
@@ -67,27 +129,33 @@ function Performance({ st, pf, s }) {
               { t: 'پول اضافه یا کم‌شده', v: r.moneyIn, k: 'money', sign: true },
               { t: 'اثر قیمت بازار و سود', v: r.market, k: 'money', sign: true, strong: true },
               { t: 'ارزش خالص الان', v: r.end, k: 'money', total: true },
-              ...r.bench.map((b) => ({ t: b.name, v: b.end, k: 'money' })),
+              ...(R ? R.rows.filter((x) => x.kind !== 'you').map((x) => ({ t: `اگر در ${x.name} بود`, v: x.end, k: 'money' })) : []),
             ],
-            notes: ['در هر گزینه، همان پول‌هایی که در طول دوره اضافه یا کم شده، در همان روز وارد آن گزینه می‌شود؛ پس مقایسه منصفانه است.', `سپرده با سود ${num(r.depositPct, 1)}٪ سالانه حساب شده که سود هر ماهش دوباره سپرده می‌شود.`, ...(r.est ? ['مبنای اول دوره بازسازی‌شده (تخمینی) است؛ دارایی‌هایی که تاریخ خریدشان ثبت نشده، از اول دوره فرض شده‌اند.'] : [])],
+            notes: ['در هر ردیف، همان پول اول دوره و همان پول‌هایی که وسط دوره اضافه یا کم شد، در همان روزها وارد آن بازار فرض می‌شود؛ بازده هر ردیف هم مثل بازده تو حساب می‌شود، پس ترتیب جدول همان ترتیب «الان چقدر داشتی» است.',
+              'ترکیب هدف و سبد ساده، روز ورود هر پول به همان نسبت خریده و نگه داشته می‌شوند (بدون متوازن‌سازی).',
+              `سپرده با سود ${num(r.depositPct, 1)}٪ سالانه حساب شده که سود هر ماهش دوباره سپرده می‌شود.`, ...(r.est ? ['مبنای اول دوره بازسازی‌شده (تخمینی) است؛ دارایی‌هایی که تاریخ خریدشان ثبت نشده، از اول دوره فرض شده‌اند.'] : [])],
           })} />
         </div>
+        ${R?.why && html`<div class="small rk-why"><${Icon} n="info" cls="sm" /><span><b>چرا از ${R.why.above.name} عقب‌تری؟</b> ${R.why.text}</span></div>`}
         ${(r.retAssets !== null || r.real) && html`<div class="perf-two">
           ${r.retAssets !== null && html`
             <div class="pcell"><span class="n row" style="gap:2px">بازده سرمایه خودت${T('equity')}</span><span class="v"><${Delta} p=${r.ret} showAbs=${false} /></span><span class="xs muted">بعد از کم کردن بدهی</span></div>
             <div class="pcell"><span class="n">بازده دارایی‌ها</span><span class="v"><${Delta} p=${r.retAssets} showAbs=${false} /></span><span class="xs muted">بدهی در آن نیست</span></div>`}
           ${r.real && html`<div class="pcell"><span class="n row" style="gap:2px">بعد از تورم${T('real')}</span><span class="v"><${Delta} p=${r.real.ret} showAbs=${false} /></span><span class="xs muted">تورم این مدت حدود <span class="ltr">${pct(r.real.inflation, { sign: false })}</span></span></div>`}
         </div>
-        ${r.retAssets !== null && r.ret !== null && Math.abs(r.ret - r.retAssets) >= 0.005 && html`<div class="xs muted" style="margin-top:6px">${Math.abs(r.ret) > Math.abs(r.retAssets) ? 'بدهی اثر تغییر دارایی‌ها را روی سرمایه خودت بزرگ‌تر کرده' : 'سود بدهی بخشی از بازده دارایی‌ها را خورده'}؛ مقایسه با طلا، دلار و سپرده روی سرمایه خودت است.</div>`}`}
+        ${r.retAssets !== null && r.ret !== null && Math.abs(r.ret - r.retAssets) >= 0.005 && html`<div class="xs muted" style="margin-top:6px">${Math.abs(r.ret) > Math.abs(r.retAssets) ? 'بدهی اثر تغییر دارایی‌ها را روی سرمایه خودت بزرگ‌تر کرده' : 'سود بدهی بخشی از بازده دارایی‌ها را خورده'}؛ جدول رده‌بندی روی سرمایه خودت است.</div>`}`}
       </div>
-      <div class="bench">${r.bench.map((b) => html`<div class="brow">
-        <span class="bn"><span class="small">${b.name}</span><span class="xs muted">${b.short} در این مدت <span class="ltr">${pct(b.ret)}</span></span></span>
-        <div class="wt" dir="ltr"><b style=${`${b.diff >= 0 ? 'left:50%' : `left:${50 - Math.abs(b.diff) / max * 50}%`};width:${Math.max(1.5, Math.abs(b.diff) / max * 50)}%;background:${b.diff >= 0 ? 'var(--pos)' : 'var(--neg)'}`}></b></div>
-        <span class=${'bv ' + (b.diff >= 0 ? 'pos' : 'neg')}><${Money} v=${Math.abs(b.diff)} s=${s} compact /> ${b.diff >= 0 ? 'جلوتری' : 'عقب‌تری'}</span></div>`)}
+      <div class="bench">
+        <div class="rk-h xs muted"><span>رتبه بین بازارها${T('rank')}</span><span>با همان پول و همان روزها</span></div>
+        ${R ? html`<${Ranking} R=${R} st=${st} s=${s} />` : ''}
+        ${ser.loading ? html`<div class="xs muted" style="margin-top:6px">در حال گرفتن سابقه نقره، بیت‌کوین و شاخص بورس…</div>`
+          : R?.missing?.length ? html`<div class="xs muted" style="margin-top:6px">سابقه ${R.missing.join('، ')} دریافت نشد؛ ${R.missing.length > 1 ? 'این ردیف‌ها' : 'این ردیف'} فعلاً در جدول نیست.</div>` : ''}
+        <label class="row xs muted rk-cost"><input type="checkbox" checked=${costs} onChange=${(e) => setCosts(e.target.checked)} />با هزینه معمول خرید و فروش${T('rankCost')}</label>
         <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه${T('deposit')}:
           <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>
         <div class="row xs muted" style="gap:6px;margin-top:4px">تورم سالانه برای مقایسه${T('inflation')}:
           <input class="input num-in" style="width:64px;height:28px" aria-label="تورم سالانه" value=${num(r.inflationPct, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 500) act.setSettings({ inflationPct: v }); }} />٪</div>
+        <div class="xs muted" style="margin-top:8px">حساب گذشته است، نه توصیه؛ بهترین بازار گذشته دلیلی برای خرید امروز نیست.</div>
       </div>
     </div>
   </div>`;

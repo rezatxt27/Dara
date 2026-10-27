@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   privacy: false,           // blur amounts
   refreshMinutes: 30,
   badge: 'change',          // change | gold | usd | none
-  notify: { interest: true, flows: true, alerts: true, stale: true, radar: true, radarMine: true },
+  notify: { interest: true, flows: true, alerts: true, stale: true, radar: true, radarMine: true, monthly: false },
   remindDays: { price: 7, balance: 30 },
   providers: { tgju: true, tsetmc: true, fipiran: true, nobitex: true },
   targets: {},              // categoryId -> target share (0..1)

@@ -79,6 +79,14 @@ export const TOOL_STEPS = {
 export function makeTools(ctx) {
   const P = () => ctx.privacy === 'percent';
   const st = () => ctx.getState();
+  // silver, bitcoin and the stock index over the period (cached by the worker), for «رتبه بین بازارها»
+  const rankSeries = async (days) => {
+    if (!ctx.history) return {};
+    const span = days && days <= 365 ? 400 : 1500;
+    const refs = { silver: { provider: 'tgju', key: 'silver_999' }, btc: { provider: 'nobitex', key: 'btc' }, index: { provider: 'tsetmc', key: 'index' } };
+    const got = await Promise.all(Object.entries(refs).map(async ([k, ref]) => { try { const r = await ctx.history(ref, span); return [k, r?.points?.length ? r.points : null]; } catch { return [k, null]; } }));
+    return Object.fromEntries(got);
+  };
   const money = (rial, net) => (P() ? { share_pct: net ? pct(rial / Math.abs(net)) : null } : { amount: disp(rial, st().settings) });
   const pfOf = () => { const s = st(); return E.portfolio(s.assets, s.quotes, s.settings); };
   return [
@@ -244,7 +252,7 @@ export function makeTools(ctx) {
       name: 'compare_performance',
       description: '«واقعاً پولدارتر شدم؟»: بازده واقعی پرتفوی (بعد از کنار گذاشتن واریز، برداشت و ثبت‌های دستی) در مقایسه با نگه‌داشتن همان پول در طلای ۱۸، دلار یا سپرده.',
       schema: { type: 'object', properties: { period: { type: 'string', enum: ['month', 'quarter', 'year', 'all'] }, deposit_rate_pct: { type: 'number' } }, required: ['period'] },
-      run: ({ period = 'quarter', deposit_rate_pct } = {}) => {
+      run: async ({ period = 'quarter', deposit_rate_pct } = {}) => {
         const s = st(); const pf = pfOf();
         const days = { month: 30, quarter: 90, year: 365, all: 0 }[period] ?? 90;
         const r = I.performance(s, days, { depositPct: deposit_rate_pct || I.defaultDepositPct(s), pf });
@@ -253,6 +261,9 @@ export function makeTools(ctx) {
         return { from: fmtJ(r.from), days: r.days, estimated_base: r.est || undefined, market_return_pct: r.ret !== null ? pct(r.ret) : null, annualized_pct: r.annual !== null ? pct(r.annual) : null,
           ...(r.retAssets !== null ? { market_return_pct_is: 'on own capital (net worth); debts make it larger in both directions', return_on_assets_pct: pct(r.retAssets) } : {}),
           ...(r.real ? { after_inflation_pct: pct(r.real.ret), inflation_assumed_annual_pct: r.inflationPct } : {}),
+          // the same money on the same days in each market, your own target mix, a simple mix and the inflation line
+          ...((R) => (R ? { ranking: { rank: R.rank, of: R.of, rows: R.rows.map((x) => ({ name: x.name, kind: x.kind, return_same_money_pct: pct(x.ret), market_own_change_pct: x.own !== undefined && x.own !== null ? pct(x.own) : undefined, ...(x.kind === 'you' ? {} : { you_are_ahead_by: m(x.diff) }) })),
+            why_behind: R.why?.text } } : {}))(I.ranking(s, days, { depositPct: deposit_rate_pct || I.defaultDepositPct(s), pf, series: await rankSeries(days) })),
           market_gain: m(r.market), money_added_or_removed: m(r.moneyIn),
           alternatives: r.bench.map((b) => ({ name: b.name, alternative_return_pct: pct(b.ret), you_are_ahead_by: m(b.diff) })) };
       },

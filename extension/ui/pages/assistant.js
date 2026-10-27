@@ -140,7 +140,7 @@ export function AssistantPage({ st, s, route }) {
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
     try {
-      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); }, onLink: (l) => { if (links.length < 2 && /^#\//.test(l.href)) links.push(l); }, pbData: () => send('pbData'),
+      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); }, onLink: (l) => { if (links.length < 2 && /^#\//.test(l.href)) links.push(l); }, pbData: () => send('pbData'), history: (ref, days) => send('history', { ref, days }),
         bubbleStats: async (keys) => { const r = await send('bubbleStats', { keys, days: 90 }); return r?.ok ? r.stats : {}; } });
       // in «only percentages» mode, earlier answers written with full amounts are not sent again
       const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));

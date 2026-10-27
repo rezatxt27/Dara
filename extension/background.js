@@ -7,7 +7,7 @@ import * as AI from './lib/ai.js';
 import * as A from './lib/assistant.js';
 import * as I from './lib/insights.js';
 import { CORE_REFS, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY } from './lib/catalog.js';
-import { todayIso, addDaysIso, isoFromDate } from './lib/jalali.js';
+import { todayIso, addDaysIso, isoFromDate, isoToJ } from './lib/jalali.js';
 import { money, pct, uid } from './lib/format.js';
 import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
@@ -269,6 +269,26 @@ function notify(id, title, message) {
   try {
     chrome.notifications.create(id, { type: 'basic', iconUrl: 'icons/icon128.png', title, message, priority: 0 });
   } catch (e) { /* ignore */ }
+}
+
+/**
+ * «خلاصهٔ ماه»: in the first days of a Jalali month, once — last month's return against inflation, the simple mix and the
+ * owner's own target (markets from Dara's own records only; off unless the owner turned it on).
+ */
+async function monthlySummary() {
+  const st = await store.load('assets', 'quotes', 'settings', 'snapshots', 'events', 'meta');
+  if (!st.settings.notify?.monthly) return;
+  const j = isoToJ(todayIso());
+  const key = `${j.jy}-${j.jm}`;
+  if (j.jd > 3 || st.meta.monthly === key) return;
+  const R = I.ranking(st, 30, { depositPct: I.defaultDepositPct(st) });
+  await store.update('meta', (m) => ({ ...m, monthly: key }));
+  if (!R) return;
+  const bits = [`بازده سبدت در ۳۰ روز گذشته ${pct(R.you.ret)} بود`,
+    R.aboveInflation === null ? null : R.aboveInflation ? 'بالای تورم' : 'زیر تورم',
+    R.vsBalanced === null ? null : R.vsBalanced >= 0 ? 'جلوتر از سبد ساده' : 'عقب‌تر از سبد ساده',
+    R.vsTarget === null ? null : `${R.vsTarget >= 0 ? 'جلوتر از' : 'عقب‌تر از'} هدف خودت`].filter(Boolean);
+  notify('dara-monthly', 'خلاصهٔ ماه', `${bits.join('، ')}. جدول کامل در «تحلیل و سناریو».`);
 }
 
 async function notifyAutomations(events, assets, settings) {
@@ -721,6 +741,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'refresh' || a.name === 'daily') runCycle({ reason: a.name });
+  if (a.name === 'daily') monthlySummary().catch(() => {});
   if (a.name === 'selfupdate') checkSelfUpdate().catch(() => {});
   if (a.name === 'backup') runBackup().catch(() => {});
   if (a.name === 'radar') runRadar().catch(() => {});

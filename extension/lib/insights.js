@@ -6,8 +6,8 @@
 //  - critiqueFacts: percent-only facts for the AI portfolio review
 import * as E from './engine.js';
 import { CAT, EXPOSURES, LIQUIDITY, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from './catalog.js';
-import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
-import { num, qName } from './format.js';
+import { todayIso, daysBetween, isoFromDate, fmtJ, addDaysIso } from './jalali.js';
+import { num, pct, qName } from './format.js';
 
 /**
  * Money moved during an attribution's period, dated (per asset; internal transfers cancel out), and the modified-Dietz
@@ -263,6 +263,164 @@ export function performance(st, days, { depositPct = 25, inflationPct = defaultI
     // with debts, the return on your own money (ret) is the return on assets made larger (or smaller) by what was borrowed
     retAssets: onAssets?.ret ?? null, marketAssets: onAssets?.market ?? null, debt: onAssets ? onAssets.debt : 0,
     inflationPct, real };
+}
+
+/* ------------------------------------------------------------ ranking ------------------------------------------------------------ */
+/** A price on a day from a daily series [[iso, price]] (ascending): the last one on/before the day, else the first after;
+ *  on or after today, `now` when given (the live price). */
+export function priceOn(points, now = null, today = todayIso()) {
+  const pts = (points || []).filter((p) => p && p[1] > 0);
+  // a live price far from the series' last one is in another unit (or wrong): the series is trusted
+  if (now > 0 && pts.length && Math.abs(now / pts[pts.length - 1][1] - 1) > 0.3) now = null;
+  // a day before the series begins has no price (a week's slack: holidays, a first record a few days late) — a market
+  // measured over a shorter stretch than the others would be ranked unfairly
+  const first = pts.length ? addDaysIso(pts[0][0], -7) : null;
+  return (iso) => {
+    if (now > 0 && iso >= today) return now;
+    if (!pts.length || iso < first) return null;
+    let lo = 0, hi = pts.length - 1, ans = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (pts[m][0] <= iso) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return ans >= 0 ? pts[ans][1] : pts[0][1];
+  };
+}
+/** Round-trip cost of buying and later selling, roughly (percent): what holding that market really costs. */
+export const MARKET_COST = { gold: 1.5, coin: 2, usd: 1, silver: 3, btc: 0.5, index: 1.25, deposit: 0 };
+const MARKETS = [
+  ['silver', 'نقره'], ['gold', 'طلای ۱۸ عیار'], ['coin', 'سکه امامی'], ['usd', 'دلار آزاد'], ['btc', 'بیت‌کوین'], ['index', 'شاخص کل بورس'], ['deposit', 'سپرده'],
+];
+/** Which market stands for each kind of asset in a mix (property and «other» have none). */
+const CAT_MARKET = { gold: 'gold', gold_online: 'gold', fx: 'usd', crypto: 'btc', stock: 'index', private: 'index', metal: 'silver', bank: 'deposit', fixed: 'deposit', receivable: 'deposit' };
+const EXP_MARKET = { rial: 'deposit', gold: 'gold', fx: 'usd', equity: 'index', crypto: 'btc', commodity: 'silver' };
+// Rial in an account without day-count interest: it earned nothing, unlike a deposit
+const isCash = (a) => a.category === 'bank' && !(a.mode === 'balance' && a.interest?.on);
+
+/**
+ * «رتبهٔ تو بین بازارها»: the same money, on the same days, in each market — against what your mix really did.
+ * Each row's return is measured like yours (the market's effect over the money that was there, Dietz), so the order by
+ * return is the order by what you'd have now. Rows: markets (silver, 18k gold, coin, dollar, bitcoin, total index,
+ * deposit at your rate), mixes (your own target mix; a simple third gold / dollar / deposit) and the inflation line.
+ * series: { silver, btc, index } daily [[iso, price]] fetched by the page (a market without one is left out, and said so).
+ * costs: take each market's usual round-trip cost off. Returns null without history.
+ */
+export function ranking(st, days, { depositPct = 25, inflationPct = defaultInflationPct(st), series = {}, costs = false, today = todayIso(), pf = null } = {}) {
+  pf = pf || E.portfolio(st.assets, st.quotes, st.settings);
+  const P = periodOf(st, days, pf, today);
+  if (!P) return null;
+  const { at, entries, T, keys } = P;
+  const moneyIn = at.total - at.market;
+  const denom = dietzBase(at, today, entries);
+  if (!(denom > 0)) return null;
+  const rates = E.denomRates(st.quotes);
+  // the same for Dara's own records: a rate only from the first saved day that has it
+  const firstWith = (field) => keys.find((k) => st.snapshots[k]?.[field] > 0) || null;
+  const snapRate = (field, now) => { const f0 = firstWith(field); return (iso) => (iso >= today && now > 0 ? now : !f0 || iso < addDaysIso(f0, -7) ? null : rateAt(st.snapshots, keys, field, iso)); };
+  const liveQ = (id) => { const q = st.quotes?.[id]; return q?.price > 0 && !q.error ? q.price : null; };
+  const price = {
+    gold: rates.gold ? snapRate('gold', rates.gold) : null,
+    coin: rates.coin ? snapRate('coin', rates.coin) : null,
+    usd: rates.usd ? snapRate('usd', rates.usd) : null,
+    silver: series.silver?.length ? priceOn(series.silver, liveQ('tgju:silver_999'), today) : null,
+    btc: series.btc?.length ? priceOn(series.btc, liveQ('nobitex:btc'), today) : null,
+    index: series.index?.length ? priceOn(series.index, null, today) : null,
+  };
+  const growth = {};
+  for (const [k, f] of Object.entries(price)) if (f) growth[k] = (a, b) => { const pa = f(a), pb = f(b); return pa > 0 && pb > 0 ? pb / pa : null; };
+  growth.deposit = (a, b) => depositGrowth(depositPct, Math.max(0, daysBetween(a, b)) * 12 / 365);
+  const inflG = (a, b) => Math.pow(1 + inflationPct / 100, Math.max(0, daysBetween(a, b)) / 365);
+  // a mix bought on each day money came in and held (not rebalanced)
+  const mixGrowth = (w) => (a, b) => { let s = 0; for (const [k, x] of Object.entries(w)) { const g = growth[k]?.(a, b); if (g === null || g === undefined) return null; s += x * g; } return s; };
+  // the same money: the start on the first day, each later amount on its own day
+  const replay = (g, to = today) => {
+    let end = at.base * (g(at.from, to) ?? NaN);
+    for (const e of entries) if (e.date <= to) end += e.amount * (g(e.date, to) ?? NaN);
+    return end;
+  };
+  const rows = [];
+  const add = (id, name, g, kind, extra = {}) => {
+    const end0 = replay(g);
+    if (!isFinite(end0)) return false;
+    const cost = costs && extra.cost ? extra.cost / 100 : 0;
+    const end = end0 - Math.max(0, end0) * cost;
+    const own = g(at.from, today);
+    rows.push({ id, name, kind, end, ret: (end - at.base - moneyIn) / denom, own: own !== null ? own - 1 : null, diff: pf.net - end, g, ...extra });
+    return true;
+  };
+  // a market without a history, or whose history doesn't reach back to the start, is named instead of ranked
+  const missing = [];
+  for (const [id, name] of MARKETS) if (!growth[id] || !add(id, id === 'deposit' ? `سپرده ${num(depositPct, 1)}٪` : name, growth[id], 'market', { cost: MARKET_COST[id] })) { missing.push(name); delete growth[id]; }
+  // the owner's own target mix (kinds with no market — property, «other» — left out and said)
+  const tg = Object.entries(st.settings?.targets || {}).filter(([k, v]) => +v > 0 && CAT[k] && !CAT[k].liability);
+  let targetNote = null;
+  if (tg.length) {
+    const tw = {}; let left = 0; const sum = tg.reduce((s, [, v]) => s + +v, 0);
+    for (const [k, v] of tg) { const m = CAT_MARKET[k]; if (m && growth[m]) tw[m] = (tw[m] || 0) + +v / sum; else left += +v / sum; }
+    const tot = Object.values(tw).reduce((s, x) => s + x, 0);
+    if (tot > 0.5) {
+      for (const k of Object.keys(tw)) tw[k] /= tot;
+      if (left > 0.005) targetNote = `${pct(left, { sign: false })} از هدف (ملک، سایر یا بازاری که سابقه‌اش نیامد) در این حساب نیامد`;
+      add('target', 'ترکیب هدف خودت', mixGrowth(tw), 'mix', { weights: tw, note: targetNote, cost: Object.entries(tw).reduce((s, [k, x]) => s + x * (MARKET_COST[k] || 0), 0) });
+    }
+  }
+  if (growth.gold && growth.usd) add('balanced', 'سبد ساده', mixGrowth({ gold: 1 / 3, usd: 1 / 3, deposit: 1 / 3 }), 'mix', { note: 'یک‌سوم طلا، یک‌سوم دلار، یک‌سوم سپرده', cost: (MARKET_COST.gold + MARKET_COST.usd) / 3 });
+  add('inflation', `تورم (${num(inflationPct, 1)}٪ سالانه)`, inflG, 'line');
+  const you = { id: 'you', name: 'سبد تو', kind: 'you', end: pf.net, ret: at.market / denom, diff: 0 };
+  rows.push(you);
+  rows.sort((a, b) => b.ret - a.ret);
+  const ranked = rows.filter((r) => r.kind !== 'line');
+  const rank = ranked.findIndex((r) => r.kind === 'you') + 1;
+  const infl = rows.find((r) => r.id === 'inflation');
+  const target = rows.find((r) => r.id === 'target');
+  const balanced = rows.find((r) => r.id === 'balanced');
+  // why a market above you did better: the kind you held most of that grew least against it (at the start). The
+  // nearest market above that this can explain (the one right above may be the very market you held — a deposit
+  // above Rial cash says nothing new)
+  let why = null;
+  const byId = Object.fromEntries((st.assets || []).map((a) => [a.id, a]));
+  const ex = {}; let g0 = 0;
+  for (const [id, v] of Object.entries(at.snap?.v || {})) { const a = byId[id]; if (!a || !(v > 0) || E.isLiability(a)) continue; const e = isCash(a) ? 'cash' : E.exposureOf(a); ex[e] = (ex[e] || 0) + v; g0 += v; }
+  for (const above of ranked.slice(0, rank - 1).reverse().filter((r) => r.kind === 'market' && r.own !== null)) {
+    let best = null;
+    for (const [e, v] of Object.entries(ex)) {
+      const m = EXP_MARKET[e]; const r = e === 'cash' ? { id: 'cash', name: 'حساب بانکی', own: 0 } : m ? rows.find((x) => x.id === m) : null;
+      if (!r || r.id === above.id || r.own === null) continue;
+      const cost = (v / g0) * (above.own - r.own);
+      if (cost > 0 && (!best || cost > best.cost)) best = { exposure: e, share: v / g0, market: r, cost };
+    }
+    if (best && best.share >= 0.1) {
+      const sh = pct(best.share, { sign: false, digits: 0 });
+      const text = best.exposure === 'cash' ? `در شروع دوره ${sh} سبدت نقد در حساب بانکی بود که سودی نگرفت؛ در این مدت ${above.name} ${pct(above.own, { digits: 0 })} تغییر کرد.`
+        : `در شروع دوره ${sh} سبدت ${EXPOSURES[best.exposure]?.name || best.exposure} بود؛ در این مدت ${best.market.name} ${pct(best.market.own, { digits: 0 })} تغییر کرد و ${above.name} ${pct(above.own, { digits: 0 })}.`;
+      why = { above, ...best, text }; break;
+    }
+  }
+  return { from: at.from, days: T, partial: P.partial, est: at.est, rows, rank, of: ranked.length, you, missing, why,
+    aboveInflation: infl ? you.ret >= infl.ret : null, vsTarget: target ? you.ret - target.ret : null, vsBalanced: balanced ? you.ret - balanced.ret : null,
+    ahead: ranked.filter((r) => r.kind !== 'you' && r.ret < you.ret).length, behind: rank - 1, costs, depositPct, inflationPct, at, entries };
+}
+
+/** A row's path through the period, next to yours: your net worth on each saved day, and that same money in the market. */
+export function rankingPath(R, rowId, st, today = todayIso()) {
+  const row = R?.rows.find((r) => r.id === rowId); if (!row?.g) return null;
+  const days = Object.keys(st.snapshots || {}).sort().filter((k) => k >= R.from && k < today);
+  const pts = [...days, today].map((d) => {
+    let alt = R.at.base * (row.g(R.from, d) ?? NaN);
+    for (const e of R.entries) if (e.date <= d) alt += e.amount * (row.g(e.date, d) ?? NaN);
+    const mine = d === today ? R.you.end : st.snapshots[d]?.t;
+    return { date: d, mine, alt };
+  }).filter((p) => isFinite(p.mine) && isFinite(p.alt));
+  return pts.length >= 2 ? pts : null;
+}
+
+/** The period a comparison is measured over: its attribution, the money moved (dated), its length. */
+function periodOf(st, days, pf, today) {
+  const keys = Object.keys(st.snapshots || {}).sort();
+  if (!keys.length) return null;
+  const whole = Math.max(1, daysBetween(keys[0], today));
+  const partial = !!days && days > whole;
+  const span = !days || partial ? whole : days;
+  const at = E.attribution(st.assets, st.quotes, st.settings, st.snapshots, st.events, span, today, pf);
+  if (!at) return null;
+  return { at, keys, partial, T: Math.max(1, daysBetween(at.from, today)), entries: flowEntries(at, today) };
 }
 
 /**

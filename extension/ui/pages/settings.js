@@ -508,7 +508,7 @@ export function SettingsPage({ st, pf, s }) {
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="bell" cls="sm" />اعلان‌ها</h3></div>
-      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند'], ['radar', 'مورد تازه در قاعده‌های رادار'], ['radarMine', 'هشدار رادار دربارهٔ دارایی‌های خودم']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
+      ${[['interest', 'واریز سود ماهانه'], ['flows', 'اعمال جریان‌های تکراری'], ['alerts', 'هشدارهای قیمت و حباب'], ['stale', 'یادآوری دارایی‌هایی که مدتی به‌روز نشده‌اند'], ['radar', 'مورد تازه در قاعده‌های رادار'], ['radarMine', 'هشدار رادار دربارهٔ دارایی‌های خودم'], ['monthly', 'خلاصهٔ ماه: سبدت در برابر تورم، سبد ساده و هدف خودت']].map(([k, t]) => html`<${Row} t=${t}><${Toggle} title=${t} on=${s.notify[k]} onChange=${(v) => set({ notify: { ...s.notify, [k]: v } })} /></${Row}>`)}
     </div>
 
     <div class="card"><div class="card-h"><h3><${Icon} n="radar" cls="sm" />رادار فرصت‌ها</h3></div>

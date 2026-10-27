@@ -955,3 +955,26 @@ svg.rot { transform: rotate(180deg); }
 .as-att > .grow { flex: 1 1 160px; min-width: 140px; }
 @media (max-width: 640px) { .as-net b { font-size: 22px; } .as-sum { padding: 14px; } }
 @media (max-width: 640px) { .as-legend { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -14px; padding-inline: 14px; } .as-legend::-webkit-scrollbar { display: none; } .as-li { flex: none; } }
+
+/* ---------- numbers that tell where they come from (1.25) ---------- */
+.hero .chg .chg-link { color: inherit; text-decoration: none; border-radius: 6px; }
+.hero .chg .chg-link:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.hero .chg .late-dot { color: #FFD46B; font-weight: 800; margin-inline-start: 2px; }
+.late-note { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-2); background: var(--warn-bg, rgba(214,140,0,.10)); border-radius: 10px; padding: 7px 10px; }
+.late-note .i { color: var(--warn); flex: none; margin-top: 3px; }
+.as-base { margin-top: 1px; }
+.as-late { display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); margin-bottom: 8px; }
+.as-late .i { color: var(--warn); flex: none; margin-top: 3px; }
+.perf-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 12px; }
+.net-rial { display: flex; flex-direction: column; gap: 3px; margin-top: 14px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.net-rial b { font-size: 14px; }
+.tgt-tbl tr.off td { color: var(--muted); }
+.tgt-tbl tr.off .ava { opacity: .6; }
+.tgt-sum { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); font-size: 13px; line-height: 1.9; }
+.hl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hl i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.hl.ok i { background: var(--pos); }
+.hl.warn i { background: var(--warn); }
+.hl.down { color: var(--neg); }
+.hl.down i { background: var(--neg); }
+.hl .hl-err { color: var(--muted); max-width: 46ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

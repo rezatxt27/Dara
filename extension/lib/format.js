@@ -141,6 +141,8 @@ export function timeHM(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** «name» — once, even when the name already has guillemets in it (صندوق «زر»). */
+export const qName = (n) => (/[«»]/.test(String(n || '')) ? String(n) : `«${n || '—'}»`);
 export const uid = (p = '') => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
 /* ---------------- Persian number words (for safe money entry) ---------------- */

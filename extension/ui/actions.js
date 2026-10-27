@@ -18,6 +18,9 @@ function costAfter(a, q0, q1, quotes) {
   if (q1 > q0) return cb + (q1 - q0) * (E.unitPriceOf(a, quotes).price || 0);
   return q0 > 0 ? cb * (q1 / q0) : cb;
 }
+/** A hand-typed price corrected: logged with the value it moved (old quantity × price change), so «امروز» and the
+ *  return leave it out like any other correction. Undo puts the old price back. */
+const priceFixChange = (id, x, p1) => { const dp = p1 - num(x.price?.value); return { assetId: id, field: 'price.value', delta: dp, value: (E.isLiability(x) ? -1 : 1) * dp * num(x.quantity), fix: true }; };
 const maxIso = (a, b) => (!a ? b || null : !b ? a : a > b ? a : b);
 const num = (v) => +v || 0;
 /** Let the worker apply anything that fell due (installment, payout, salary) before a manual change to the same assets. */
@@ -152,7 +155,10 @@ export const act = {
             // the cost follows the quantity unless the user set the cost themselves
             if (num(rec.costBasis) === num(x.costBasis)) rec.costBasis = costAfter(x, num(x.quantity), num(rec.quantity), quotes);
           }
-          if (changes.length) ev = { id: uid('e'), kind: 'edit', date: today, at: now, title: `ویرایش «${rec.name}»`, amount: 0, changes };
+          // a hand-typed price corrected (a typo, a wrong unit): a correction of the record, not a market move
+          const fix = opts.priceFix && rec.mode === 'units' && x.mode === 'units' && rec.price?.source !== 'market' && x.price?.source !== 'market' && num(rec.price?.value) !== num(x.price?.value);
+          if (fix) changes.push(priceFixChange(rec.id, x, num(rec.price.value)));
+          if (changes.length) ev = { id: uid('e'), kind: 'edit', date: today, at: now, title: `${fix && changes.length === 1 ? 'اصلاح قیمت' : 'ویرایش'} «${rec.name}»`, amount: 0, changes };
         }
         list[i] = rec;
       } else {
@@ -209,8 +215,9 @@ export const act = {
         changes.push({ assetId: id, field: 'quantity', delta: dq, value: qtyValue(x, dq, st.quotes) });
         if (!('costBasis' in patch)) next.costBasis = costAfter(x, num(x.quantity), num(patch.quantity), st.quotes);
       }
-      if ('price' in patch && x.mode === 'units' && num(patch.price?.value) !== num(x.price?.value)) changes.push({ assetId: id, field: 'price.value', delta: num(patch.price.value) - num(x.price?.value) });
-      if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `ویرایش «${x.name}»`, amount: 0, changes };
+      const fix = !!opts.priceFix && x.price?.source !== 'market';
+      if ('price' in patch && x.mode === 'units' && num(patch.price?.value) !== num(x.price?.value)) changes.push(fix ? priceFixChange(id, x, num(patch.price.value)) : { assetId: id, field: 'price.value', delta: num(patch.price.value) - num(x.price?.value) });
+      if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `${fix && changes.length === 1 ? 'اصلاح قیمت' : 'ویرایش'} «${x.name}»`, amount: 0, changes };
       Object.assign(x, next);
       logEv(st, ev);
     });

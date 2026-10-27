@@ -251,6 +251,8 @@ export function makeTools(ctx) {
         if (!r) return { error: 'تاریخچه کافی نیست؛ «بازسازی تاریخچه» را در صفحه اصلی اجرا کن' };
         const m = (v) => (P() ? { pct_of_net: pct(v / Math.abs(r.end || 1)) } : { amount: disp(v, s.settings) });
         return { from: fmtJ(r.from), days: r.days, estimated_base: r.est || undefined, market_return_pct: r.ret !== null ? pct(r.ret) : null, annualized_pct: r.annual !== null ? pct(r.annual) : null,
+          ...(r.retAssets !== null ? { market_return_pct_is: 'on own capital (net worth); debts make it larger in both directions', return_on_assets_pct: pct(r.retAssets) } : {}),
+          ...(r.real ? { after_inflation_pct: pct(r.real.ret), inflation_assumed_annual_pct: r.inflationPct } : {}),
           market_gain: m(r.market), money_added_or_removed: m(r.moneyIn),
           alternatives: r.bench.map((b) => ({ name: b.name, alternative_return_pct: pct(b.ret), you_are_ahead_by: m(b.diff) })) };
       },

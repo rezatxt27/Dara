@@ -14,6 +14,10 @@ import { CAT_GUIDE, CAT_SWITCH, modeDesc, L as LT, T, methodTip } from '../tips.
 
 const QUICK = { metal: { label: 'انتخاب سریع فلز', list: METAL_PRESETS }, gold: { label: 'چه چیزی داری؟', list: GOLD_PRESETS } };
 
+/** «چرا تغییر کرد؟» under a changed price or value: a market move, money moved, or a mistake put right. */
+const WhyChanged = ({ value, onChange, options, hint }) => html`<div class="field why-chg"><label>چرا تغییر کرد؟</label><${Seg} value=${value} onChange=${onChange} options=${options} />
+  <span class="hint">${hint}</span></div>`;
+
 const MODES = [
   { id: 'units', t: 'تعداد × قیمت', icon: 'coin' },
   { id: 'balance', t: 'مانده / ارزش کل', icon: 'bank' },
@@ -195,6 +199,10 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const appraised = E.APPRAISED.has(a.category) && a.mode === 'balance' && asset?.mode === 'balance';
   const balChanged = !isNew && a.balance !== null && +a.balance !== +asset?.balance;
   const [why, setWhy] = useState('reval');
+  // a hand-typed unit price changed: a new price (a market move) or an earlier mistake put right (not a gain or loss)
+  const priceChanged = !isNew && a.mode === 'units' && asset?.mode === 'units' && a.price.source === 'manual' && asset?.price?.source !== 'market'
+    && +a.price.value > 0 && +a.price.value !== +asset?.price?.value && +a.quantity > 0;
+  const [priceWhy, setPriceWhy] = useState('market');
   const L = a.loan || blankLoan();
   const plan = a.mode === 'loan' && +L.amount > 0 && +L.months >= 1 ? E.loanState({ ...L, installment: +L.installment || null }, todayIso()) : null;
   const liabCat = !!cat.liability;
@@ -300,6 +308,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
     const ev = await act.saveAsset(out, {
       orig: asset || null,
       ...(appraised && balChanged ? { reval: why === 'reval' } : {}),
+      ...(priceChanged && priceWhy === 'fix' ? { priceFix: true } : {}),
       ...(isNew && fundOk && fund.on && fundAcc && fundAmt > 0 ? { fund: { accountId: fundAcc.id, amount: fundAmt } } : {}),
     });
     doneToast(isNew ? `«${out.name}» اضافه شد${out.mode === 'rate' || out.mode === 'loan' || out.interest?.on ? '؛ سود و قسط‌هایش در «خودکارسازی» دیده می‌شود' : ''}` : 'ذخیره شد', ev);
@@ -368,15 +377,17 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
             <${NumField} label="اختلاف با قیمت مرجع (٪)" value=${a.price.adjustPct} onInput=${(v) => setPrice({ adjustPct: v || 0 })} hint="مثلاً کارمزد فروش پلتفرم −۱٫۵" />
             <${NumField} label="ضریب" value=${a.price.factor} onInput=${(v) => setPrice({ factor: v || 1 })} hint="مثلاً عیار ۷۵۰÷۷۴۰ یا وزن هر سکه" />
           </div>`}`
-        : html`<${MoneyField} label="قیمت هر واحد" rial=${a.price.value} onRial=${(v) => setPrice({ value: v })} s=${s} prev=${asset?.price?.value} err=${E_('price')} />`}
+        : html`<${MoneyField} label="قیمت هر واحد" rial=${a.price.value} onRial=${(v) => setPrice({ value: v })} s=${s} prev=${asset?.price?.value} err=${E_('price')} />
+          ${priceChanged && html`<${WhyChanged} value=${priceWhy} onChange=${setPriceWhy} options=${[['market', 'قیمتش عوض شد'], ['fix', 'اشتباه قبلی را درست کردم']]}
+            hint=${priceWhy === 'fix' ? 'اصلاح ثبت می‌شود: در «امروز»، «چرا تغییر کرد» و بازده، سود یا زیان حساب نمی‌شود.' : 'سود یا زیان بازار حساب می‌شود.'} />`}`}
         ${E_('src') && html`<span class="err-msg">${a.category === 'gold' ? 'نوع سکه یا طلا را از بالا انتخاب کن (یا «ورود دستی»)' : 'از فهرست بالا یک منبع قیمت انتخاب کن (یا «ورود دستی»)'}</span>`}
       `}
 
       ${a.mode === 'balance' && html`
         <${MoneyField} label=${LT(cat.liability ? 'مانده بدهی' : a.category === 'bank' ? 'مانده حساب' : 'ارزش امروز', 'balance')} rial=${a.balance} onRial=${(v) => set({ balance: v })} s=${s} autoFocus=${!isNew} prev=${asset?.balance} err=${E_('balance')}
           hint=${a.interest?.on ? 'همان عددی که اپ بانک نشان می‌دهد؛ سودِ جمع‌شده این ماه جدا حساب و روز واریز اضافه می‌شود' : ''} />
-        ${appraised && balChanged && html`<div class="field"><label>چرا ارزش تغییر کرد؟</label><${Seg} value=${why} onChange=${setWhy} options=${[['reval', 'قیمت بازارش عوض شد'], ['money', 'بخشی را خریدم یا فروختم']]} />
-          <span class="hint">${why === 'reval' ? 'سود یا زیان بازار حساب می‌شود.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'}</span></div>`}
+        ${appraised && balChanged && html`<${WhyChanged} value=${why} onChange=${setWhy} options=${[['reval', 'قیمت بازارش عوض شد'], ['money', 'خریدم یا فروختم'], ['fix', 'اشتباه بود']]}
+          hint=${why === 'reval' ? 'سود یا زیان بازار حساب می‌شود.' : why === 'fix' ? 'اصلاح ثبت می‌شود، نه سود یا زیان.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'} />`}
         ${!cat.liability && (a.category === 'bank' || asset?.interest?.on) && html`<div class="sec" style="padding:12px;gap:10px;background:var(--surface-2)">
           <div class="row between"><div><div class="sb small">${LT('این حساب سود ماهانه می‌دهد', 'interest')}</div><div class="xs muted">برای حساب کوتاه‌مدت: سود هر روز روی مانده همان روز حساب و ماهی یک بار به همین حساب واریز می‌شود.</div></div>
             <${Toggle} title="این حساب سود ماهانه می‌دهد" on=${!!a.interest?.on} onChange=${(v) => set({ interest: v ? { basis: 365, payDay: 0, ...(a.interest || {}), on: true, since: todayIso(), sinceMs: Date.now(), lastAccrual: null, accrued: 0 } : { ...(a.interest || {}), on: false } })} /></div>

@@ -5,7 +5,7 @@ import { T as H } from './tips.js';
 import * as E from '../lib/engine.js';
 import * as BB from '../lib/bubble.js';
 import { CAT, EXPOSURES } from '../lib/catalog.js';
-import { ago, timeHM, signed } from '../lib/format.js';
+import { ago, timeHM, signed, qName } from '../lib/format.js';
 import { todayIso } from '../lib/jalali.js';
 import { act } from './actions.js';
 import { AssetsPage } from './pages/assets.js';
@@ -77,7 +77,9 @@ function Hero({ st, pf, s }) {
         <${Seg} value=${denom} onChange=${(v) => act.setSettings({ denom: v })} options=${[['money', s.currency === 'rial' ? 'ریال' : 'تومان'], ['usd', 'دلار'], ['gold', 'طلا'], ['coin', 'سکه']]} /></div>
       <div class="big num"><${DenomText} v=${net} denom=${denom} s=${s} /></div>
       ${denom === 'money' && s.compact && html`<div class="full num"><${Money} v=${pf.net} s=${s} /></div>`}
-      <div class="chg">${periods.map(([t, d], i) => html`<div class="box"><span class="row" style="gap:2px">${t}<${Explain} light s=${s} title=${`تغییر ${t} از کجا آمد؟`} get=${() => I.explainChange(st, [1, 7, 30][i], pf)} /></span><b title="تغییر قیمت‌ها و سودها؛ پولی که اضافه، برداشت یا جابه‌جا کردی جدا حساب شده"><${Delta} p=${d?.pct} showAbs=${false} /></b>
+      <div class="chg">${periods.map(([t, d], i) => html`<div class="box" title=${[I.baseLabel(d, todayIso(), timeHM), d?.late?.length ? `${qName(d.late[0].name)}${d.late.length > 1 ? ' و …' : ''} قیمت قدیمی داشت؛ تغییرش از ${fmtJ(d.late.map((x) => x.since).sort()[0], 'dm')} اینجا آمده` : ''].filter(Boolean).join(' · ')}>
+        <span class="row" style="gap:2px">${t}${d?.late?.length ? html`<span class="late-dot" aria-label="شامل تغییر چند روز">•</span>` : ''}<${Explain} light s=${s} title=${`تغییر ${t} از کجا آمد؟`} get=${() => I.explainChange(st, [1, 7, 30][i], pf)} /></span>
+        ${i === 0 ? html`<a class="chg-link" href="#/assets?sort=change" title="ریز تغییر هر دارایی در صفحه دارایی‌ها"><b><${Delta} p=${d?.pct} showAbs=${false} /></b></a>` : html`<b title="تغییر قیمت‌ها و سودها؛ پولی که اضافه، برداشت یا جابه‌جا کردی جدا حساب شده"><${Delta} p=${d?.pct} showAbs=${false} /></b>`}
         <span class="xs" style="opacity:.75">${d && isFinite(d.abs) ? html`<${Money} v=${d.abs} s=${s} compact sign unit=${false} />` : '—'}</span>
         ${d && Math.abs(d.moved) >= 10 && html`<span class="xs" style="opacity:.6" title="تغییر کل ارزش خالص، با پول جدید و جابه‌جایی‌ها">کل <${Money} v=${d.total} s=${s} compact sign unit=${false} /></span>`}</div>`)}</div>
       <div class="equiv" style="margin-top:auto;padding-top:14px">
@@ -105,7 +107,10 @@ function WhyChanged({ st, pf, s, open }) {
   if (!at) return html`<div class="card">${head}<div class="empty small" style="padding:18px"><div style="margin-bottom:10px">برای این دوره هنوز عکس‌فوری ذخیره نشده.</div><${BackfillButton} st=${st} /></div></div>`;
   // lead with the same number as the «امروز» chip: what prices and interest did (money moved or recorded is told apart)
   // (when the last saved day is older than the period — the browser was closed — say from when, honestly)
-  const lead = at.from < E.addDaysIso(todayIso(), -days) ? `از ${fmtJ(at.from, 'dm')} تا حالا` : label;
+  // and from what time: «امروز» is measured from the last record of the day before, not from midnight
+  const baseAt = !at.est && at.snap?.at > 0 ? at.snap.at : null;
+  const lead = at.from < E.addDaysIso(todayIso(), -days) ? `از ${fmtJ(at.from, 'dm')}${baseAt ? ` ساعت ${timeHM(baseAt)}` : ''} تا حالا` : days === 1 && baseAt ? `از دیروز ساعت ${timeHM(baseAt)} تا حالا` : label;
+  const late = at.rows.filter((r) => r.since && Math.abs(r.market) >= 1);
   const ret = at.market; const up = ret >= 0;
   const moved = at.total - at.market;
   const drivers = at.cats.filter((c) => Math.abs(c.price) >= 1).sort((a, b) => Math.abs(b.price) - Math.abs(a.price));
@@ -125,6 +130,7 @@ function WhyChanged({ st, pf, s, open }) {
           ${top ? html` بیشترین اثر قیمت را <b>${top.name}</b> داشت (<${Money} v=${top.price} s=${s} compact sign />).` : ''}
           ${Math.abs(moved) >= 10 ? html`<div class="small muted" style="margin-top:4px">جدا از آن، <${Money} v=${moved} s=${s} compact sign /> پول جابه‌جا یا ثبت شد؛ پس کل ارزش خالص <${Money} v=${at.total} s=${s} compact sign /> عوض شد.</div>` : ''}
           ${showSplit ? html`<div class="small muted" style="margin-top:4px" title="تقریبی: قیمت سکه، انس و دلار در لحظه‌های کمی متفاوت ثبت می‌شوند">از این، سکه‌هایت <${Money} v=${split.total} s=${s} compact sign />: <${Money} v=${split.gold} s=${s} compact sign /> از قیمت طلا و <b class=${split.bubble >= 0 ? 'pos' : 'neg'}><${Money} v=${split.bubble} s=${s} compact sign /></b> از ${split.bubble >= 0 ? 'بزرگ‌تر شدن' : 'کوچک‌تر شدن'} حباب.</div>` : ''}
+          ${late.length > 0 && html`<div class="small late-note" style="margin-top:4px"><${Icon} n="info" cls="sm" /><span>${late.slice(0, 2).map((r) => qName(r.asset?.name)).join(' و ')}${late.length > 2 ? ` و ${num(late.length - 2)} مورد دیگر` : ''} در آن ساعت قیمت قدیمی داشت؛ تغییرش از ${fmtJ(late.map((r) => r.since).sort()[0], 'dm')} یک‌جا در این عدد آمده: <${Money} v=${late.reduce((x, r) => x + r.market, 0)} s=${s} compact sign />.</span></div>`}
           ${at.est ? html`<div class="xs muted">مبنای مقایسه بازسازی‌شده است.</div>` : ''}</div>
         <div class="split">
           <div class="pcell"><span class="n">تغییر قیمت${H('wPrice')}</span><span class=${'v ' + (at.price >= 0 ? 'pos' : 'neg')}><${Money} v=${at.price} s=${s} compact sign /></span></div>
@@ -168,7 +174,8 @@ function Kpis({ st, pf, s, open }) {
           ${inf.target !== null && html`<span class="tgt" style=${`right:${inf.target * 100}%`} title="هدف از «تخصیص هدف» در تحلیل"></span><span class="tgl" style=${`right:${inf.target * 100}%`}>هدف ${p0(inf.target)}</span>`}
         </div>
         <div class="klg">${inf.parts.slice(0, 4).map((x) => html`<span><i style=${`background:${x.color}`}></i>${x.name} ${p0(x.share)}</span>`)}</div>
-        <div class="kf">${inf.unprotected.length ? html`<b>بی‌محافظ ${p0(inf.unprotectedShare)}:</b> ${inf.unprotected.slice(0, 2).map((u) => `${u.name} ${p0(u.share)}`).join(' و ')}${inf.unprotected.length > 2 ? ' و …' : ''}` : 'همه دارایی‌ها در برابر تورم محافظت شده‌اند'}</div>`
+        <div class="kf">${inf.unprotected.length ? html`<b>بی‌محافظ ${p0(inf.unprotectedShare)}:</b> ${inf.unprotected.slice(0, 2).map((u) => `${u.name} ${p0(u.share)}`).join(' و ')}${inf.unprotected.length > 2 ? ' و …' : ''}` : 'همه دارایی‌ها در برابر تورم محافظت شده‌اند'}</div>
+        ${inf.rialDebt >= 1 && html`<div class="kf" title="تورم ارزش واقعی بدهی ریالی را هم کم می‌کند؛ آنچه واقعاً در معرض تورم است، ریالی است که داری منهای ریالی که بدهکاری"><b>ریال خالص:</b> <${Money} v=${inf.netRial} s=${s} compact sign=${inf.netRial < 0} /><span class="muted">؛ ${inf.netRial > 0 ? 'بعد از کم کردن بدهی ریالی' : 'بدهی ریالی از دارایی ریالی بیشتر است'}</span></div>`}`
       : html`<span class="v">—</span>`}
     </div>
 

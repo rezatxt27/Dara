@@ -770,11 +770,15 @@ export function makeSnapshot(pf, quotes, extra = {}) {
   const cats = {}; for (const c of pf.cats) cats[c.id] = Math.round(c.value);
   // an asset whose price hasn't arrived yet is left out, so its first real value counts as its start, not as a gain
   const v = {}; for (const r of pf.rows) if (!(r.status === 'error' && !r.value)) v[r.asset.id] = Math.round(r.signedValue);
+  // assets valued at an old price (the source was down, the symbol halted): when the price comes back, the move of all
+  // those days lands in one day — kept here so «امروز» can say from when it is
+  const old = {}; for (const r of pf.rows) if (r.status === 'delayed' && r.at > 0 && v[r.asset.id] !== undefined) old[r.asset.id] = r.at;
   const d = denomRates(quotes);
   // the global gold price (ounce × free-market dollar, Rial): later splits a coin's move into gold and bubble
   const gx = !extra.est && quotes['tgju:ons']?.price > 0 && quotes['tgju:price_dollar_rl']?.price > 0 && !quotes['tgju:ons'].error && !quotes['tgju:price_dollar_rl'].error
     ? Math.round(quotes['tgju:ons'].price * quotes['tgju:price_dollar_rl'].price) : undefined;
-  return { t: Math.round(pf.net), g: Math.round(pf.gross), l: Math.round(pf.debt), usd: d.usd, gold: d.gold, coin: d.coin, ...(gx ? { gx } : {}), cats, v, at: Date.now(), ...extra };
+  return { t: Math.round(pf.net), g: Math.round(pf.gross), l: Math.round(pf.debt), usd: d.usd, gold: d.gold, coin: d.coin, ...(gx ? { gx } : {}), cats, v,
+    ...(Object.keys(old).length && !extra.est ? { old } : {}), at: Date.now(), ...extra };
 }
 /**
  * Keep the last `keepDays` daily snapshots. The per-asset values (`v`, most of their size) are kept only for the last
@@ -943,6 +947,9 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
     const a = r.asset;
     const earns = a && (a.mode === 'rate' || a.mode === 'loan' || (a.mode === 'balance' && a.interest?.on));
     r.interest = earns ? r.market : 0; r.price = r.market - r.interest;
+    // the starting point used an old price: this move covers the days since that price, not just the period
+    const o = s.snap.old?.[r.id];
+    if (o > 0 && !r.removed) { const d0 = isoFromDate(new Date(o)); if (d0 < s.date) r.since = d0; }
   }
   const total = pf.net - s.snap.t;
   const editsTotal = rows.reduce((x, r) => x + r.edit, 0);
@@ -1125,15 +1132,55 @@ export function checkAlerts(alerts, quotes, now = Date.now()) {
   return fired;
 }
 
-export function rebalance(pf, targets = {}) {
-  const sum = Object.values(targets).reduce((s, x) => s + (+x || 0), 0);
-  const ids = new Set([...Object.keys(targets).filter((k) => +targets[k] > 0), ...pf.cats.filter((c) => !c.liability).map((c) => c.id)]);
-  return [...ids].map((id) => {
-    const c = CAT[id]; const cur = pf.cats.find((x) => x.id === id)?.value || 0;
-    const t = +targets[id] || 0; const tv = pf.gross * t;
-    return { id, cat: c, current: cur, currentShare: pf.gross ? cur / pf.gross : 0, target: t, targetValue: tv, diff: tv - cur, hasTarget: t > 0, sumTargets: sum };
-  }).filter((r) => r.cat && !r.cat.liability).sort((a, b) => b.current - a.current);
+/** Two names for the same thing: online gold and gold you hold. With a target on one and none on the other, they count as one. */
+export const TARGET_TWIN = { gold_online: 'gold', gold: 'gold_online' };
+
+/**
+ * The target mix as a plan («تخصیص هدف»). targets: { categoryId: fraction } — only categories with a target above 0 take
+ * part. What is held in categories without a target stays out (neither bought nor sold), so the plan moves money only
+ * between the targeted kinds: the buys equal the sells. Targets that don't add up to 100% are read in proportion to
+ * each other. A held kind without a target whose twin has one (online gold ↔ gold) counts with its twin.
+ * Returns { rows, base, gross, sumTargets, scaled, outside, outsideValue, buy, sell, needNew }:
+ *  rows: [{ id, cat, ids, current, currentShare (of base), target (normalised), targetRaw, targetValue, diff, hasTarget,
+ *          twin? (the merged kind), mergedInto? (this kind counts under another row), share (of all assets) }]
+ *  needNew: new money that would reach the targets by buying only.
+ */
+export function rebalancePlan(pf, targets = {}) {
+  const tgt = (id) => (CAT[id] && !CAT[id].liability && +targets[id] > 0 ? +targets[id] : 0);
+  const held = (id) => Math.max(0, pf.cats.find((x) => x.id === id)?.value || 0);
+  const ids = [...new Set([...Object.keys(targets).filter((k) => tgt(k) > 0), ...pf.cats.filter((c) => !c.liability).map((c) => c.id)])].filter((id) => CAT[id] && !CAT[id].liability);
+  const sumRaw = ids.reduce((s, id) => s + tgt(id), 0);
+  const into = {}; // untargeted kind → the targeted twin it counts under
+  for (const id of ids) { const tw = TARGET_TWIN[id]; if (!tgt(id) && tw && tgt(tw)) into[id] = tw; }
+  const rows = []; let base = 0, outsideValue = 0; const outside = [];
+  for (const id of ids) {
+    if (into[id]) continue;
+    const t = tgt(id);
+    const twin = Object.keys(into).find((k) => into[k] === id) || null;
+    const cur = held(id) + (twin ? held(twin) : 0);
+    if (t > 0) base += cur;
+    else if (cur > 0) { outsideValue += cur; outside.push(id); }
+    rows.push({ id, cat: CAT[id], ids: twin ? [id, twin] : [id], current: cur, targetRaw: t, hasTarget: t > 0, twin });
+  }
+  for (const r of rows) {
+    r.target = r.hasTarget && sumRaw > 0 ? r.targetRaw / sumRaw : 0;
+    r.currentShare = r.hasTarget ? (base ? r.current / base : 0) : pf.gross ? r.current / pf.gross : 0;
+    r.targetValue = r.hasTarget ? base * r.target : r.current;
+    r.diff = r.targetValue - r.current;
+    r.share = pf.gross ? r.current / pf.gross : 0;
+  }
+  for (const [id, tw] of Object.entries(into)) rows.push({ id, cat: CAT[id], ids: [id], current: held(id), currentShare: 0, share: pf.gross ? held(id) / pf.gross : 0, target: 0, targetRaw: 0, targetValue: held(id), diff: 0, hasTarget: false, mergedInto: tw });
+  const on = rows.filter((r) => r.hasTarget);
+  const buy = on.reduce((s, r) => s + Math.max(0, r.diff), 0), sell = on.reduce((s, r) => s + Math.max(0, -r.diff), 0);
+  // reach the targets by buying only: the total grows until no kind is above its target
+  const total = on.length ? Math.max(base, ...on.map((r) => r.current / r.target)) : base;
+  const needNew = Math.max(0, total - base);
+  rows.sort((a, b) => (a.mergedInto ? 1 : 0) - (b.mergedInto ? 1 : 0) || (b.hasTarget ? 1 : 0) - (a.hasTarget ? 1 : 0) || b.current - a.current);
+  // targets set, but nothing held in any of those kinds yet: nothing to move — new money is the way in
+  const empty = on.length > 0 && base < 1;
+  return { rows, base, gross: pf.gross, sumTargets: sumRaw, scaled: on.length > 0 && Math.abs(sumRaw - 1) > 0.005, outside, outsideValue, buy, sell, needNew, empty };
 }
+export function rebalance(pf, targets = {}) { return rebalancePlan(pf, targets).rows; }
 
 export function collectRefs(assets, alerts = [], extra = []) {
   const refs = [...extra];

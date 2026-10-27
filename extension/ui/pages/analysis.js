@@ -15,6 +15,9 @@ import * as CMP from '../../lib/compare.js';
 /* Plain-language help for each section (for people new to these ideas). */
 const TIPS = {
   perf: ['واقعاً پولدارتر شدم؟', 'نشان می‌دهد دارایی‌هایت در این دوره واقعاً چقدر رشد کرده‌اند. پولی که خودت اضافه کرده‌ای (مثل حقوق یا واریز) سود حساب نمی‌شود. بعد همان پول، با همان تاریخ‌ها، در سه حالت دیگر هم حساب می‌شود: اگر همه را طلا، دلار یا سپرده نگه داشته بودی. «جلوتری» یعنی ترکیب دارایی‌هایت از آن حالت بهتر عمل کرده.', 'اگر طلا در این مدت ۲۰٪ رشد کرده و دارایی تو ۱۵٪، از «طلا» عقب‌تری.'],
+  equity: ['بازده سرمایه خودت و بازده دارایی‌ها', 'وقتی بدهی داری، دو عدد فرق می‌کنند. «بازده دارایی‌ها» می‌گوید خود دارایی‌هایت چقدر رشد کردند. «بازده سرمایه خودت» همان سود را بر پولی که مال خودت است (دارایی منهای بدهی) تقسیم می‌کند؛ پس با بدهی بزرگ‌تر دیده می‌شود، هم در سود و هم در زیان. سود بدهی هم از آن کم شده.', 'دارایی ۱۰۰۰ با بدهی ۵۰۰: اگر دارایی‌ها ۱۰٪ رشد کنند (۱۰۰)، سرمایه خودت (۵۰۰) ۲۰٪ رشد کرده.'],
+  real: ['بازده بعد از تورم', 'بازده‌ای که پس از کم کردن تورم همان مدت می‌ماند: قدرت خریدت واقعاً چقدر بیشتر یا کمتر شد. اگر منفی است، پولت از تورم عقب مانده، حتی اگر عدد تومانی‌اش بالا رفته باشد.'],
+  inflation: ['تورم سالانه برای مقایسه', 'پیش‌فرض، تورم سالانه (میانگین ۱۲ ماهه) شهریور ۱۴۰۵ مرکز آمار است: ۷۳٫۶٪. می‌توانی عدد دیگری بگذاری، مثلاً تورمی که خودت در هزینه‌هایت حس می‌کنی.'],
   deposit: ['نرخ سپرده برای مقایسه', 'سود سالانه‌ای که بانک یا صندوق درآمد ثابت واقعاً به تو می‌دهد. برای مقایسه منصفانه، نرخی را بگذار که خودت به آن دسترسی داری. این نرخ مثل سپرده بانکی حساب می‌شود: سود هر ماه دوباره سپرده می‌شود؛ پس سپرده ۲۵٪ در عمل حدود ۲۸٪ در سال رشد می‌کند. بازدهی که صندوق‌ها «سالانه مؤثر» اعلام می‌کنند از قبل همین را دارد.'],
   scenario: ['شبیه‌ساز سناریو', 'می‌بینی اگر قیمت‌ها تغییر کنند، ارزش دارایی‌هایت چه می‌شود. لغزنده‌ها را جابه‌جا کن، یکی از سناریوهای آماده را بزن، یا اتفاق را با یک جمله بنویس تا فرض‌ها خودکار ساخته شوند. این پیش‌بینی نیست؛ فقط حساب «اگر … شود» است.', '«اگر دلار ۳۰٪ گران شود» را امتحان کن و ببین کدام دارایی‌ها بیشتر اثر می‌گیرند.'],
   terms: ['بر حسب دلار و طلا', 'ارزش دارایی‌هایت را با دلار یا طلا می‌سنجد، نه تومان. اگر ارزش تومانی بالا برود ولی این عدد منفی شود، یعنی با پولت دلار یا طلای کمتری می‌توانی بخری؛ قدرت خریدت کم شده.'],
@@ -23,7 +26,7 @@ const TIPS = {
   liquidity: ['چقدر زود نقد می‌شود؟', 'چقدر از دارایی‌ات را می‌توانی زود به پول نقد تبدیل کنی. بالا: در چند روز (حساب بانکی، ارز، صندوق بورسی). متوسط: چند هفته. پایین: ملک، سهام خصوصی و طلب‌ها. بهتر است همیشه بخشی برای شرایط اضطراری در ردیف «بالا» باشد.'],
   custody: ['تمرکز بر اساس محل نگهداری', 'دارایی‌هایت کجا یا نزد چه کسی است: بانک، کارگزاری، پلتفرم آنلاین یا خانه. اگر بخش بزرگی فقط در یک جا باشد، هر مشکلی در همان یک جا روی کل دارایی‌ات اثر می‌گذارد.'],
   risks: ['ریسک‌ها و نکات', 'هشدارهای خودکار درباره ترکیب دارایی‌هایت، مثل تمرکز زیاد روی یک دارایی یا کمبود پول در دسترس. «نگاه دستیار» با هوش مصنوعی سه نقطه ضعف را به زبان ساده توضیح می‌دهد؛ برای این کار فقط درصدها فرستاده می‌شود، نه مبلغ‌ها.'],
-  targets: ['تخصیص هدف', 'مشخص کن دوست داری هر دسته چند درصد از دارایی‌ات باشد (بهتر است جمع ۱۰۰٪ شود). جدول نشان می‌دهد الان کجا بیشتر یا کمتر از هدفی و تقریباً چقدر باید خرید یا فروخت تا به هدف برسی. این فقط حساب ریاضی بر اساس هدف خودت است، نه توصیه.', 'اگر هدف طلا ۳۰٪ باشد و الان ۲۰٪ داری، ستون آخر می‌گوید چقدر طلا کم داری.'],
+  targets: ['تخصیص هدف', 'مشخص کن دوست داری هر دسته چند درصد از دارایی‌ات باشد (بهتر است جمع ۱۰۰٪ شود). جدول نشان می‌دهد الان کجا بیشتر یا کمتر از هدفی و چقدر باید بین همین دسته‌ها جابه‌جا کنی؛ جمع خریدها همیشه برابر جمع فروش‌هاست. دسته‌ای که هدف ندارد دست نمی‌خورد و در سهم‌ها نمی‌آید. اگر فقط برای «طلا و سکه» یا فقط برای «طلای آنلاین» هدف بگذاری، هر دو با هم حساب می‌شوند. این فقط حساب ریاضی بر اساس هدف خودت است، نه توصیه.', 'اگر هدف طلا ۳۰٪ باشد و الان ۲۰٪ داری، ستون آخر می‌گوید چقدر طلا کم داری.'],
   newmoney: ['پول جدید را کجا بگذارم؟', 'اگر پول تازه‌ای داری (مثلاً پاداش یا پس‌انداز)، این بخش آن را طوری بین دسته‌ها پخش می‌کند که به درصدهای هدفت نزدیک‌تر شوی، بدون اینکه چیزی را بفروشی.'],
   breakeven: ['از کِی سود می‌دهد؟ (نقطه سربه‌سر)', 'سرمایه‌گذاری در یک دارایی را با گذاشتن همان پول در سپرده مقایسه می‌کند. نشان می‌دهد قیمت آن دارایی تا پایان مدت باید به چه عددی برسد تا سودش از سپرده بیشتر شود. اگر فکر می‌کنی به آن قیمت نمی‌رسد، سپرده انتخاب امن‌تری است.', 'سپرده ۲۵٪ در ۶ ماه حدود ۱۳٪ سود می‌دهد؛ پس طلا باید بیش از ۱۳٪ (به‌علاوه کارمزد) گران شود.'],
   fee: ['کارمزد خرید و فروش', 'هزینه‌ای که در خرید و فروش از دست می‌دهی: اختلاف قیمت خرید و فروش، کارمزد پلتفرم یا اجرت طلا. برای طلای آب‌شده معمولاً کم و برای طلای زینتی بیشتر است.'],
@@ -40,7 +43,7 @@ const parsePct = (v) => parseFloat(String(v).replace(/[۰-۹]/g, (c) => '۰۱۲�
 function Performance({ st, pf, s }) {
   const [days, setDays] = useState(90);
   const dep = I.defaultDepositPct(st);
-  const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep]);
+  const r = useMemo(() => I.performance(st, days, { depositPct: dep, pf }), [st.assets, st.quotes, st.snapshots, st.events, pf, days, dep, s.inflationPct]);
   const periodName = { 30: 'یک ماه گذشته', 90: 'سه ماه گذشته', 365: 'یک سال گذشته', 0: 'از ابتدای ثبت' }[days];
   const head = html`<div class="card-h"><h3><${Icon} n="chart" cls="sm" />واقعاً پولدارتر شدم؟${T('perf')}</h3>
     <div class="row" style="gap:8px">${r && html`<${AskBtn} q=${`در ${periodName} واقعاً پولدارتر شدم؟ بازده من را با طلا، دلار و سپرده مقایسه کن و بگو کجا جلو یا عقب بودم.`} label="از دستیار بپرس" />`}
@@ -55,7 +58,7 @@ function Performance({ st, pf, s }) {
     <div class="perf">
       <div>
         <div class="lead">${verdict ? html`<b>${verdict}</b><br />` : ''}
-          در ${short ? `${num(r.days)} روزی که تاریخچه هست` : periodName} بازار برایت <b class=${r.market >= 0 ? 'pos' : 'neg'}><${Money} v=${r.market} s=${s} compact sign /></b>${r.ret !== null ? html` (<span class="ltr">${pct(r.ret)}</span>)` : ''} ساخت${r.annual !== null ? html`، معادل سالانه <span class="ltr">${pct(r.annual)}</span>` : ''}.
+          در ${short ? `${num(r.days)} روزی که تاریخچه هست` : periodName} بازار برایت <b class=${r.market >= 0 ? 'pos' : 'neg'}><${Money} v=${r.market} s=${s} compact sign /></b>${r.ret !== null ? html` (<span class="ltr">${pct(r.ret)}</span>${r.retAssets !== null ? ' از سرمایه خودت' : ''})` : ''} ساخت${r.annual !== null ? html`، معادل سالانه <span class="ltr">${pct(r.annual)}</span>` : ''}.
           ${Math.abs(r.moneyIn) >= 1 ? html` <span class="muted">${r.moneyIn > 0 ? 'جدا از آن' : 'و'} <${Money} v=${Math.abs(r.moneyIn)} s=${s} compact /> ${r.moneyIn > 0 ? 'پول تازه (حقوق، واریز یا دارایی تازه‌ثبت‌شده) اضافه شد که بازده حساب نمی‌شود' : 'برداشت یا حذف شد که زیان حساب نمی‌شود'}.</span>` : ''}
           <${Explain} s=${s} title="این مقایسه چطور حساب می‌شود؟" get=${() => ({
             formula: 'بازده = اثر قیمت بازار ÷ (ارزش اول دوره + پول‌هایی که در طول دوره اضافه شد، به نسبت مدتی که بوده)',
@@ -69,6 +72,13 @@ function Performance({ st, pf, s }) {
             notes: ['در هر گزینه، همان پول‌هایی که در طول دوره اضافه یا کم شده، در همان روز وارد آن گزینه می‌شود؛ پس مقایسه منصفانه است.', `سپرده با سود ${num(r.depositPct, 1)}٪ سالانه حساب شده که سود هر ماهش دوباره سپرده می‌شود.`, ...(r.est ? ['مبنای اول دوره بازسازی‌شده (تخمینی) است؛ دارایی‌هایی که تاریخ خریدشان ثبت نشده، از اول دوره فرض شده‌اند.'] : [])],
           })} />
         </div>
+        ${(r.retAssets !== null || r.real) && html`<div class="perf-two">
+          ${r.retAssets !== null && html`
+            <div class="pcell"><span class="n row" style="gap:2px">بازده سرمایه خودت${T('equity')}</span><span class="v"><${Delta} p=${r.ret} showAbs=${false} /></span><span class="xs muted">بعد از کم کردن بدهی</span></div>
+            <div class="pcell"><span class="n">بازده دارایی‌ها</span><span class="v"><${Delta} p=${r.retAssets} showAbs=${false} /></span><span class="xs muted">بدهی در آن نیست</span></div>`}
+          ${r.real && html`<div class="pcell"><span class="n row" style="gap:2px">بعد از تورم${T('real')}</span><span class="v"><${Delta} p=${r.real.ret} showAbs=${false} /></span><span class="xs muted">تورم این مدت حدود <span class="ltr">${pct(r.real.inflation, { sign: false })}</span></span></div>`}
+        </div>
+        ${r.retAssets !== null && r.ret !== null && Math.abs(r.ret - r.retAssets) >= 0.005 && html`<div class="xs muted" style="margin-top:6px">${Math.abs(r.ret) > Math.abs(r.retAssets) ? 'بدهی اثر تغییر دارایی‌ها را روی سرمایه خودت بزرگ‌تر کرده' : 'سود بدهی بخشی از بازده دارایی‌ها را خورده'}؛ مقایسه با طلا، دلار و سپرده روی سرمایه خودت است.</div>`}`}
       </div>
       <div class="bench">${r.bench.map((b) => html`<div class="brow">
         <span class="bn"><span class="small">${b.name}</span><span class="xs muted">${b.short} در این مدت <span class="ltr">${pct(b.ret)}</span></span></span>
@@ -76,6 +86,8 @@ function Performance({ st, pf, s }) {
         <span class=${'bv ' + (b.diff >= 0 ? 'pos' : 'neg')}><${Money} v=${Math.abs(b.diff)} s=${s} compact /> ${b.diff >= 0 ? 'جلوتری' : 'عقب‌تری'}</span></div>`)}
         <div class="row xs muted" style="gap:6px;margin-top:4px">نرخ سپرده برای مقایسه${T('deposit')}:
           <input class="input num-in" style="width:64px;height:28px" value=${num(dep, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 200) act.setSettings({ depositPct: v }); }} />٪</div>
+        <div class="row xs muted" style="gap:6px;margin-top:4px">تورم سالانه برای مقایسه${T('inflation')}:
+          <input class="input num-in" style="width:64px;height:28px" aria-label="تورم سالانه" value=${num(r.inflationPct, 1)} onChange=${(e) => { const v = parsePct(e.target.value); if (v > 0 && v < 500) act.setSettings({ inflationPct: v }); }} />٪</div>
       </div>
     </div>
   </div>`;
@@ -290,25 +302,40 @@ function Bars({ items, s, total }) {
 
 function Targets({ pf, s, assets }) {
   const [t, setT] = useState(() => ({ ...s.targets }));
-  const rows = E.rebalance(pf, Object.fromEntries(Object.entries(t).map(([k, v]) => [k, (+v || 0) / 100])));
+  const plan = E.rebalancePlan(pf, Object.fromEntries(Object.entries(t).map(([k, v]) => [k, (+v || 0) / 100])));
+  const rows = plan.rows;
+  const on = rows.filter((r) => r.hasTarget);
   const sum = Object.values(t).reduce((x, v) => x + (+v || 0), 0);
   const dirty = JSON.stringify(t) !== JSON.stringify(s.targets);
-  const fill = () => { const n = {}; for (const r of rows) n[r.id] = Math.round(r.currentShare * 1000) / 10; setT(n); };
+  // every kind held, at its share of all assets (online gold and gold apart, so each gets its own number)
+  const fill = () => { const n = {}; for (const c of pf.cats) if (!c.liability && c.value > 0) n[c.id] = Math.round(c.share * 1000) / 10; setT(n); };
+  const nameOf = (r) => (r.twin ? `${r.cat.short} + ${CAT[r.twin].short}` : r.cat.short);
+  const tol = Math.max(1, plan.base * 0.005);
+  const moves = on.some((r) => Math.abs(r.diff) >= tol);
+  const outsideNames = plan.outside.map((id) => CAT[id]?.short).filter(Boolean);
   return html`<div class="card" id="targets">
     <div class="card-h"><h3><${Icon} n="target" cls="sm" />تخصیص هدف و پیشنهاد متوازن‌سازی${T('targets')}</h3>
       <div class="row"><button class="btn sm ghost" onClick=${fill}>پر کردن با وضعیت فعلی</button>
         <button class="btn sm primary" disabled=${!dirty} onClick=${() => { act.setSettings({ targets: t }); toast('اهداف ذخیره شد'); }}>ذخیره اهداف</button></div></div>
-    <div class=${'callout' + (Math.abs(sum - 100) > 0.5 && sum > 0 ? ' warn' : '')} style="margin-bottom:12px"><${Icon} n="info" cls="sm" /><div>
-      درصد هدف هر دسته را وارد کن (مثلاً ۳۰٪ طلا، ۲۰٪ ارز). جمع فعلی: <b class="num">${num(sum, 1)}٪</b>${Math.abs(sum - 100) > 0.5 && sum > 0 ? ' — بهتر است جمع ۱۰۰٪ باشد.' : ''}</div></div>
-    <table class="tbl"><thead><tr><th>دسته</th><th class="n">ارزش فعلی</th><th class="n">سهم فعلی</th><th style="width:130px">هدف ٪</th><th style="width:28%">فعلی در برابر هدف</th><th class="n">اقدام پیشنهادی</th></tr></thead><tbody>
-    ${rows.map((r) => html`<tr class="r">
-      <td><div class="row"><${Ava} cat=${r.id} size=${28} /><span class="sb">${r.cat.short}</span></div></td>
+    <div class=${'callout' + (plan.scaled ? ' warn' : '')} style="margin-bottom:12px"><${Icon} n="info" cls="sm" /><div>
+      درصد هدف هر دسته را وارد کن (مثلاً ۳۰٪ طلا، ۲۰٪ ارز). جمع فعلی: <b class="num">${num(sum, 1)}٪</b>${plan.scaled ? html` — جمع ۱۰۰٪ نیست؛ هدف‌ها <b>به نسبت خودشان</b> خوانده شدند (ستون هدف، عدد مؤثر را زیرش نشان می‌دهد).` : ''}</div></div>
+    <table class="tbl tgt-tbl"><thead><tr><th>دسته</th><th class="n">ارزش فعلی</th><th class="n">سهم فعلی</th><th style="width:130px">هدف ٪</th><th style="width:26%">فعلی در برابر هدف</th><th class="n">اقدام پیشنهادی</th></tr></thead><tbody>
+    ${rows.map((r) => html`<tr class=${'r' + (r.hasTarget ? '' : ' off')}>
+      <td><div class="row"><${Ava} cat=${r.id} size=${28} /><span class="sb">${nameOf(r)}</span></div></td>
       <td class="n small"><${Money} v=${r.current} s=${s} compact unit=${false} /></td>
-      <td class="n small num">${pct(r.currentShare, { sign: false })}</td>
-      <td><input class="input num-in" style="height:32px" value=${t[r.id] ?? ''} placeholder="—" onInput=${(e) => setT({ ...t, [r.id]: e.target.value === '' ? undefined : (parseNum(e.target.value) || 0) })} /></td>
-      <td><div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i>${r.hasTarget && html`<span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span>`}</div></div></td>
-      <td class="n small">${r.hasTarget ? (Math.abs(r.diff) < pf.gross * 0.005 ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`) : html`<span class="faint">—</span>`}</td>
+      <td class="n small num">${r.hasTarget ? pct(r.currentShare, { sign: false }) : html`<span class="muted" title="سهم از کل دارایی‌ها">${pct(r.share, { sign: false })} از کل</span>`}</td>
+      <td><input class="input num-in" style="height:32px" value=${t[r.id] ?? ''} placeholder="—" aria-label=${`هدف ${r.cat.short}`} onInput=${(e) => setT({ ...t, [r.id]: e.target.value === '' ? undefined : (parseNum(e.target.value) || 0) })} />
+        ${r.hasTarget && plan.scaled && html`<div class="xs muted num" style="margin-top:2px">مؤثر ${pct(r.target, { sign: false })}</div>`}</td>
+      <td>${r.hasTarget ? html`<div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i><span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span></div></div>` : ''}</td>
+      <td class="n small">${r.mergedInto ? html`<span class="muted">با «${CAT[r.mergedInto].short}» حساب شد</span>`
+        : r.hasTarget ? (plan.empty ? html`<span class="muted">هنوز چیزی در این دسته نداری</span>` : Math.abs(r.diff) < tol ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`)
+        : html`<span class="faint">بدون هدف؛ دست نمی‌خورد</span>`}</td>
     </tr>`)}</tbody></table>
+    ${on.length > 0 && html`<div class="tgt-sum">
+      ${plan.empty ? html`<div>هنوز در هیچ‌کدام از دسته‌هایی که هدف دارند دارایی‌ای نداری؛ پول تازه را با «پول جدید را کجا بگذارم؟» (از دستیار بپرس) بین آن‌ها پخش کن.</div>` : moves ? html`<div>با جابه‌جایی بین همین دسته‌ها: جمع خریدها <b><${Money} v=${plan.buy} s=${s} compact /></b> = جمع فروش‌ها <b><${Money} v=${plan.sell} s=${s} compact /></b>؛ پول تازه لازم نیست.</div>` : html`<div class="pos">ترکیبت با هدف می‌خواند.</div>`}
+      ${moves && plan.needNew >= 1 && html`<div>اگر نمی‌خواهی چیزی بفروشی: با حدود <b><${Money} v=${plan.needNew} s=${s} compact /></b> پول تازه، فقط با خرید، به همین هدف می‌رسی.</div>`}
+      ${outsideNames.length > 0 && html`<div class="muted">سهم‌ها از <${Money} v=${plan.base} s=${s} compact /> حساب شده: دارایی دسته‌هایی که هدف دارند. ${outsideNames.join('، ')} (${pct(plan.outsideValue / (plan.gross || 1), { sign: false })} از کل) هدف ${outsideNames.length > 1 ? 'ندارند' : 'ندارد'} و در این حساب نیامد؛ اگر می‌خواهی جزو برنامه باشد، برایش هدف بگذار.</div>`}
+    </div>`}
     <div class="xs muted" style="margin-top:10px;line-height:1.9">ترکیب هدف کجا به کار می‌رود: همین جدول می‌گوید برای رسیدن به آن چقدر بخری یا بفروشی؛ «سبدساز» پایین همین صفحه سبد «ترکیب هدف تو» را هم روی گذشته امتحان می‌کند؛ و دستیار هم آن را می‌بیند. ذخیره‌اش چیزی را خرید و فروش نمی‌کند. می‌توانی آن را از «پروفایل سرمایه‌گذاری» (تنظیمات) یا از یک سبد در سبدساز هم بگذاری.</div>
   </div>`;
 }
@@ -403,6 +430,7 @@ export function AnalysisPage({ st, pf, s, open, route }) {
   // #/analysis?to=targets (or another card's id) opens the page at that card
   useEffect(() => { const to = route?.q?.to; if (to) setTimeout(() => document.getElementById(to)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 200); }, [route?.q?.to]);
   const g = pf.gross || 1;
+  const inf = I.inflationCard(st, pf);
   const exItems = Object.entries(EXPOSURES).map(([k, v]) => ({ name: v.name, color: v.color, value: pf.byExposure[k] || 0 })).filter((x) => x.value > 0).sort((a, b) => b.value - a.value);
   const liqItems = [['high', '#14BCDB'], ['mid', '#8E70FF'], ['low', '#D946A8']].map(([k, c]) => ({ name: 'نقدشوندگی ' + LIQUIDITY[k], color: c, value: pf.byLiquidity[k] || 0 }));
   const cust = Object.entries(pf.byCustodian).map(([name, value]) => ({ name, value, color: 'var(--violet-2)' })).sort((a, b) => b.value - a.value).slice(0, 8);
@@ -424,8 +452,11 @@ export function AnalysisPage({ st, pf, s, open, route }) {
     <${Performance} st=${st} pf=${pf} s=${s} />
     <${Scenario} st=${st} pf=${pf} s=${s} />
     <div class="grid-ov" id="risk">
-      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز${T('exposure')}</h3><span class="sub">محافظت‌شده در برابر تورم: ${I.inflationCard(st, pf) ? pct(I.inflationCard(st, pf).share, { sign: false }) : '—'}</span></div>
-        <${StackBar} items=${exItems} height=${14} /><div style="height:14px"></div><${Bars} items=${exItems} s=${s} total=${g} /></div>
+      <div class="card"><div class="card-h"><h3><${Icon} n="shield" cls="sm" />مواجهه با تورم و ارز${T('exposure')}</h3><span class="sub">محافظت‌شده در برابر تورم: ${inf ? pct(inf.share, { sign: false }) : '—'}</span></div>
+        <${StackBar} items=${exItems} height=${14} /><div style="height:14px"></div><${Bars} items=${exItems} s=${s} total=${g} />
+        ${inf && inf.rialDebt >= 1 && html`<div class="net-rial small"><span>ریالی که داری <${Money} v=${inf.rialOwned} s=${s} compact /> منهای بدهی ریالی <${Money} v=${inf.rialDebt} s=${s} compact /></span>
+          <b>= ریال خالص <${Money} v=${inf.netRial} s=${s} compact sign=${inf.netRial < 0} /></b>
+          <span class="xs muted">${inf.netRial <= 0 ? 'بدهی ریالی‌ات از دارایی ریالی بیشتر است. تورم همان‌قدر که ارزش واقعی ریال را کم می‌کند، ارزش واقعی بدهی ریالی را هم کم می‌کند؛ پس از این بابت، ریال خالصی در معرض تورم نداری.' : `این بخش است که واقعاً با تورم کوچک می‌شود${inf.netRialShare !== null ? `: ${pct(inf.netRialShare, { sign: false })} از ارزش خالص` : ''}.`}</span></div>`}</div>
       <div class="card"><div class="card-h"><h3><${Icon} n="droplet" cls="sm" />چقدر زود نقد می‌شود؟${T('liquidity')}</h3></div>
         <${StackBar} items=${liqItems} height=${14} /><div style="height:14px"></div><${Bars} items=${liqItems} s=${s} total=${g} />
         <div class="xs muted" style="margin-top:8px">بالا: قابل نقد در چند روز (بانک، ارز، صندوق بورسی)، متوسط: چند هفته، پایین: ملک، سهام خصوصی، مطالبات</div></div>

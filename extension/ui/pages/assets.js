@@ -5,7 +5,7 @@ const QUIET = { live: 'آنلاین', auto: 'خودکار', manual: 'دستی', 
 import * as I from '../../lib/insights.js';
 import { CATEGORIES, CAT, EXPOSURES, LIQUIDITY, unpricedCrypto, cryptoFixes } from '../../lib/catalog.js';
 import * as E from '../../lib/engine.js';
-import { ago, parseNum, groupTyping, getDigits, toEnDigits, hasWords } from '../../lib/format.js';
+import { ago, parseNum, groupTyping, getDigits, toEnDigits, hasWords, timeHM, qName } from '../../lib/format.js';
 import { act, doneToast } from '../actions.js';
 import * as BB from '../../lib/bubble.js';
 import { BubblePill, useBubbleStats } from '../bubbles.js';
@@ -186,8 +186,8 @@ function ValueModal({ s, asset, onClose }) {
     <div class="preview outcome"><div class="row between small"><span class="muted">ارزش قبلی${asset.balanceAt ? ` (${ago(asset.balanceAt)})` : ''}</span><${Money} v=${b0} s=${s} /></div>
       ${v > 0 && b0 > 0 && html`<div class="row between small"><span class="muted">تغییر</span><b class=${v >= b0 ? 'pos' : 'neg'}><span class="ltr">${pct(v / b0 - 1)}</span></b></div>`}</div>
     <${MoneyField} label="ارزش امروز" rial=${v} onRial=${setV} s=${s} autoFocus prev=${asset.balance} />
-    <div class="field"><label>چرا تغییر کرد؟</label><${Seg} value=${why} onChange=${setWhy} options=${[['reval', 'قیمت بازارش عوض شد'], ['money', 'بخشی را خریدم یا فروختم']]} />
-      <span class="hint">${why === 'reval' ? 'در «چرا تغییر کرد» و بازده واقعی، سود یا زیان بازار حساب می‌شود.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'}</span></div>
+    <div class="field"><label>چرا تغییر کرد؟</label><${Seg} value=${why} onChange=${setWhy} options=${[['reval', 'قیمت بازارش عوض شد'], ['money', 'خریدم یا فروختم'], ['fix', 'اشتباه بود']]} />
+      <span class="hint">${why === 'reval' ? 'در «چرا تغییر کرد» و بازده واقعی، سود یا زیان بازار حساب می‌شود.' : why === 'fix' ? 'عدد قبلی اشتباه بود: اصلاح ثبت می‌شود، نه سود یا زیان.' : 'پول واردشده یا خارج‌شده حساب می‌شود، نه سود.'}</span></div>
   </${Modal}>`;
 }
 
@@ -335,11 +335,14 @@ function AssetsSummary({ pf, mv, s, cat, onCat, att, onAtt }) {
   const refresh = async () => { setBusy(true); const r = await send('refresh'); setBusy(false); toast(r?.ok ? (r.errors ? `قیمت‌ها به‌روز شد؛ ${num(r.errors)} قیمت دریافت نشد` : 'همه قیمت‌ها به‌روز شد') : 'به‌روزرسانی انجام نشد'); };
   const dc = mv?.abs ?? pf.dayChange, dp = mv?.pct ?? pf.dayChangePct;
   const lbl = mv?.stale ? `از ${fmtJ(mv.from, 'dm')}` : 'امروز';
+  const base = I.baseLabel(mv, todayIso(), timeHM);
+  const late = mv?.late || [];
   const pick = (id) => onCat(cat === id ? 'all' : id);
   return html`<section class="card as-sum">
     <div class="as-head">
       <div class="as-net"><span class="xs muted">ارزش خالص</span><b><${Money} v=${pf.net} s=${s} compact /></b>
-        <span class=${'small ' + (dc > 0 ? 'pos' : dc < 0 ? 'neg' : 'muted')} title="تغییر ارزش از آخرین ثبتِ روز قبل: تغییر قیمت و سود؛ پولی که جابه‌جا یا اضافه کرده‌ای و اصلاح‌های دستی مقدار و مانده حساب نمی‌شوند">${Math.abs(dc) >= 1 ? html`${lbl} <${Money} v=${dc} s=${s} compact sign /> <span class="ltr num">(${pct(dp)})</span>` : `${lbl} بدون تغییر`}</span></div>
+        <span class=${'small ' + (dc > 0 ? 'pos' : dc < 0 ? 'neg' : 'muted')} title="تغییر ارزش از آخرین ثبتِ روز قبل: تغییر قیمت و سود؛ پولی که جابه‌جا یا اضافه کرده‌ای و اصلاح‌های دستی مقدار و مانده حساب نمی‌شوند">${Math.abs(dc) >= 1 ? html`${lbl} <${Money} v=${dc} s=${s} compact sign /> <span class="ltr num">(${pct(dp)})</span>` : `${lbl} بدون تغییر`}</span>
+        ${base && html`<span class="xs muted as-base">${base}</span>`}</div>
       ${pf.debt > 0 && html`<div class="as-split">
         <div><span class="xs muted">دارایی‌ها</span><b class="num"><${Money} v=${pf.gross} s=${s} compact /></b></div>
         <span class="as-op" aria-hidden="true">−</span>
@@ -352,6 +355,7 @@ function AssetsSummary({ pf, mv, s, cat, onCat, att, onAtt }) {
       ${owned.map((c) => html`<button class=${'as-li' + (cat === c.id ? ' on' : '')} onClick=${() => pick(c.id)}><span class="dot" style=${'background:' + c.color}></span>${c.short}<span class="num muted">${pct(c.share, { sign: false })}</span></button>`)}
       ${owed.map((c) => html`<button class=${'as-li' + (cat === c.id ? ' on' : '')} onClick=${() => pick(c.id)}><span class="dot" style=${'background:' + c.color}></span>${c.short}<span class="num muted debt"><${Money} v=${c.value} s=${s} compact /></span></button>`)}
     </div>
+    ${late.length > 0 && html`<div class="as-late small"><${Icon} n="info" cls="sm" /><span class="grow">${late.slice(0, 2).map((x) => qName(x.name)).join(' و ')}${late.length > 2 ? ` و ${num(late.length - 2)} مورد دیگر` : ''} دیروز قیمت به‌روز نداشت؛ تغییرش از ${fmtJ(late.map((x) => x.since).sort()[0], 'dm')} یک‌جا در «${lbl}» آمده (<${Money} v=${late.reduce((t, x) => t + x.market, 0)} s=${s} compact sign />).</span></div>`}
     ${(staleN > 0 || maturedN > 0) && html`<div class="as-att">
       <${Icon} n="alert" cls="sm" />
       <span class="grow small">${[staleN > 0 && `${num(staleN)} قیمت به‌روز نیست`, maturedN > 0 && `${num(maturedN)} مورد سررسید شده`].filter(Boolean).join('، ')}</span>
@@ -369,7 +373,7 @@ const saveFolded = (set) => { try { localStorage.setItem(FOLD_KEY, JSON.stringif
 export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const [cat, setCat] = useState(route.q.cat || 'all');
   const [group, setGroup] = useState('cat');
-  const [sort, setSort] = useState('value');
+  const [sort, setSort] = useState(route.q.sort || 'value');
   const [onlyAtt, setOnlyAtt] = useState(route.q.f === 'attention');
   const [modal, setModal] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -380,13 +384,15 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
   const todayOf = useMemo(() => (mv?.at?.rows ? new Map(mv.at.rows.filter((x) => !x.removed).map((x) => [x.id, x.market])) : null), [mv]);
   const gone = mv?.at?.rows ? mv.at.rows.filter((x) => x.removed).reduce((t, x) => t + x.market, 0) : 0;
   const tc = (r) => (todayOf ? todayOf.get(r.asset.id) ?? 0 : r.dayChange || 0);
+  // a row whose starting price was already old: its «today» covers the days since then
+  const sinceOf = useMemo(() => new Map((mv?.late || []).map((x) => [x.id, x.since])), [mv]);
   const todayLbl = mv?.stale ? `از ${fmtJ(mv.from, 'dm')}` : 'امروز';
   const todayTip = 'تغییر ارزش از آخرین ثبتِ روز قبل: تغییر قیمت و سود؛ پولی که جابه‌جا یا اضافه کرده‌ای و اصلاح‌های دستی مقدار و مانده حساب نمی‌شوند';
   const gKey = (g) => `${group}:${g.key}`;
   // a filter or a search shows what it found, folded groups or not
   const isFolded = (g) => !!g.title && fCat === 'all' && !fAtt && !term && folded.has(gKey(g));
   const fold = (key) => { const n = new Set(folded); if (n.has(key)) n.delete(key); else n.add(key); setFolded(n); saveFolded(n); };
-  useEffect(() => { if (route.q.cat) setCat(route.q.cat); if (route.q.f === 'attention') setOnlyAtt(true); }, [route.q.cat, route.q.f]);
+  useEffect(() => { if (route.q.cat) setCat(route.q.cat); if (route.q.f === 'attention') setOnlyAtt(true); if (route.q.sort) setSort(route.q.sort); }, [route.q.cat, route.q.f, route.q.sort]);
 
   const present = CATEGORIES.filter((c) => pf.rows.some((r) => r.cat.id === c.id));
   const attN = pf.attention.length;
@@ -453,7 +459,7 @@ export function AssetsPage({ st, pf, s, open, route, q, openPrice }) {
               <td class="n small c-price">${a.mode === 'units' ? html`${manualPrice ? html`<${InlineMoney} value=${r.unitPrice} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.unitPrice, 'قیمت ثبت شد'), await act.patchAsset(a.id, { price: { ...a.price, value: v, updatedAt: Date.now() } }))}><${Money} v=${r.unitPrice} s=${s} unit=${false} /></${InlineMoney}>` : html`<${Money} v=${r.unitPrice} s=${s} unit=${false} />`}` : ''}<${SourceLine} r=${r} /></td>
               <td class="n"><div class="sb">${a.mode === 'balance' && !a.interest?.on ? html`<${InlineMoney} value=${r.value} s=${s} onSave=${async (v) => doneToast(savedMsg(v, r.value, 'ثبت شد'), await act.patchAsset(a.id, { balance: v, balanceAt: Date.now() }))}><${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} /></${InlineMoney}>` : html`<${Money} v=${r.value} s=${s} cls=${liab ? 'debt' : ''} />`}</div>
                 ${!liab && html`<div class="share-bar" title=${pct(share, { sign: false })}><i style=${`width:${Math.min(100, share * 100 * 2)}%;background:${r.cat.color}`}></i></div>`}</td>
-              <td class="n small c-today">${((d) => Math.abs(d) >= 1 ? html`<${Money} v=${d} s=${s} compact sign unit=${false} cls=${d > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`)(tc(r))}</td>
+              <td class="n small c-today">${((d) => Math.abs(d) >= 1 ? html`<${Money} v=${d} s=${s} compact sign unit=${false} cls=${d > 0 ? 'pos' : 'neg'} />` : html`<span class="faint">—</span>`)(tc(r))}${sinceOf.has(a.id) && html`<div class="xs warn" title="دیروز قیمت این دارایی قدیمی بود؛ این تغییر چند روز را با هم نشان می‌دهد">از ${fmtJ(sinceOf.get(a.id), 'dm')}</div>`}</td>
               ${hasPnl && html`<td class="n small c-pnl">${r.pnl !== null ? html`<div class=${r.pnl >= 0 ? 'pos' : 'neg'}><${Money} v=${r.pnl} s=${s} compact sign unit=${false} /></div><div class="xs"><${Delta} p=${r.ret} showAbs=${false} /></div>` : html`<span class="faint">—</span>`}</td>`}
               <td class="c-status">${E.needsAttention(r.status) ? html`<${StatusPill} status=${r.status} at=${r.at} title=${r.error || ''} />` : html`<span class="xs muted" title=${r.error || ''}>${QUIET[r.status] || ''}</span>`}<div class="xs faint" style="margin-top:3px">${a.mode === 'loan' && r.status === 'auto' ? 'قسط ' + fmtJ(E.loanState(a.loan).next.date, 'dm') : r.status === 'auto' ? 'هر لحظه' : r.status === 'matured' ? fmtJ(a.rate.maturity, 'dm') : r.at ? ago(r.at) : '—'}</div></td>
               <td onClick=${(e) => e.stopPropagation()}><div class="row" style="gap:2px;justify-content:flex-end">

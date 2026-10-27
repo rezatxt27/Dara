@@ -247,8 +247,8 @@ async def main():
             await pg.click('tr.xrow button:has-text("ویرایش")'); await pg.wait_for_timeout(500)
             check('a house offers no irrelevant valuation methods', await pg.locator('.drawer .modes').count() == 0)
             await pg.fill('.drawer .field:has-text("ارزش امروز") input', '3,500,000,000'); await pg.wait_for_timeout(200)
-            check('appraised asset asks why its value changed', await pg.locator('.drawer .field:has-text("چرا ارزش تغییر کرد")').count() == 1)
-            await pg.click('.drawer .seg >> text=بخشی را خریدم یا فروختم')
+            check('appraised asset asks why its value changed', await pg.locator('.drawer .why-chg').count() == 1)
+            await pg.click('.drawer .why-chg .seg >> text=خریدم یا فروختم')
             await pg.click('.drawer button:has-text("ذخیره تغییرات")'); await pg.wait_for_timeout(700)
             ev = (await get(pg, 'events'))[0]
             check('«bought part of it» is logged as money, not market', ev['changes'][0]['field'] == 'balance' and not ev['changes'][0].get('reval') and ev['changes'][0]['delta'] == 2_000_000_000, ev['changes'])

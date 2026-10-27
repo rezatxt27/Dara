@@ -7,7 +7,7 @@
 import * as E from './engine.js';
 import { CAT, EXPOSURES, LIQUIDITY, TGJU_BY_KEY, NOBITEX_BY_KEY, PROVIDERS } from './catalog.js';
 import { todayIso, daysBetween, isoFromDate, fmtJ } from './jalali.js';
-import { num } from './format.js';
+import { num, qName } from './format.js';
 
 /**
  * Money moved during an attribution's period, dated (per asset; internal transfers cancel out), and the modified-Dietz
@@ -48,8 +48,19 @@ export function marketMove(st, pf, days = 1, today = todayIso()) {
   if (!att) return days === 1 ? live : null;
   // a longer view whose start is far older than its label says nothing honest
   if (days > 1 && daysBetween(att.from, today) > days + 3) return null;
+  // what the number is measured from: that day's last record (its time), rebuilt or not, and the assets whose price
+  // there was already old — their move since then lands here in one go
+  const late = att.rows.filter((r) => r.since && Math.abs(r.market) >= 1).map((r) => ({ id: r.id, name: r.asset?.name || '—', since: r.since, market: r.market }));
   return { abs: att.market, pct: movePct(att, today), total: att.total, moved: att.total - att.market, from: att.from,
-    stale: att.from < E.addDaysIso(today, -days), at: att };
+    stale: att.from < E.addDaysIso(today, -days), est: !!att.est, baseAt: !att.est && att.snap?.at > 0 ? att.snap.at : null, late, at: att };
+}
+
+/** «از دیروز ساعت ۲۲:۴۰» — what a change is measured from, in words (null when it can't be said). */
+export function baseLabel(mv, today = todayIso(), hm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }) {
+  if (!mv || mv.live) return null;
+  const when = mv.from === E.addDaysIso(today, -1) ? 'دیروز' : fmtJ(mv.from, 'dm');
+  if (mv.est) return `از ${when} (تخمینی)`;
+  return mv.baseAt ? `از ${when} ساعت ${hm(mv.baseAt)}` : `از ${when}`;
 }
 
 const MODE_NAME = { payout: 'روزشمار، سود ماهانه واریز می‌شود', compound: 'روزشمار مرکب (نرخ = بازده مؤثر سالانه)', simple: 'روزشمار ساده' };
@@ -187,8 +198,14 @@ export function explainChange(st, days, pf, today = todayIso()) {
     ...(Math.abs(other) >= 1 ? [{ t: 'جابه‌جایی با دارایی‌های تازه', v: other, k: 'money', sign: true }] : []),
     { t: 'ارزش خالص الان', v: at.now, k: 'money', total: true },
   ];
-  const drivers = at.rows.filter((r) => Math.abs(r.market) >= 1).slice(0, 5).map((r) => ({ t: r.asset?.name || 'دارایی حذف‌شده', v: r.market, k: 'money', sign: true }));
-  return { lines, drivers, formula: 'تغییر = اثر بازار + پولی که وارد یا خارج شد + ویرایش‌های دستی', notes: at.est ? ['مبنای مقایسه بازسازی‌شده (تخمینی) است.'] : [], at };
+  const drivers = at.rows.filter((r) => Math.abs(r.market) >= 1).slice(0, 5).map((r) => ({ t: r.asset?.name || 'دارایی حذف‌شده', v: r.market, k: 'money', sign: true, ...(r.since ? { sub: `از ${fmtJ(r.since, 'dm')}` } : {}) }));
+  const notes = [];
+  if (at.est) notes.push('مبنای مقایسه بازسازی‌شده (تخمینی) است.');
+  else if (at.snap?.at > 0) { const d = new Date(at.snap.at); notes.push(`مبنا: آخرین ثبتِ ${fmtJ(at.from, 'dm')}، ساعت ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}. هر بار که دارا قیمت‌ها را می‌گیرد، عدد آن روز به‌روز می‌شود.`); }
+  const late = at.rows.filter((r) => r.since && Math.abs(r.market) >= 1);
+  if (late.length) notes.push(`${late.slice(0, 3).map((r) => qName(r.asset?.name)).join('، ')}${late.length > 3 ? ' و …' : ''} در مبنا قیمت قدیمی داشت؛ تغییرش از ${fmtJ(late.map((r) => r.since).sort()[0], 'dm')} یک‌جا در این عدد آمده.`);
+  if (days === 1) notes.push('ریز تغییر هر دارایی: صفحه دارایی‌ها، ستون «امروز».');
+  return { lines, drivers, formula: 'تغییر = اثر بازار + پولی که وارد یا خارج شد + ویرایش‌های دستی', notes, at };
 }
 
 /* ------------------------------------------------------------ performance ------------------------------------------------------------ */
@@ -206,7 +223,7 @@ function rateAt(snaps, keys, field, iso) {
  * Money you added or took out (salary, deposits, new assets, edits) is separated from what the market earned,
  * and the same money is replayed into three alternatives: all in 18k gold, all in dollars, all in a deposit.
  */
-export function performance(st, days, { depositPct = 25, today = todayIso(), pf = null, now = Date.now() } = {}) {
+export function performance(st, days, { depositPct = 25, inflationPct = defaultInflationPct(st), today = todayIso(), pf = null, now = Date.now() } = {}) {
   pf = pf || E.portfolio(st.assets, st.quotes, st.settings);
   const keys = Object.keys(st.snapshots || {}).sort();
   if (!keys.length) return null;
@@ -240,7 +257,41 @@ export function performance(st, days, { depositPct = 25, today = todayIso(), pf 
     bench.push({ id, name: NAMES[id], short: { gold: 'طلا', usd: 'دلار', deposit: 'سپرده' }[id], end, diff: pf.net - end, ret: g0 - 1 });
   }
   const annual = ret !== null && T >= 60 && ret > -1 ? Math.pow(1 + ret, 365 / T) - 1 : null;
-  return { from: at.from, days: T, partial, est: at.est, base: at.base, end: pf.net, moneyIn, market: at.market, ret, annual, bench, depositPct };
+  const onAssets = assetsReturn(at, pf, today);
+  const real = realReturn(ret, T, inflationPct);
+  return { from: at.from, days: T, partial, est: at.est, base: at.base, end: pf.net, moneyIn, market: at.market, ret, annual, bench, depositPct,
+    // with debts, the return on your own money (ret) is the return on assets made larger (or smaller) by what was borrowed
+    retAssets: onAssets?.ret ?? null, marketAssets: onAssets?.market ?? null, debt: onAssets ? onAssets.debt : 0,
+    inflationPct, real };
+}
+
+/**
+ * The return of what you own, debts left out (a loan's cost is not in it): the market effect on assets over the money
+ * that was in them (Dietz). Only when there were debts in the period — without any it is the same as the return on net
+ * worth. Returns { ret, market, base, debt } or null.
+ */
+export function assetsReturn(at, pf, today = todayIso()) {
+  const liab = (r) => (r.asset ? E.isLiability(r.asset) : (r.then || 0) < 0 || (r.now || 0) < 0);
+  const debtThen = +at.snap?.l || Object.values(at.snap?.v || {}).filter((v) => v < 0).reduce((s, v) => s - v, 0);
+  if (!(debtThen > 0) && !(pf.debt > 0)) return null;
+  const rows = at.rows.filter((r) => !liab(r));
+  const g0 = +at.snap?.g || Object.values(at.snap?.v || {}).filter((v) => v > 0).reduce((s, v) => s + v, 0);
+  const market = rows.reduce((s, r) => s + r.market, 0);
+  const now = rows.reduce((s, r) => s + (r.now || 0), 0);
+  const part = { from: at.from, base: g0, rows, total: now - g0, market };
+  const d = dietzBase(part, today);
+  return { ret: d > 0 ? market / d : null, market, base: g0, debt: pf.debt };
+}
+
+/** The default yearly inflation to measure against: the owner's setting, else the Statistical Centre of Iran's
+ *  12-month average for Shahrivar 1405 (73.6%). */
+export const INFLATION_DEFAULT = 73.6;
+export const defaultInflationPct = (st) => (+st.settings?.inflationPct > 0 ? +st.settings.inflationPct : INFLATION_DEFAULT);
+/** A nominal return over `days`, after inflation of `inflationPct` a year: (1 + ret) ÷ (1 + inflation) over the same days − 1. */
+export function realReturn(ret, days, inflationPct) {
+  if (ret === null || !isFinite(ret) || !(inflationPct >= 0) || !(days > 0)) return null;
+  const infl = Math.pow(1 + inflationPct / 100, days / 365) - 1;
+  return { ret: (1 + ret) / (1 + infl) - 1, inflation: infl };
 }
 
 /* ------------------------------------------------------------- break-even ------------------------------------------------------------- */
@@ -260,36 +311,63 @@ export function breakEven({ price0, ratePct, months, feePct = 0 }) {
   return { months: m, depositGrowth: dg, depositGain: dg - 1, needed, annualNeeded: Math.pow(1 + needed, 12 / m) - 1, targetPrice: price0 > 0 ? price0 * (1 + needed) : null };
 }
 
+/* --------------------------------------------------------- price sources --------------------------------------------------------- */
+/**
+ * How each price source is doing, from the stored quotes: when it last answered, how many prices it gives now, and which
+ * didn't come (with the source's message). Only the prices tried in the latest round count — an old one from an asset
+ * since deleted isn't news. status: 'ok' | 'some' (a few failed) | 'down' (nothing came in the latest round) |
+ * 'old' (no answer for longer than `staleMs`) | 'idle' (nothing to fetch from it).
+ */
+export function providerHealth(quotes = {}, now = Date.now(), staleMs = 3 * 3600e3) {
+  const out = {};
+  for (const [id, q] of Object.entries(quotes || {})) {
+    // Bitpin's prices are kept under the crypto source's name: told apart by where they came from
+    const p0 = id.split(':')[0]; if (!PROVIDERS[p0] || !q) continue;
+    const p = p0 === 'nobitex' && q.source === 'bitpin' ? 'bitpin' : p0;
+    const o = out[p] ||= { items: [] };
+    o.items.push({ id, q, tried: Math.max(+q.fetchedAt || 0, +q.errorAt || 0) });
+  }
+  for (const k of [...Object.keys(PROVIDERS), 'bitpin']) {
+    const o = out[k] ||= { items: [] };
+    const latest = Math.max(0, ...o.items.map((x) => x.tried));
+    const cur = o.items.filter((x) => x.tried >= latest - 6 * 3600e3); // the latest round (a round can take a while)
+    const failed = cur.filter((x) => x.q.error && (x.q.errorAt || 0) >= (x.q.fetchedAt || 0));
+    const lastOk = Math.max(0, ...o.items.filter((x) => x.q.price > 0).map((x) => +x.q.fetchedAt || 0));
+    const status = !cur.length ? 'idle' : failed.length === cur.length ? 'down' : now - lastOk > staleMs ? 'old' : failed.length ? 'some' : 'ok';
+    out[k] = { status, n: cur.length, ok: cur.length - failed.length, failed: failed.length, lastOk: lastOk || null, lastTry: latest || null,
+      error: failed[0]?.q.error || null, failedIds: failed.map((x) => x.id) };
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ new money ------------------------------------------------------------ */
 /**
  * Split `amount` of new money across categories so the mix moves toward the targets, without selling anything.
  * targets: { categoryId: fraction }. Shortfalls are filled in proportion to their size; anything left follows the targets.
  */
 export function allocateNew(pf, targets = {}, amount = 0, assets = []) {
-  const ids = Object.keys(targets).filter((k) => +targets[k] > 0 && CAT[k] && !CAT[k].liability);
-  if (!ids.length || !(amount > 0)) return null;
-  const sumT = ids.reduce((x, k) => x + +targets[k], 0);
-  // Targets are used as entered; only a total above 100% is scaled down. Categories without a target get nothing new.
-  const scale = sumT > 1 ? 1 / sumT : 1;
-  const T = (id) => +targets[id] * scale;
-  const G1 = pf.gross + amount;
-  const cur = (id) => pf.cats.find((c) => c.id === id)?.value || 0;
-  const gaps = Object.fromEntries(ids.map((id) => [id, Math.max(0, T(id) * G1 - cur(id))]));
+  // the same plan as «تخصیص هدف»: only the targeted kinds (online gold counted with gold when only one has a target),
+  // targets read in proportion to each other; what is held without a target is left out of the shares
+  const plan = E.rebalancePlan(pf, targets);
+  const on = plan.rows.filter((r) => r.hasTarget);
+  if (!on.length || !(amount > 0)) return null;
+  const G1 = plan.base + amount;
+  const gaps = Object.fromEntries(on.map((r) => [r.id, Math.max(0, r.target * G1 - r.current)]));
   const gapSum = Object.values(gaps).reduce((x, v) => x + v, 0);
   const add = {};
-  if (gapSum >= amount) for (const id of ids) add[id] = amount * gaps[id] / gapSum;
-  else for (const id of ids) add[id] = gaps[id] + (amount - gapSum) * (+targets[id] / sumT);
-  const vehicle = (id) => {
-    const rows = pf.rows.filter((r) => r.asset.category === id && !r.asset.archived).sort((a, b) => b.value - a.value);
+  if (gapSum >= amount) for (const r of on) add[r.id] = amount * gaps[r.id] / gapSum;
+  else for (const r of on) add[r.id] = gaps[r.id] + (amount - gapSum) * r.target;
+  const vehicle = (ids) => {
+    const rows = pf.rows.filter((x) => ids.includes(x.asset.category) && !x.asset.archived).sort((a, b) => b.value - a.value);
     return rows[0]?.asset || null;
   };
-  const rows = ids.map((id) => ({
-    id, cat: CAT[id], current: cur(id), currentShare: pf.gross ? cur(id) / pf.gross : 0, target: T(id),
-    add: add[id], after: cur(id) + add[id], afterShare: (cur(id) + add[id]) / G1, vehicle: add[id] >= 1 ? vehicle(id) : null,
+  const rows = on.map((r) => ({
+    id: r.id, cat: r.cat, ids: r.ids, current: r.current, currentShare: r.currentShare, target: r.target,
+    add: add[r.id], after: r.current + add[r.id], afterShare: (r.current + add[r.id]) / G1, vehicle: add[r.id] >= 1 ? vehicle(r.ids) : null,
   })).sort((a, b) => b.add - a.add);
   const maxDevBefore = Math.max(...rows.map((r) => Math.abs(r.currentShare - r.target)));
   const maxDevAfter = Math.max(...rows.map((r) => Math.abs(r.afterShare - r.target)));
-  return { amount, rows, sumTargets: sumT, maxDevBefore, maxDevAfter };
+  return { amount, rows, sumTargets: plan.sumTargets, maxDevBefore, maxDevAfter, outside: plan.outside };
 }
 
 /* ------------------------------------------------------------- critique ------------------------------------------------------------- */
@@ -388,7 +466,14 @@ export function inflationCard(st, pf, today = todayIso()) {
   const target = protectedTarget(st.settings?.targets);
   let status = null;
   if (target !== null) status = share >= target - 0.0005 ? 'ok' : target - share <= 0.05 + 1e-9 ? 'near' : 'below';
-  return { share, delta, target, status, parts, unprotected, unprotectedShare: unp / g };
+  // A debt in Rial is the other side of the same bet: inflation shrinks it as it shrinks a deposit. What is left exposed
+  // is the Rial you own minus the Rial you owe (a debt in gold or dollars is not Rial, and grows with them).
+  const rialOwned = ex.rial || 0;
+  const rialDebt = pf.rows.filter((r) => r.cat.liability && r.value > 0 && r.exposure === 'rial').reduce((t, r) => t + r.value, 0);
+  const otherDebt = pf.rows.filter((r) => r.cat.liability && r.value > 0 && r.exposure !== 'rial').reduce((t, r) => t + r.value, 0);
+  const netRial = rialOwned - rialDebt;
+  return { share, delta, target, status, parts, unprotected, unprotectedShare: unp / g, rialOwned, rialDebt, otherDebt, netRial,
+    netRialShare: pf.net > 0 ? netRial / pf.net : null };
 }
 
 /** «نقدشوندگی»: how much turns into cash in days / weeks / months, with the largest assets of each tier. */

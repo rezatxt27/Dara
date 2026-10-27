@@ -1,6 +1,7 @@
 import { html, useState, useEffect, useMemo, useRef, Icon, Seg, Toggle, Money, toast, send, num, pct, fmtJ, Ava, hasChrome, refLabel, BackfillButton } from '../components.js';
 import * as store from '../../lib/store.js';
 import * as E from '../../lib/engine.js';
+import * as I from '../../lib/insights.js';
 import { parseDelimited, toCSV } from '../../lib/importer.js';
 import * as SM from '../../lib/sheetmap.js';
 import { readXlsx } from '../../lib/xlsx.js';
@@ -376,6 +377,17 @@ function BackupCard({ st, s }) {
 }
 
 /* ---------------- settings ---------------- */
+/** One line under a price source: is it answering, since when, and what failed. */
+function Health({ h, off }) {
+  if (off) return html`<span class="hl idle">خاموش</span>`;
+  if (!h || h.status === 'idle') return html`<span class="hl idle">فعلاً قیمتی از این منبع لازم نیست</span>`;
+  const when = h.lastOk ? ago(h.lastOk) : 'هرگز';
+  if (h.status === 'ok') return html`<span class="hl ok"><i></i>سالم · ${num(h.n)} قیمت · آخرین دریافت ${when}</span>`;
+  if (h.status === 'some') return html`<span class="hl warn" title=${h.error || ''}><i></i>${num(h.failed)} از ${num(h.n)} قیمت دریافت نشد · آخرین دریافت ${when}${h.error ? html`<span class="hl-err">؛ ${h.error}</span>` : ''}</span>`;
+  if (h.status === 'old') return html`<span class="hl warn"><i></i>مدتی است جواب تازه نداده · آخرین دریافت موفق ${when}</span>`;
+  return html`<span class="hl down" title=${h.error || ''}><i></i>در دسترس نیست · آخرین دریافت موفق ${when}${h.error ? html`<span class="hl-err">؛ ${h.error}</span>` : ''}</span>`;
+}
+
 function Row({ t, d, children }) {
   return html`<div class="row between" style="padding:12px 0;border-bottom:1px solid var(--line);gap:16px"><div><div class="sb">${t}</div>${d && html`<div class="xs muted">${d}</div>`}</div><div class="row">${children}</div></div>`;
 }
@@ -458,6 +470,7 @@ function UpdateCard({ s }) {
 
 export function SettingsPage({ st, pf, s }) {
   const set = (p) => act.setSettings(p);
+  const health = useMemo(() => I.providerHealth(st.quotes), [st.quotes]);
   // with a backup password set, this copy is locked too (it lands in the same Downloads folder the password protects)
   const backup = async () => {
     const b = await store.exportBackup();
@@ -488,7 +501,8 @@ export function SettingsPage({ st, pf, s }) {
 
     <div class="card"><div class="card-h"><h3><${Icon} n="refresh" cls="sm" />به‌روزرسانی خودکار</h3></div>
       <${Row} t="فاصله دریافت قیمت‌ها"><${Seg} value=${s.refreshMinutes} onChange=${(v) => set({ refreshMinutes: v })} options=${[[15, '۱۵ دقیقه'], [30, '۳۰ دقیقه'], [60, '۱ ساعت'], [180, '۳ ساعت']]} /></${Row}>
-      ${Object.entries(PROVIDERS).map(([k, p]) => html`<${Row} t=${p.title}><${Toggle} title=${p.title} on=${s.providers[k] !== false} onChange=${(v) => set({ providers: { ...s.providers, [k]: v } })} /></${Row}>`)}
+      ${Object.entries(PROVIDERS).map(([k, p]) => html`<${Row} t=${p.title} d=${html`<${Health} h=${health[k]} off=${s.providers[k] === false} />${k === 'nobitex' && s.providers[k] !== false && health.bitpin?.status !== 'idle' ? html`<div>بیت‌پین: <${Health} h=${health.bitpin} /></div>` : ''}`}><${Toggle} title=${p.title} on=${s.providers[k] !== false} onChange=${(v) => set({ providers: { ...s.providers, [k]: v } })} /></${Row}>`)}
+      <div class="xs muted" style="padding-top:8px">آخرین تلاش برای گرفتن قیمت‌ها: ${st.meta?.lastRun ? ago(st.meta.lastRun) : 'هنوز نه'}. اگر منبعی قطع است، دارا تا برگشتنش آخرین قیمت معتبر را نگه می‌دارد و آن دارایی را «قیمت قدیمی» نشان می‌دهد.</div>
       <${Row} t="یادآوری قیمت‌های دستی" d="بعد از این مدت، دارایی «نیاز به به‌روزرسانی» می‌شود"><${Seg} value=${s.remindDays.price} onChange=${(v) => set({ remindDays: { ...s.remindDays, price: v } })} options=${[[3, '۳ روز'], [7, '۱ هفته'], [30, '۱ ماه']]} /></${Row}>
       <${Row} t="یادآوری مانده حساب‌ها"><${Seg} value=${s.remindDays.balance} onChange=${(v) => set({ remindDays: { ...s.remindDays, balance: v } })} options=${[[7, '۱ هفته'], [30, '۱ ماه'], [90, '۳ ماه']]} /></${Row}>
     </div>

@@ -471,10 +471,10 @@ test('new money fills the shortfalls first and never sells', () => {
   close(b.rows.find((r) => r.id === 'gold').add, 800, 1e-9);
   close(b.rows.find((r) => r.id === 'bank').add, 200, 1e-9);
   close(b.maxDevAfter, 0, 1e-12);
-  // targets below 100% are used as entered (not scaled up); gold 20% of 2000 = 400 → +200, the rest by weight
+  // targets that don't add up to 100% are read in proportion to each other (the same as the target table): 20/20 = 50/50
   const c = IN.allocateNew(pf, { gold: 0.2, bank: 0.2 }, 1000);
-  close(c.rows.find((r) => r.id === 'gold').target, 0.2, 1e-12);
-  close(c.rows.find((r) => r.id === 'gold').add, 200 + 800 * 0.5, 1e-9);
+  close(c.rows.find((r) => r.id === 'gold').target, 0.5, 1e-12);
+  close(c.rows.find((r) => r.id === 'gold').add, 800, 1e-9);
   close(c.rows.reduce((x, r) => x + r.add, 0), 1000, 1e-9);
   const over = IN.allocateNew(pf, { gold: 0.8, bank: 0.8 }, 1000); // above 100% is scaled down
   close(over.rows.find((r) => r.id === 'gold').target, 0.5, 1e-12);

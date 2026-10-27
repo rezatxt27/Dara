@@ -328,11 +328,11 @@ function Targets({ pf, s, assets }) {
         ${r.hasTarget && plan.scaled && html`<div class="xs muted num" style="margin-top:2px">مؤثر ${pct(r.target, { sign: false })}</div>`}</td>
       <td>${r.hasTarget ? html`<div class="bars"><div class="track"><i style=${`width:${Math.min(100, r.currentShare * 100)}%;background:${r.cat.color}`}></i><span class="tgt" style=${`right:${Math.min(100, r.target * 100)}%`}></span></div></div>` : ''}</td>
       <td class="n small">${r.mergedInto ? html`<span class="muted">با «${CAT[r.mergedInto].short}» حساب شد</span>`
-        : r.hasTarget ? (Math.abs(r.diff) < tol ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`)
+        : r.hasTarget ? (plan.empty ? html`<span class="muted">هنوز چیزی در این دسته نداری</span>` : Math.abs(r.diff) < tol ? html`<span class="pos">متوازن</span>` : html`<span style="color:var(--ink-2)">${r.diff > 0 ? '↑ خرید' : '↓ فروش'} <${Money} v=${Math.abs(r.diff)} s=${s} compact /></span>`)
         : html`<span class="faint">بدون هدف؛ دست نمی‌خورد</span>`}</td>
     </tr>`)}</tbody></table>
     ${on.length > 0 && html`<div class="tgt-sum">
-      ${moves ? html`<div>با جابه‌جایی بین همین دسته‌ها: جمع خریدها <b><${Money} v=${plan.buy} s=${s} compact /></b> = جمع فروش‌ها <b><${Money} v=${plan.sell} s=${s} compact /></b>؛ پول تازه لازم نیست.</div>` : html`<div class="pos">ترکیبت با هدف می‌خواند.</div>`}
+      ${plan.empty ? html`<div>هنوز در هیچ‌کدام از دسته‌هایی که هدف دارند دارایی‌ای نداری؛ پول تازه را با «پول جدید را کجا بگذارم؟» (از دستیار بپرس) بین آن‌ها پخش کن.</div>` : moves ? html`<div>با جابه‌جایی بین همین دسته‌ها: جمع خریدها <b><${Money} v=${plan.buy} s=${s} compact /></b> = جمع فروش‌ها <b><${Money} v=${plan.sell} s=${s} compact /></b>؛ پول تازه لازم نیست.</div>` : html`<div class="pos">ترکیبت با هدف می‌خواند.</div>`}
       ${moves && plan.needNew >= 1 && html`<div>اگر نمی‌خواهی چیزی بفروشی: با حدود <b><${Money} v=${plan.needNew} s=${s} compact /></b> پول تازه، فقط با خرید، به همین هدف می‌رسی.</div>`}
       ${outsideNames.length > 0 && html`<div class="muted">سهم‌ها از <${Money} v=${plan.base} s=${s} compact /> حساب شده: دارایی دسته‌هایی که هدف دارند. ${outsideNames.join('، ')} (${pct(plan.outsideValue / (plan.gross || 1), { sign: false })} از کل) هدف ${outsideNames.length > 1 ? 'ندارند' : 'ندارد'} و در این حساب نیامد؛ اگر می‌خواهی جزو برنامه باشد، برایش هدف بگذار.</div>`}
     </div>`}

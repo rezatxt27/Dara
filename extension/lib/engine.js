@@ -1176,7 +1176,9 @@ export function rebalancePlan(pf, targets = {}) {
   const total = on.length ? Math.max(base, ...on.map((r) => r.current / r.target)) : base;
   const needNew = Math.max(0, total - base);
   rows.sort((a, b) => (a.mergedInto ? 1 : 0) - (b.mergedInto ? 1 : 0) || (b.hasTarget ? 1 : 0) - (a.hasTarget ? 1 : 0) || b.current - a.current);
-  return { rows, base, gross: pf.gross, sumTargets: sumRaw, scaled: on.length > 0 && Math.abs(sumRaw - 1) > 0.005, outside, outsideValue, buy, sell, needNew };
+  // targets set, but nothing held in any of those kinds yet: nothing to move — new money is the way in
+  const empty = on.length > 0 && base < 1;
+  return { rows, base, gross: pf.gross, sumTargets: sumRaw, scaled: on.length > 0 && Math.abs(sumRaw - 1) > 0.005, outside, outsideValue, buy, sell, needNew, empty };
 }
 export function rebalance(pf, targets = {}) { return rebalancePlan(pf, targets).rows; }
 

@@ -20,7 +20,9 @@ function costAfter(a, q0, q1, quotes) {
 }
 /** A hand-typed price corrected: logged with the value it moved (old quantity × price change), so «امروز» and the
  *  return leave it out like any other correction. Undo puts the old price back. */
-const priceFixChange = (id, x, p1) => { const dp = p1 - num(x.price?.value); return { assetId: id, field: 'price.value', delta: dp, value: (E.isLiability(x) ? -1 : 1) * dp * num(x.quantity), fix: true }; };
+// qty: the quantity the price change applies to — the old one when the quantity change is valued at the new price
+// (saveAsset), the new one when it is valued at the old price (patchAsset); either way the two add up to p1·q1 − p0·q0
+const priceFixChange = (id, x, p1, qty = num(x.quantity)) => { const dp = p1 - num(x.price?.value); return { assetId: id, field: 'price.value', delta: dp, value: (E.isLiability(x) ? -1 : 1) * dp * qty, fix: true }; };
 const maxIso = (a, b) => (!a ? b || null : !b ? a : a > b ? a : b);
 const num = (v) => +v || 0;
 /** Let the worker apply anything that fell due (installment, payout, salary) before a manual change to the same assets. */
@@ -216,7 +218,7 @@ export const act = {
         if (!('costBasis' in patch)) next.costBasis = costAfter(x, num(x.quantity), num(patch.quantity), st.quotes);
       }
       const fix = !!opts.priceFix && x.price?.source !== 'market';
-      if ('price' in patch && x.mode === 'units' && num(patch.price?.value) !== num(x.price?.value)) changes.push(fix ? priceFixChange(id, x, num(patch.price.value)) : { assetId: id, field: 'price.value', delta: num(patch.price.value) - num(x.price?.value) });
+      if ('price' in patch && x.mode === 'units' && num(patch.price?.value) !== num(x.price?.value)) changes.push(fix ? priceFixChange(id, x, num(patch.price.value), 'quantity' in patch ? num(patch.quantity) : num(x.quantity)) : { assetId: id, field: 'price.value', delta: num(patch.price.value) - num(x.price?.value) });
       if (changes.length) ev = { id: uid('e'), kind: 'edit', date: todayIso(), at: Date.now(), title: `${fix && changes.length === 1 ? 'اصلاح قیمت' : 'ویرایش'} «${x.name}»`, amount: 0, changes };
       Object.assign(x, next);
       logEv(st, ev);

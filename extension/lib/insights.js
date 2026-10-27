@@ -321,11 +321,13 @@ export function breakEven({ price0, ratePct, months, feePct = 0 }) {
 export function providerHealth(quotes = {}, now = Date.now(), staleMs = 3 * 3600e3) {
   const out = {};
   for (const [id, q] of Object.entries(quotes || {})) {
-    const p = id.split(':')[0]; if (!PROVIDERS[p] || !q) continue;
+    // Bitpin's prices are kept under the crypto source's name: told apart by where they came from
+    const p0 = id.split(':')[0]; if (!PROVIDERS[p0] || !q) continue;
+    const p = p0 === 'nobitex' && q.source === 'bitpin' ? 'bitpin' : p0;
     const o = out[p] ||= { items: [] };
     o.items.push({ id, q, tried: Math.max(+q.fetchedAt || 0, +q.errorAt || 0) });
   }
-  for (const k of Object.keys(PROVIDERS)) {
+  for (const k of [...Object.keys(PROVIDERS), 'bitpin']) {
     const o = out[k] ||= { items: [] };
     const latest = Math.max(0, ...o.items.map((x) => x.tried));
     const cur = o.items.filter((x) => x.tried >= latest - 6 * 3600e3); // the latest round (a round can take a while)

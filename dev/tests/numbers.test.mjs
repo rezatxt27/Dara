@@ -41,6 +41,9 @@ test('target plan: a kind without a target stays out; targets not adding up to 1
   close(p.base, 7000); assert.deepEqual(p.outside, ['bank']); close(p.outsideValue, 3000);
   close(p.rows.find((r) => r.id === 'gold').diff, -500, 1e-6); close(p.rows.find((r) => r.id === 'fx').diff, 500, 1e-6);
   assert.equal(p.rows.find((r) => r.id === 'bank').hasTarget, false); close(p.rows.find((r) => r.id === 'bank').diff, 0);
+  // targets only on kinds not held yet: nothing to move, flagged so the table doesn't say «balanced»
+  const e = E.rebalancePlan(E.portfolio([bal('b', 'bank', 3000)], {}, {}, now), { gold: 0.5, fx: 0.5 });
+  assert.equal(e.empty, true); assert.equal(p.empty, false);
   const q = E.rebalancePlan(pf, { gold: 0.3, fx: 0.3 });
   assert.equal(q.scaled, true); close(q.rows.find((r) => r.id === 'gold').target, 0.5);
   // both gold kinds with a target: apart
@@ -88,6 +91,13 @@ test('a hand-typed price put right is a correction, not a market move; a new pri
   await reset();
   await act.patchAsset('p', { price: { ...a.price, value: 4950 } }, { priceFix: true });
   r = await att(); close(r.market, 0, 1e-6); close(r.edits, 450000, 1e-6);
+  // price and quantity corrected together: the whole change is the correction, in both ways of saving
+  await reset();
+  await act.patchAsset('p', { quantity: 2000, price: { ...a.price, value: 45000 } }, { priceFix: true });
+  r = await att(); close(r.market, 0, 1e-6, 'patch'); close(r.edits, 2000 * 45000 - 4.5e6, 1e-6);
+  await reset();
+  await act.saveAsset({ ...structuredClone(a), quantity: 2000, price: { ...a.price, value: 45000 } }, { orig: a, priceFix: true });
+  r = await att(); close(r.market, 0, 1e-6, 'save'); close(r.edits, 2000 * 45000 - 4.5e6, 1e-6);
 });
 
 /* ---------------- net Rial ---------------- */
@@ -140,4 +150,7 @@ test('price sources: ok, some failed, down, idle — only the latest round count
   assert.equal(h.nobitex.status, 'down'); close(h.nobitex.lastOk, now - 5 * 3600e3);
   assert.equal(h.fipiran.status, 'ok'); assert.equal(h.fipiran.n, 1);
   assert.equal(I.providerHealth({}, now).tgju.status, 'idle');
+  // Bitpin's prices, kept under the crypto source's name, are reported apart
+  const b = I.providerHealth({ 'nobitex:btc': Q(1), 'nobitex:tsla': { price: 5, source: 'bitpin', fetchedAt: now - 3600e3, error: 'HTTP 502', errorAt: now } }, now);
+  assert.equal(b.nobitex.status, 'ok'); assert.equal(b.bitpin.status, 'down');
 });

@@ -700,3 +700,19 @@ test('a NAV a day behind the radar\'s closes: the missing close is fetched once 
   for (let i = 0; i < 3; i++) RD.fillEtf(R, 'S', null, D(-1), true);
   assert.deepEqual(RD.etfGaps(R), []);
 });
+
+test('a fund named in a capture is found in Fipiran\'s list by its own name', async () => {
+  const P = await import('../../extension/lib/providers.js');
+  const items = P.parseFunds([
+    { regNo: 10789, name: 'فیروزه موفقیت', fundType: 6, typeOfInvest: 'IssuanceAndCancellation', cancelNav: 98441, date: '2026-10-27' },
+    { regNo: 11518, name: 'ارمغان فیروزه آسیا', fundType: 4, typeOfInvest: 'Negotiable', smallSymbolName: 'فیروزا', insCode: '10795723506538053', cancelNav: 94542 },
+    { regNo: 1, name: 'صندوق سرمایه گذاری آرمان', fundType: 4, cancelNav: 1 }, { regNo: 2, name: 'آرمان پایدار', fundType: 4, cancelNav: 1 },
+  ]);
+  assert.equal(P.matchFund(items, 'صندوق موفقیت').hit?.regNo, '10789');
+  assert.equal(P.matchFund(items, 'صندوق موفقيت').hit?.regNo, '10789', 'Arabic letters');
+  assert.equal(P.matchFund(items, 'فیروزا').hit?.insCode, '10795723506538053', 'by its exchange symbol');
+  assert.equal(P.matchFund(items, 'صندوق آرمان').hit?.regNo, '1', 'the exact name wins over a longer one');
+  assert.equal(P.matchFund(items, 'فیروزه').hit, null, 'two funds fit: none is picked');
+  assert.equal(P.matchFund(items, 'فیروزه').many, 2);
+  assert.equal(P.matchFund(items, 'صندوق').hit, null);
+});

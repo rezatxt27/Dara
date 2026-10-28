@@ -437,6 +437,21 @@ export function searchFunds(items, q) {
 }
 export async function fipiranSearch(q) { return searchFunds(await fipiranFunds(), q); }
 
+/** The words around a fund's own name that every listing writes differently («صندوق»، «سرمایه‌گذاری»، «س.»…). */
+const fundCore = (s) => squash(fundName(s).replace(/صندوق|سرمايه\s*‌?\s*گذاري|سرمایه\s*‌?\s*گذاری|مشترك|مشترک|(^|\s)(س|ص|ب)\.?(?=\s|$)/g, ' '));
+/**
+ * A fund named in a capture or a sheet («صندوق موفقیت») found in Fipiran's list by its own name («فیروزه موفقیت»):
+ * the one fund whose name holds those words (or is held by them). { hit } when exactly one fits, { many } when several do.
+ */
+export function matchFund(items, name) {
+  const want = fundCore(name);
+  if (want.length < 3) return { hit: null, many: 0 };
+  const fits = items.filter((f) => { const c = fundCore(f.name); return c && (c.includes(want) || want.includes(c)) || (f.symbol && squash(f.symbol) === want); });
+  const exact = fits.filter((f) => fundCore(f.name) === want || (f.symbol && squash(f.symbol) === want));
+  const list = exact.length ? exact : fits;
+  return list.length === 1 ? { hit: list[0], many: 1 } : { hit: null, many: list.length };
+}
+
 /** The fund a saved ref points at. Older refs hold only the regNo; for an umbrella fund the saved name picks the class. */
 export function findFund(items, ref) {
   const key = String(ref?.key ?? '');

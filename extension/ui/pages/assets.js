@@ -32,7 +32,7 @@ function SourceLine({ r }) {
   if (a.mode === 'balance') return html`<div class="src"><${Icon} n=${a.interest?.on ? 'percent' : 'edit'} cls="sm" />${a.interest?.on ? `مانده + سود روزشمار ${num(a.interest.annualPct, 2)}٪` : E.APPRAISED.has(a.category) ? 'برآورد دستی' : 'مانده دستی'}، ${ago(r.at)}</div>`;
   if (a.price?.source === 'market') {
     const ref = a.price.ref || {};
-    const pending = ref.provider === 'tsetmc' && !ref.key;
+    const pending = ref.provider === 'tsetmc' && !ref.key && !ref.notFound;
     return html`<div class="src" title=${r.error || r.note || ''}><${Icon} n=${r.status === 'error' ? 'wifi' : 'live'} cls="sm" />${providerName(ref)}، ${refLabel(ref)}${a.price.adjustPct ? html` <span class="ltr">(${a.price.adjustPct > 0 ? '+' : ''}${num(a.price.adjustPct, 2)}٪)</span>` : ''}${pending ? '، در انتظار شناسایی نماد' : ''}${r.status === 'error' && r.error ? html`، <span class="warn">${r.error}</span>` : ''}${r.note ? html`، <span class="approx" title=${r.note}>${r.quote?.approx ? 'تقریبی' : r.note}</span>` : ''}</div>`;
   }
   return html`<div class="src"><${Icon} n="edit" cls="sm" />قیمت دستی، ${ago(r.at)}</div>`;

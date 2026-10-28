@@ -194,18 +194,40 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     const pending = [...new Set(assets.map((a) => (a.mode === 'units' && a.price?.source === 'market' ? a.price.ref : null))
       .filter((ref) => ref?.provider === 'tsetmc' && !ref.key && ref.symbol && !(Date.now() - (failedAt[ref.symbol] || 0) < 6 * 3600000))
       .map((ref) => ref.symbol))].slice(0, 8);
-    if (pending.length && settings.providers.tsetmc !== false) {
+    // a symbol the exchange didn't know earlier and that hasn't been looked up in the fund list yet
+    const stuck = (r) => r?.provider === 'tsetmc' && !r.key && r.symbol && !r.notFound && failedAt[r.symbol];
+    let marked = false;
+    if ((pending.length || assets.some((a) => stuck(a.price?.ref))) && settings.providers.tsetmc !== false) {
       const hits = await Promise.allSettled(pending.map((sym) => P.tsetmcResolve(sym)));
       const fails = {};
       pending.forEach((sym, i) => { const h = hits[i].status === 'fulfilled' ? hits[i].value : null; if (h) resolved[sym] = h; else fails[sym] = Date.now(); });
       for (const a of assets) { const ref = a.price?.ref; const h = ref && !ref.key && resolved[ref.symbol]; if (h) { ref.key = h.insCode; ref.label = h.symbol; ref.name = h.name; } }
+      // not on the exchange: a fund bought by issue and redemption («صدور و ابطال») is priced by its NAV on Fipiran — the
+      // one fund there whose own name fits (an exchange-traded one found this way gets its exchange symbol)
+      // (also those the exchange didn't know in an earlier round — tried here once, then marked)
+      const misses = [...new Set([...Object.keys(fails), ...assets.map((a) => a.price?.ref).filter((r) => stuck(r) && !resolved[r.symbol]).map((r) => r.symbol)])].slice(0, 8);
+      if (misses.length && settings.providers.fipiran !== false) {
+        let funds = null;
+        try { funds = await P.fipiranFunds(); } catch { funds = null; }
+        for (const sym of funds ? misses : []) {
+          const { hit, many } = P.matchFund(funds, sym);
+          for (const a of assets) {
+            const ref = a.price?.ref; if (!ref || ref.key || ref.symbol !== sym || ref.provider !== 'tsetmc') continue;
+            if (hit) {
+              a.price = { ...a.price, ref: hit.traded && hit.insCode ? { provider: 'tsetmc', key: hit.insCode, symbol: hit.symbol || sym, label: hit.symbol || hit.name, name: hit.name, field: 'close' }
+                : { provider: 'fipiran', key: hit.key, name: hit.name, label: hit.name, field: 'cancelNav' } };
+              resolved[sym] = hit; delete fails[sym];
+            } else { ref.notFound = many > 1 ? 'many' : 'none'; marked = true; }
+          }
+        }
+      }
       if (Object.keys(fails).length) await store.update('meta', (m) => ({ ...m, symFail: { ...(m.symFail || {}), ...fails } }));
     }
-    if (Object.keys(resolved).length) {
-      // persist resolved keys on the freshest asset list
+    if (Object.keys(resolved).length || marked) {
+      // persist resolved keys (or a source found elsewhere, or «not found») on the freshest asset list
       assets = await store.update('assets', (list) => list.map((x) => {
         const m = assets.find((y) => y.id === x.id);
-        if (m?.price?.ref?.key && x.price?.ref && !x.price.ref.key) x.price.ref = { ...x.price.ref, ...m.price.ref };
+        if (m?.price?.ref && x.price?.ref && !x.price.ref.key && (m.price.ref.key || m.price.ref.notFound)) x.price.ref = m.price.ref.provider !== x.price.ref.provider ? { ...m.price.ref } : { ...x.price.ref, ...m.price.ref };
         return x;
       }));
     }

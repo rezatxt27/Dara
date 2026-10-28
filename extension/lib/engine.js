@@ -296,7 +296,11 @@ export function valueOf(asset, quotes = {}, settings = {}, now = Date.now(), opt
         error = raw?.error || (u.usd && !usdRate(quotes) ? 'نرخ دلار برای تبدیل در دسترس نیست' : 'قیمت آنلاین در دسترس نیست؛ آخرین قیمت معتبر استفاده شد');
       } else {
         status = 'error'; at = null;
-        error = raw?.error || (asset.price?.ref?.provider === 'tsetmc' && !asset.price.ref.key ? 'نماد هنوز شناسایی نشده' : 'قیمت آنلاین هنوز دریافت نشده');
+        const r0 = asset.price?.ref;
+        error = raw?.error || (r0?.provider === 'tsetmc' && !r0.key
+          ? (r0.notFound === 'many' ? 'چند صندوق یا نماد با این نام هست؛ ویرایش کن و از فهرست انتخاب کن'
+            : r0.notFound ? 'در بورس و فهرست صندوق‌ها پیدا نشد؛ ویرایش کن و منبع قیمت را از فهرست انتخاب کن' : 'نماد هنوز شناسایی نشده')
+          : 'قیمت آنلاین هنوز دریافت نشده');
       }
     } else {
       at = asset.price?.updatedAt || asset.updatedAt;

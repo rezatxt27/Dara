@@ -304,7 +304,8 @@ export async function tsetmcQuote(insCode, field = 'close') {
   const price = field === 'last' ? n(c.pDrCotVal) : n(c.pClosing);
   if (!(price > 0)) throw new Error('قیمتی برای این نماد ثبت نشده');
   const y = n(c.priceYesterday);
-  return { price, change: y > 0 ? price - y : 0, changePct: y > 0 ? (price - y) / y : 0, ...tseDate(c.dEven, c.hEven), source: 'tsetmc' };
+  // prev: the exchange's base for this session — after a split or capital increase it is the adjusted one, not the last close
+  return { price, change: y > 0 ? price - y : 0, changePct: y > 0 ? (price - y) / y : 0, ...(y > 0 ? { prev: y } : {}), ...tseDate(c.dEven, c.hEven), source: 'tsetmc' };
 }
 /**
  * Daily rows (newest first, as TSETMC sends them) → ascending [{date, close, raw, vol, val, py}] with closes ADJUSTED for

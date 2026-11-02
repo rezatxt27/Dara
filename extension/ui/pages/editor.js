@@ -203,6 +203,10 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
   const priceChanged = !isNew && a.mode === 'units' && asset?.mode === 'units' && a.price.source === 'manual' && asset?.price?.source !== 'market'
     && +a.price.value > 0 && +a.price.value !== +asset?.price?.value && +a.quantity > 0;
   const [priceWhy, setPriceWhy] = useState('market');
+  // more or fewer units of the same holding: bought or sold, or a split (1 → 10) where the money stays the same
+  const qtyChanged = !isNew && a.mode === 'units' && asset?.mode === 'units' && +asset?.quantity > 0 && +a.quantity > 0 && +a.quantity !== +asset.quantity;
+  const [qtyWhy, setQtyWhy] = useState('trade');
+  const splitRatio = qtyChanged ? +a.quantity / +asset.quantity : 1;
   const L = a.loan || blankLoan();
   const plan = a.mode === 'loan' && +L.amount > 0 && +L.months >= 1 ? E.loanState({ ...L, installment: +L.installment || null }, todayIso()) : null;
   const liabCat = !!cat.liability;
@@ -309,6 +313,7 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
       orig: asset || null,
       ...(appraised && balChanged ? { reval: why === 'reval' } : {}),
       ...(priceChanged && priceWhy === 'fix' ? { priceFix: true } : {}),
+      ...(qtyChanged && qtyWhy === 'split' ? { qtySplit: true } : {}),
       ...(isNew && fundOk && fund.on && fundAcc && fundAmt > 0 ? { fund: { accountId: fundAcc.id, amount: fundAmt } } : {}),
     });
     doneToast(isNew ? `«${out.name}» اضافه شد${out.mode === 'rate' || out.mode === 'loan' || out.interest?.on ? '؛ سود و قسط‌هایش در «خودکارسازی» دیده می‌شود' : ''}` : 'ذخیره شد', ev);
@@ -362,6 +367,9 @@ export function AssetEditor({ st, s, asset, preset, onClose }) {
           <${NumField} label=${LT('مقدار / تعداد', 'qty')} value=${a.quantity} onInput=${(v) => set({ quantity: v })} err=${E_('qty')} />
           <div class="field"><label>${LT('واحد', 'unit')}</label><input class="input" value=${a.unit || ''} onInput=${(e) => set({ unit: e.target.value })} placeholder="گرم، عدد، سهم، دلار…" /></div>
         </div>
+        ${qtyChanged && html`<${WhyChanged} value=${qtyWhy} onChange=${setQtyWhy} options=${[['trade', 'خریدم یا فروختم'], ['split', 'تجزیه یا تجمیع واحدها']]}
+          hint=${qtyWhy === 'split' ? `همان پول در ${splitRatio >= 1 ? 'واحدهای بیشتر' : 'واحدهای کمتر'} (${splitRatio >= 1 ? `۱ به ${num(splitRatio, 2)}` : `${num(1 / splitRatio, 2)} به ۱`}): نه پول تازه حساب می‌شود، نه سود یا زیان، و بهای تمام‌شده عوض نمی‌شود. دارا تجزیهٔ صندوق‌های بورسی را معمولاً خودش تشخیص می‌دهد.`
+            : 'مقدار اضافه یا کم‌شده با قیمت امروز، پول واردشده یا خارج‌شده حساب می‌شود.'} />`}
         <div class="row between"><span class="lbl">${LT('منبع قیمت', 'psrc')}</span><${Seg} value=${a.price.source} onChange=${(v) => setPrice({ source: v, ref: v === 'market' ? (a.price.ref || { ...(DEFAULT_REF[a.category] || { provider: 'tgju', key: 'geram18' }) }) : a.price.ref,
             ...(v === 'manual' && !(+a.price.value > 0) && val.unitPrice > 0 ? { value: Math.round(val.unitPrice) } : {}) })}
           options=${[['market', 'قیمت آنلاین خودکار'], ['manual', 'ورود دستی']]} /></div>

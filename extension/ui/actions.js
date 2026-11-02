@@ -153,14 +153,19 @@ export const act = {
           if (rec.mode === 'balance' && Math.abs(db) >= 1) changes.push({ assetId: rec.id, field: 'balance', delta: db, ...(reval ? { reval: true } : {}) });
           if (rec.mode === 'units' && num(x.quantity) !== num(rec.quantity)) {
             const dq = num(rec.quantity) - num(x.quantity);
-            changes.push({ assetId: rec.id, field: 'quantity', delta: dq, value: qtyValue(rec, dq, quotes) });
-            // the cost follows the quantity unless the user set the cost themselves
-            if (num(rec.costBasis) === num(x.costBasis)) rec.costBasis = costAfter(x, num(x.quantity), num(rec.quantity), quotes);
+            // a split (1 → 10 units): the same money in more units — worth nothing as a change, and the cost stays
+            if (opts.qtySplit && num(x.quantity) > 0) changes.push({ assetId: rec.id, field: 'quantity', delta: dq, value: 0, split: num(rec.quantity) / num(x.quantity) });
+            else {
+              changes.push({ assetId: rec.id, field: 'quantity', delta: dq, value: qtyValue(rec, dq, quotes) });
+              // the cost follows the quantity unless the user set the cost themselves
+              if (num(rec.costBasis) === num(x.costBasis)) rec.costBasis = costAfter(x, num(x.quantity), num(rec.quantity), quotes);
+            }
           }
           // a hand-typed price corrected (a typo, a wrong unit): a correction of the record, not a market move
           const fix = opts.priceFix && rec.mode === 'units' && x.mode === 'units' && rec.price?.source !== 'market' && x.price?.source !== 'market' && num(rec.price?.value) !== num(x.price?.value);
           if (fix) changes.push(priceFixChange(rec.id, x, num(rec.price.value)));
-          if (changes.length) ev = { id: uid('e'), kind: 'edit', date: today, at: now, title: `${fix && changes.length === 1 ? 'اصلاح قیمت' : 'ویرایش'} «${rec.name}»`, amount: 0, changes };
+          const split = changes.find((c) => c.split);
+          if (changes.length) ev = { id: uid('e'), kind: 'edit', date: today, at: now, title: split && changes.length === 1 ? `${split.split >= 1 ? 'تجزیه' : 'تجمیع'} واحدهای «${rec.name}»` : `${fix && changes.length === 1 ? 'اصلاح قیمت' : 'ویرایش'} «${rec.name}»`, amount: 0, changes };
         }
         list[i] = rec;
       } else {

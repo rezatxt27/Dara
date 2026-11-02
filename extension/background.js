@@ -8,7 +8,7 @@ import * as A from './lib/assistant.js';
 import * as I from './lib/insights.js';
 import { CORE_REFS, TGJU, TGJU_BY_KEY, NOBITEX_BY_KEY } from './lib/catalog.js';
 import { todayIso, addDaysIso, isoFromDate, isoToJ } from './lib/jalali.js';
-import { money, pct, uid } from './lib/format.js';
+import { money, pct, uid, num } from './lib/format.js';
 import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
@@ -252,7 +252,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
 
     // 3–5) Automations, today's snapshot and alerts on the freshest state, under the shared lock: a page saving at the
     //      same moment waits instead of being overwritten (or overwriting an installment that was just applied).
-    let autos, pf, snapshots, quotes, fired, meta, events;
+    let autos, pf, snapshots, quotes, fired, meta, events, splits = [];
     await store.mutate(['assets', 'flows', 'events', 'alerts', 'snapshots', 'meta', 'quotes', 'settings'], (cur) => {
       quotes = E.mergeQuotes(cur.quotes, fresh, errors);
       // a price that failed this time but came in within the last few hours isn't counted as missing
@@ -264,6 +264,9 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       catch (e) { console.error('[dara] automations failed', e); autoError = String(e?.message || e); autos = { assets: cur.assets, flows: cur.flows, events: [] }; }
       E.rememberLastPrices(autos.assets, quotes);
       events = autos.events.slice().reverse().concat(cur.events).slice(0, E.EVENTS_MAX);
+      // a fund's units split (1 → 10): more units, the same money — before today's value is saved
+      try { splits = E.applySplits(autos.assets, quotes, cur.snapshots, events, todayIso()); } catch (e) { console.error('[dara] split check failed', e); splits = []; }
+      if (splits.length) events = [...splits.map((x) => x.event), ...events].slice(0, E.EVENTS_MAX);
       E.settlePending(autos.assets, events, quotes);
       pf = E.portfolio(autos.assets, quotes, cur.settings);
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
@@ -276,6 +279,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     // 6) Notifications + badge
     await notifyAutomations(autos.events, autos.assets, settings);
     await notifyAlerts(fired, settings);
+    if (splits.length) notify('dara-split', 'تعداد واحدها به‌روز شد', splits.slice(0, 3).map((x) => `«${x.asset.name}»: ${x.event.title.match(/\(([^)]+)\)/)?.[1] || ''}؛ ${num(x.q0)} واحد شد ${num(x.q1)} واحد`).join('\n') + '\nارزشت عوض نشد؛ در تاریخچه «برگشت» هم دارد.');
     await maybeStaleNotice(pf, meta, settings);
     await updateBadge(pf, { assets: autos.assets, quotes, settings, snapshots, events });
     return { ok: okCount, errors: meta.errCount, events: autos.events.length };

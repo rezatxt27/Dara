@@ -1236,6 +1236,44 @@ export function mergeQuotes(stored, fetched, errors, now = Date.now()) {
   return out;
 }
 
+/**
+ * Unit splits (and reverse splits) of exchange-traded funds and shares: on the first session after one, the exchange's base
+ * price («قیمت دیروز») is the old price divided by the ratio. Held units are then the same money in more (or fewer) units:
+ * the quantity is multiplied by the ratio and logged as a change worth nothing — neither a gain nor money moved.
+ * Found by comparing each unit's value in the last saved day before today with the session's base price: a whole ratio
+ * (2, 3, 5, 10…) within a few percent (more when days were missed). Anything else — a dividend, a capital increase with
+ * new money — is not a split and is left alone. Only when the quantity hasn't changed since that day. Mutates assets;
+ * returns [{ asset, k, q0, q1, event }].
+ */
+export function applySplits(assets, quotes, snaps, events, today = todayIso(), now = Date.now()) {
+  const keys = Object.keys(snaps || {}).sort().filter((k) => k < today);
+  const day = keys[keys.length - 1]; const s = day ? snaps[day] : null;
+  if (!s?.v || s.est) return [];
+  const out = [];
+  for (const a of assets) {
+    if (a.archived || a.mode !== 'units' || a.price?.source !== 'market' || a.price.ref?.provider !== 'tsetmc' || !(+a.quantity > 0)) continue;
+    const q = quotes[quoteId(a.price.ref)];
+    if (!(q?.prev > 0) || q.error || !q.asOf || q.asOf <= day || s.old?.[a.id]) continue;
+    const then = Math.abs(+s.v[a.id] || 0); if (!(then > 0)) continue;
+    // the quantity must be the one that day's value was counted with
+    const moved = (events || []).some((e) => !e.undone && (e.at || 0) > (s.at || 0) && e.changes?.some((c) => c.assetId === a.id && ['quantity', 'value', 'add'].includes(c.field)));
+    if (moved) continue;
+    const adj = (+a.price.factor || 1) * (1 + (+a.price.adjustPct || 0) / 100);
+    const r = then / (+a.quantity) / adj / q.prev;
+    const tol = Math.min(0.08, 0.02 + 0.015 * (Math.max(1, daysBetween(day, q.asOf)) - 1));
+    let k = null;
+    if (r >= 1.8) { const kr = Math.round(r); if (kr >= 2 && kr <= 1000 && Math.abs(r / kr - 1) <= tol) k = kr; }
+    else if (r > 0 && r <= 0.56) { const kr = Math.round(1 / r); if (kr >= 2 && kr <= 1000 && Math.abs(1 / r / kr - 1) <= tol) k = 1 / kr; }
+    if (!k) continue;
+    const q0 = +a.quantity; const q1 = Math.round(q0 * k * 1e6) / 1e6;
+    a.quantity = q1; a.updatedAt = now;
+    const ratio = k >= 1 ? `۱ به ${num(k)}` : `${num(1 / k)} به ۱`;
+    out.push({ asset: a, k, q0, q1, event: { id: uid('e'), kind: 'edit', date: today, at: now, title: `${k >= 1 ? 'تجزیه' : 'تجمیع'} واحدهای «${a.name}» (${ratio})`, amount: 0, auto: true,
+      changes: [{ assetId: a.id, field: 'quantity', delta: q1 - q0, value: 0, split: k }] } });
+  }
+  return out;
+}
+
 /** Fill in corrections logged while the new price source had no price yet (see saveAsset). Mutates assets & events. */
 export function settlePending(assets, events, quotes) {
   for (const a of assets) {

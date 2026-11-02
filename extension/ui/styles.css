@@ -1018,3 +1018,7 @@ svg.rot { transform: rotate(180deg); }
   .rk-main { grid-template-columns: 18px minmax(0, 1fr) 60px; row-gap: 2px; }
   .rk-diff { grid-column: 2 / -1; grid-row: 2; text-align: start; }
 }
+
+/* fund type from Fipiran, on an asset row */
+.fk-tag { display: inline-block; padding: 0 6px; border-radius: 6px; background: var(--surface-3); color: var(--ink-2); font-size: 11px; line-height: 17px; margin-inline-end: 4px; vertical-align: 1px; }
+.fk-tag.risky { background: var(--neg-bg); color: var(--neg); }

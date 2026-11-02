@@ -91,7 +91,8 @@ export function compareOptions(st, pf, { amount, sourceId = 'new', a, b, months 
   };
 
   // the portfolio before, with new money counted as cash so both sides start from the same total
-  const base = pf.rows.filter((r) => !r.cat.liability && r.value > 0).map((r) => ({ id: r.asset.id, value: r.value, exposure: r.exposure, liq: r.asset.liquidity || r.cat.liquidity }));
+  // a mixed fund counts in each of its parts
+  const base = pf.rows.filter((r) => !r.cat.liability && r.value > 0).flatMap((r) => (r.parts || [[r.exposure, 1]]).map(([e, w], i) => ({ id: i ? `${r.asset.id}#${i}` : r.asset.id, value: r.value * w, exposure: e, liq: r.asset.liquidity || r.cat.liquidity })));
   if (!src) base.push({ id: '__new', value: P, exposure: 'rial', liq: 'high' });
   const before = shares(base);
 

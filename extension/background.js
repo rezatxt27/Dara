@@ -232,6 +232,18 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       }));
     }
 
+    // 1b) What each held fund is (fixed income, equity, mixed…), from Fipiran's list: it decides what the fund's value
+    //     moves with (inflation card, scenarios). Looked up for a new asset, a changed symbol, or once a week; a symbol
+    //     that isn't a fund is remembered as such (type 0) for the same week. Never blocks the cycle.
+    //     Runs alongside the price requests (a slow Fipiran never holds prices back); after a failure, tried again in 6 hours.
+    const kinds = {};
+    const kindsDue = settings.providers.fipiran !== false && !(Date.now() - (st.meta.fundKindFail || 0) < 6 * 3600000)
+      ? assets.filter((a) => E.fundKindDue(a, Date.now())) : [];
+    const kindsP = !kindsDue.length ? Promise.resolve(null) : P.fipiranFunds().then((funds) => {
+      for (const a of kindsDue) kinds[a.id] = E.fundKindOf(a.price.ref, funds, Date.now());
+      return true;
+    }, () => false);
+
     // 2) Fetch quotes
     // the extra currencies ride along on the price board (one request for all); fetched one by one only when used
     const refs = [...E.collectRefs(assets, st.alerts, [...CORE_REFS, ...TGJU.filter((t) => !t.more).map((t) => ({ provider: 'tgju', key: t.key })), ...(settings.watch || [])]),
@@ -245,6 +257,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
     if (Object.keys(nav.miss).length || nav.hit.some((k) => st.meta.navMiss?.[k])) {
       await store.update('meta', (m) => { const nm = { ...(m.navMiss || {}), ...nav.miss }; for (const k of nav.hit) delete nm[k]; return { ...m, navMiss: nm }; });
     }
+    const kindsOk = await kindsP;
     const okCount = Object.keys(fresh).filter((k) => !nav.aux.has(k)).length;
     // Only errors on prices you actually use count as problems (the rest of the board is optional)
     const relevant = new Set(E.collectRefs(assets, st.alerts, CORE_REFS).map((r) => P.quoteId(r)));
@@ -262,6 +275,8 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       let autoError;
       try { autos = E.applyAutomations(structuredClone(cur.assets), structuredClone(cur.flows), quotes, todayIso()); }
       catch (e) { console.error('[dara] automations failed', e); autoError = String(e?.message || e); autos = { assets: cur.assets, flows: cur.flows, events: [] }; }
+      // (only if the asset still points at the symbol that was looked up)
+      for (const a of autos.assets) if (kinds[a.id] && kinds[a.id].ref === E.fundRefId(a.price?.ref)) a.fundKind = kinds[a.id];
       E.rememberLastPrices(autos.assets, quotes);
       events = autos.events.slice().reverse().concat(cur.events).slice(0, E.EVENTS_MAX);
       // a fund's units split (1 → 10): more units, the same money — before today's value is saved
@@ -277,7 +292,7 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       pf = E.portfolio(autos.assets, quotes, cur.settings);
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
       fired = E.checkAlerts(cur.alerts, quotes);
-      meta = { ...cur.meta, priceAdjust, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
+      meta = { ...cur.meta, priceAdjust, fundKindFail: kindsOk === false ? Date.now() : kindsOk ? undefined : cur.meta.fundKindFail, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
         errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason, fatal: undefined, autoError };
       Object.assign(cur, { assets: autos.assets, flows: autos.flows, events, quotes, snapshots, meta });
     });

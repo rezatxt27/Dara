@@ -377,7 +377,7 @@ export function ranking(st, days, { depositPct = 25, inflationPct = defaultInfla
   let why = null;
   const byId = Object.fromEntries((st.assets || []).map((a) => [a.id, a]));
   const ex = {}; let g0 = 0;
-  for (const [id, v] of Object.entries(at.snap?.v || {})) { const a = byId[id]; if (!a || !(v > 0) || E.isLiability(a)) continue; const e = isCash(a) ? 'cash' : E.exposureOf(a); ex[e] = (ex[e] || 0) + v; g0 += v; }
+  for (const [id, v] of Object.entries(at.snap?.v || {})) { const a = byId[id]; if (!a || !(v > 0) || E.isLiability(a)) continue; for (const [e, w] of isCash(a) ? [['cash', 1]] : E.exposureParts(a)) ex[e] = (ex[e] || 0) + v * w; g0 += v; }
   for (const above of ranked.slice(0, rank - 1).reverse().filter((r) => r.kind === 'market' && r.own !== null)) {
     let best = null;
     for (const [e, v] of Object.entries(ex)) {
@@ -577,7 +577,7 @@ export function protectedShareAt(snap, assets = []) {
     if (!a) { unknown += +val; continue; }
     if (E.isLiability(a)) continue;
     gross += +val;
-    if (PROTECTED(E.exposureOf(a))) prot += +val;
+    for (const [e, w] of E.exposureParts(a)) if (PROTECTED(e)) prot += +val * w;
   }
   if (!gross || unknown > 0.05 * (gross + unknown)) return null;
   return prot / gross;
@@ -604,7 +604,7 @@ export function inflationCard(st, pf, today = todayIso()) {
   const g = pos.reduce((t, r) => t + r.value, 0);
   if (!(g > 0)) return null;
   const ex = {};
-  for (const r of pos) ex[r.exposure] = (ex[r.exposure] || 0) + r.value;
+  for (const r of pos) for (const [e, w] of r.parts || [[r.exposure, 1]]) ex[e] = (ex[e] || 0) + r.value * w;
   const unp = (ex.rial || 0) + (ex.other || 0);
   const share = (g - unp) / g;
   const parts = Object.entries(ex).filter(([k, v]) => PROTECTED(k) && v > 0)
@@ -612,8 +612,13 @@ export function inflationCard(st, pf, today = todayIso()) {
     .sort((a, b) => b.value - a.value);
   // what isn't protected, by category (a deposit, an account, money owed to you…)
   const rialBy = {};
-  for (const r of pos) if (!PROTECTED(r.exposure)) rialBy[r.cat.id] = (rialBy[r.cat.id] || 0) + r.value;
-  const unprotected = Object.entries(rialBy).map(([id, v]) => ({ id, name: CAT[id]?.short || id, value: v, share: v / g })).sort((a, b) => b.value - a.value);
+  // (a fund holding Rial — fixed income, the bond part of a mixed one — is shown as «صندوق‌ها (بخش ریالی)», not under «بورس»)
+  for (const r of pos) for (const [e, w] of r.parts || [[r.exposure, 1]]) {
+    if (PROTECTED(e)) continue;
+    const key = +r.asset.fundKind?.type > 0 && !r.asset.exposure && r.cat.id !== 'fixed' ? 'fund_rial' : r.cat.id;
+    rialBy[key] = (rialBy[key] || 0) + r.value * w;
+  }
+  const unprotected = Object.entries(rialBy).map(([id, v]) => ({ id, name: id === 'fund_rial' ? 'صندوق‌ها (بخش ریالی)' : CAT[id]?.short || id, value: v, share: v / g })).sort((a, b) => b.value - a.value);
   // the move: against a snapshot about a month old (not one from long ago standing in for «last month»)
   let delta = null;
   const past = E.snapshotBefore(st.snapshots || {}, 30, today);

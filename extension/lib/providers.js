@@ -416,9 +416,16 @@ export function parseFunds(raw) {
   return [...byKey.values()];
 }
 
+let fundsInFlight = null;
 /** maxAge: how old (ms) a cached list may be. NAVs change once a day, so a few minutes is plenty. */
 export async function fipiranFunds(maxAge = 30 * 60 * 1000) {
   if (fundCache.items.length && Date.now() - fundCache.at < maxAge) return fundCache.items;
+  // asked twice at once (prices and fund types in the same cycle): one download
+  if (fundsInFlight) return fundsInFlight;
+  fundsInFlight = loadFunds().finally(() => { fundsInFlight = null; });
+  return fundsInFlight;
+}
+async function loadFunds() {
   const ask = (timeout) => getJSON(FIPIRAN_FUNDS_URL, { method: 'POST', timeout, headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ regNos: [], showMarketMakers: false }) });
   // Fipiran is sometimes slow for a while (the list is ~0.5 MB): one more, longer try before giving up

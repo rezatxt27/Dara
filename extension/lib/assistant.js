@@ -121,7 +121,7 @@ export function makeTools(ctx) {
           ...(P() ? {} : { quantity: r.asset.mode === 'units' ? +(+r.asset.quantity).toFixed(6) : undefined, unit: r.asset.unit, unit_price: r.unitPrice ? disp(r.unitPrice, s.settings) : undefined, value: disp(r.signedValue, s.settings), pnl: r.pnl !== null ? disp(r.pnl, s.settings) : undefined }),
           share_pct: r.cat.liability ? null : pct(r.value / g), return_pct: r.ret !== null ? pct(r.ret) : undefined,
           price_source: r.asset.mode === 'units' ? (r.asset.price?.source === 'market' ? refName(r.asset.price.ref) : 'دستی') : r.asset.mode === 'rate' ? `نرخ ${r.asset.rate?.annualPct}٪` : r.asset.mode === 'loan' ? loanLine(r.asset, P() ? null : s.settings) : 'مانده',
-          status: r.status, exposure: EXPOSURES[r.exposure]?.name,
+          status: r.status, exposure: E.partsText(r.parts || [[r.exposure, 1]], (w) => `${Math.round(w * 100)}%`), ...(E.fundKindTag(r.asset.fundKind) ? { fund_type: E.fundKindTag(r.asset.fundKind).text } : {}),
         }));
       },
     },

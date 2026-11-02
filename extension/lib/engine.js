@@ -1,7 +1,7 @@
 // Valuation + automation + analytics engine. Pure functions shared by the service worker and the UI.
 // All money is Rial. Dates are ISO 'YYYY-MM-DD' (local calendar day); Jalali is used for schedules.
 import { CAT, CATEGORIES, EXPOSURES, GOLD_ETFS, TGJU_BY_KEY } from './catalog.js';
-import { quoteId, isUsdRef, isBlip, quoteOk } from './providers.js';
+import { quoteId, isUsdRef, isBlip, quoteOk, findFund, FUND_TYPES } from './providers.js';
 import { todayIso, daysBetween, addDaysIso, addJMonthsIso, isoToJ, jToIso, monthLength, isLeapJ, isoFromDate } from './jalali.js';
 import { uid, num } from './format.js';
 import * as BB from './bubble.js';
@@ -19,8 +19,72 @@ export const cashAccounts = (assets, { except = null, keep = [] } = {}) =>
 export const EVENTS_MAX = 8000;
 
 /** Exposure of an asset: explicit override → gold ETFs are gold → category default */
+/**
+ * What a fund holds, by Fipiran's type (a.fundKind, kept fresh by the worker): fixed income is Rial, a commodity fund is
+ * gold or metals by its name, equity-like ones are shares, real-estate ones property; a mixed (or fund-of-funds,
+ * pension) one is split by the mix it reports — shares, and the rest (bonds, deposits, cash) Rial. null: not known.
+ */
+export function fundParts(k) {
+  if (!k || !isFinite(+k.type)) return null;
+  const t = +k.type; const name = String(k.name || '');
+  if (t === 4 || t === 24) return [['rial', 1]];
+  if (t === 5) return [[/طلا|سکه|زر|gold/i.test(name) || GOLD_ETFS.includes(k.symbol || '') ? 'gold' : 'commodity', 1]];
+  if (t === 13 || t === 14 || t === 18) return [['real', 1]];
+  if (t === 7 || t === 17 || t === 25) {
+    const m = k.mix || {}; const eq = Math.max(0, +m.stock || 0); const rl = Math.max(0, (+m.bond || 0) + (+m.deposit || 0) + (+m.cash || 0));
+    if (!(eq + rl > 0)) return [['equity', 1]];
+    return [['equity', eq / (eq + rl)], ['rial', rl / (eq + rl)]].filter(([, w]) => w > 0.0005);
+  }
+  if ([6, 11, 12, 16, 21, 22, 23].includes(t)) return [['equity', 1]];
+  return null;
+}
+/** A fund's type as a short tag for its row («درآمد ثابت»); risky: a leveraged fund. null: not a fund Fipiran knows. */
+export function fundKindTag(k) {
+  if (!k || !(+k.type > 0)) return null;
+  const t = +k.type;
+  return { text: FUND_TYPES[t] || 'صندوق', risky: t === 22 };
+}
+/** «سهام ۴۰٪ + ریالی ۶۰٪»: what an asset's value moves with, in words. */
+export function partsText(parts, pctFmt) {
+  return parts.length === 1 ? (EXPOSURES[parts[0][0]]?.name || '—') : parts.map(([e, w]) => `${EXPOSURES[e]?.name || e} ${pctFmt(w)}`).join(' + ');
+}
+/** The price source a fund kind was looked up for ('' for one that can't be a fund on Fipiran's list). */
+export function fundRefId(ref) {
+  if (ref?.provider === 'fipiran' && ref.key) return `fipiran:${ref.key}`;
+  if (ref?.provider === 'tsetmc' && ref.key) return `tsetmc:${ref.key}`;
+  return '';
+}
+export const FUND_KIND_DAYS = 7;
+/** Whether an asset's fund kind should be looked up now: never looked up, its symbol changed, or a week old. */
+export function fundKindDue(a, now = Date.now()) {
+  if (!a || isLiability(a) || a.mode !== 'units' || a.price?.source !== 'market') return false;
+  const id = fundRefId(a.price.ref);
+  if (!id) return false;
+  const k = a.fundKind;
+  return !k || k.ref !== id || !(now - (k.at || 0) < FUND_KIND_DAYS * 86400000);
+}
+/** The fund a price source points at in Fipiran's list → what is kept on the asset; type 0: not a fund. */
+export function fundKindOf(ref, funds, now = Date.now()) {
+  const id = fundRefId(ref);
+  const f = ref.provider === 'fipiran' ? findFund(funds, ref) : funds.find((x) => x.insCode && x.insCode === String(ref.key));
+  if (!f || !(+f.fundType > 0)) return { ref: id, type: 0, at: now };
+  const m = f.mix || {};
+  return { ref: id, type: +f.fundType, name: f.name, symbol: f.symbol || '', at: now,
+    mix: { stock: +m.stock || 0, bond: +m.bond || 0, deposit: +m.deposit || 0, cash: +m.cash || 0, other: +m.other || 0 } };
+}
+/**
+ * What an asset's value moves with, as parts that add up to 1: [[exposure, weight]]. One part for almost everything;
+ * a mixed fund is split. The owner's own choice (a.exposure) wins over everything.
+ */
+export function exposureParts(a) {
+  if (a.exposure && EXPOSURES[a.exposure]) return [[a.exposure, 1]];
+  if (!isLiability(a)) { const f = fundParts(a.fundKind); if (f?.length) return f; }
+  return [[exposureOf(a), 1]];
+}
 export function exposureOf(a) {
   if (a.exposure && EXPOSURES[a.exposure]) return a.exposure;
+  // a fund Fipiran knows: its type (a mixed one by its larger part)
+  if (!isLiability(a)) { const f = fundParts(a.fundKind); if (f?.length) return f.slice().sort((x, y) => y[1] - x[1])[0][0]; }
   const c = CAT[a.category] || CAT.other;
   const key = a.price?.ref?.provider === 'nobitex' ? a.price.ref.key : null;
   if (key === 'usdt') return 'fx';                    // stablecoin ≈ dollar
@@ -353,11 +417,12 @@ export function portfolio(assets = [], quotes = {}, settings = {}, now = Date.no
     const v = valueOf(a, quotes, settings, now, opts);
     const cat = CAT[a.category] || CAT.other;
     const exposure = exposureOf(a);
-    rows.push({ asset: a, cat, exposure, ...v });
+    const parts = exposureParts(a);
+    rows.push({ asset: a, cat, exposure, parts, ...v });
     if (cat.liability) debt += v.value;
     else {
       gross += v.value;
-      byExposure[exposure] = (byExposure[exposure] || 0) + v.value;
+      for (const [e, w] of parts) byExposure[e] = (byExposure[e] || 0) + v.value * w;
       const lq = a.liquidity || cat.liquidity;
       byLiquidity[lq] = (byLiquidity[lq] || 0) + v.value;
       // same name however it was typed (Arabic ي/ك, extra spaces), and blanks together — like the assets page groups them
@@ -980,8 +1045,11 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
  */
 export function shockFactor(a, s = {}, bubble = null) {
   if (isLiability(a)) return 1;
+  // a mixed fund moves with each of its parts, by weight
+  return exposureParts(a).reduce((t, [e, w]) => t + w * shockOne(e, a, s, bubble), 0);
+}
+function shockOne(exp, a, s, bubble) {
   const usd = 1 + (+s.usd || 0);
-  const exp = exposureOf(a);
   // a coin or gold fund sells for its gold × (1 + bubble); s.bubble scales the bubble itself (−1 = it disappears)
   const k = +s.bubble || 0;
   const bf = k && isFinite(bubble) && bubble > -1 ? (1 + bubble * (1 + k)) / (1 + bubble) : 1;
@@ -998,7 +1066,13 @@ export function shockFactor(a, s = {}, bubble = null) {
 export function simulate(assets, quotes, settings, shocks = {}, pf = null) {
   pf = pf || portfolio(assets, quotes, settings);
   const now = Date.now();
-  const rows = pf.rows.map((r) => { const f = shockFactor(r.asset, shocks, shocks.bubble ? ((b) => (b && !b.stale ? b.bubble : null))(BB.assetBubble(r.asset, quotes, null, now)) : null); return { asset: r.asset, cat: r.cat, exposure: r.exposure, before: r.signedValue, after: r.signedValue * f, factor: f }; });
+  const rows = pf.rows.map((r) => {
+    const bub = shocks.bubble ? ((b) => (b && !b.stale ? b.bubble : null))(BB.assetBubble(r.asset, quotes, null, now)) : null;
+    const f = shockFactor(r.asset, shocks, bub);
+    // each part of a mixed fund moves its own way (for the by-exposure bars)
+    const parts = (r.parts || [[r.exposure, 1]]).map(([e, w]) => ({ e, before: r.signedValue * w, after: r.signedValue * w * (r.cat.liability ? 1 : shockOne(e, r.asset, shocks, bub)) }));
+    return { asset: r.asset, cat: r.cat, exposure: r.exposure, before: r.signedValue, after: r.signedValue * f, factor: f, parts };
+  });
   const after = rows.reduce((x, r) => x + r.after, 0);
   const before = pf.net;
   const rates = denomRates(quotes);
@@ -1007,8 +1081,10 @@ export function simulate(assets, quotes, settings, shocks = {}, pf = null) {
   const byExp = {};
   for (const r of rows) {
     if (r.cat.liability) continue;
-    const e = byExp[r.exposure] ||= { id: r.exposure, name: EXPOSURES[r.exposure]?.name || r.exposure, color: EXPOSURES[r.exposure]?.color, before: 0, after: 0 };
-    e.before += r.before; e.after += r.after;
+    for (const p of r.parts) {
+      const e = byExp[p.e] ||= { id: p.e, name: EXPOSURES[p.e]?.name || p.e, color: EXPOSURES[p.e]?.color, before: 0, after: 0 };
+      e.before += p.before; e.after += p.after;
+    }
   }
   return {
     before, after, delta: after - before, pct: before ? (after - before) / Math.abs(before) : 0,

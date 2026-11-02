@@ -267,11 +267,17 @@ async function runCycle({ force = false, reason = 'alarm' } = {}) {
       // a fund's units split (1 → 10): more units, the same money — before today's value is saved
       try { splits = E.applySplits(autos.assets, quotes, cur.snapshots, events, todayIso()); } catch (e) { console.error('[dara] split check failed', e); splits = []; }
       if (splits.length) events = [...splits.map((x) => x.event), ...events].slice(0, E.EVENTS_MAX);
+      // shares whose base price was adjusted overnight (capital increase, dividend): told in «نیاز به توجه» for a few days
+      let adjusts = [];
+      try { adjusts = E.priceAdjustments(autos.assets, quotes, cur.snapshots, events, todayIso()); } catch { adjusts = []; }
+      const keepFrom = addDaysIso(todayIso(), -3);
+      const priceAdjust = Object.fromEntries([...Object.entries(cur.meta.priceAdjust || {}).filter(([id, x]) => x.day >= keepFrom && autos.assets.some((a) => a.id === id)),
+        ...adjusts.map((x) => [x.assetId, { ...x, at: Date.now() }])]);
       E.settlePending(autos.assets, events, quotes);
       pf = E.portfolio(autos.assets, quotes, cur.settings);
       snapshots = E.pruneSnapshots({ ...cur.snapshots, [todayIso()]: E.makeSnapshot(pf, quotes) });
       fired = E.checkAlerts(cur.alerts, quotes);
-      meta = { ...cur.meta, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
+      meta = { ...cur.meta, priceAdjust, running: false, lastRun: Date.now(), lastOk: okCount ? Date.now() : cur.meta.lastOk,
         errors: relErrors, okCount, errCount: Object.keys(relErrors).length, duration: Date.now() - t0, reason, fatal: undefined, autoError };
       Object.assign(cur, { assets: autos.assets, flows: autos.flows, events, quotes, snapshots, meta });
     });

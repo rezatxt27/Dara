@@ -1237,39 +1237,76 @@ export function mergeQuotes(stored, fetched, errors, now = Date.now()) {
 }
 
 /**
- * Unit splits (and reverse splits) of exchange-traded funds and shares: on the first session after one, the exchange's base
- * price («قیمت دیروز») is the old price divided by the ratio. Held units are then the same money in more (or fewer) units:
- * the quantity is multiplied by the ratio and logged as a change worth nothing — neither a gain nor money moved.
- * Found by comparing each unit's value in the last saved day before today with the session's base price: a whole ratio
- * (2, 3, 5, 10…) within a few percent (more when days were missed). Anything else — a dividend, a capital increase with
- * new money — is not a split and is left alone. Only when the quantity hasn't changed since that day. Mutates assets;
- * returns [{ asset, k, q0, q1, event }].
+ * What a held unit was worth on the last saved day before today against today's price base, for assets priced on the
+ * exchange or by a fund's NAV: { r, day, q, unit0 } where r = that day's unit value ÷ today's base. The base is the
+ * exchange's «قیمت دیروز» (adjusted after a split, a capital increase or a dividend); a NAV has none, so for a fund
+ * priced by its NAV it is today's NAV. Only when the quantity is the one that day's value was counted with, the price
+ * that day was current and the day was really saved (not rebuilt). null otherwise.
+ */
+function priceBase(a, quotes, s, day, events) {
+  if (a.archived || a.mode !== 'units' || a.price?.source !== 'market' || !(+a.quantity > 0)) return null;
+  const ref = a.price.ref; const prov = ref?.provider;
+  if (prov !== 'tsetmc' && prov !== 'fipiran') return null;
+  const q = quotes[quoteId(ref)];
+  if (!q || q.error || !q.asOf || q.asOf <= day || s.old?.[a.id]) return null;
+  const base = q.prev > 0 ? q.prev : prov === 'fipiran' || ref.field === 'nav' ? q.price : 0;
+  if (!(base > 0)) return null;
+  const then = Math.abs(+s.v?.[a.id] || 0); if (!(then > 0)) return null;
+  const moved = (events || []).some((e) => !e.undone && (e.at || 0) > (s.at || 0) && e.changes?.some((c) => c.assetId === a.id && ['quantity', 'value', 'add'].includes(c.field)));
+  if (moved) return null;
+  const adj = (+a.price.factor || 1) * (1 + (+a.price.adjustPct || 0) / 100);
+  const unit0 = then / (+a.quantity) / adj;
+  return { r: unit0 / base, day, q, unit0, nav: !(q.prev > 0) };
+}
+/** A whole ratio (2, 3, 10… or ½, ⅒…) within `tol`, else null. */
+function wholeRatio(r, tol) {
+  if (r >= 1.8) { const k = Math.round(r); return k >= 2 && k <= 1000 && Math.abs(r / k - 1) <= tol ? k : null; }
+  if (r > 0 && r <= 0.56) { const k = Math.round(1 / r); return k >= 2 && k <= 1000 && Math.abs(1 / r / k - 1) <= tol ? 1 / k : null; }
+  return null;
+}
+/** An exchange-traded fund (its NAV is fetched alongside) or a fund priced by its NAV: units of the same pool of money. */
+const isFundRef = (ref, quotes) => ref?.provider === 'fipiran' || ref?.field === 'nav' || /صندوق|ص\.|^ص\s/.test(`${ref?.name || ''}`)
+  || quotes?.[`tsetmc:${ref?.key}:nav`]?.price > 0;
+const lastSaved = (snaps, today) => { const keys = Object.keys(snaps || {}).sort().filter((k) => k < today); const day = keys[keys.length - 1]; const s = day ? snaps[day] : null; return s?.v && !s.est ? { day, s } : null; };
+
+/**
+ * Unit splits (and reverse splits) of funds: on the first session after one, the exchange's base price («قیمت دیروز»)
+ * — or, for a fund priced by its NAV, the NAV itself — is the old price divided by a whole ratio. Held units are then the
+ * same money in more (or fewer) units: the quantity is multiplied by the ratio and logged as a change worth nothing —
+ * neither a gain nor money moved. Shares are not changed here (a halved base there may be bonus shares or a rights issue —
+ * see priceAdjustments). Mutates assets; returns [{ asset, k, q0, q1, event }].
  */
 export function applySplits(assets, quotes, snaps, events, today = todayIso(), now = Date.now()) {
-  const keys = Object.keys(snaps || {}).sort().filter((k) => k < today);
-  const day = keys[keys.length - 1]; const s = day ? snaps[day] : null;
-  if (!s?.v || s.est) return [];
+  const L = lastSaved(snaps, today); if (!L) return [];
   const out = [];
   for (const a of assets) {
-    if (a.archived || a.mode !== 'units' || a.price?.source !== 'market' || a.price.ref?.provider !== 'tsetmc' || !(+a.quantity > 0)) continue;
-    const q = quotes[quoteId(a.price.ref)];
-    if (!(q?.prev > 0) || q.error || !q.asOf || q.asOf <= day || s.old?.[a.id]) continue;
-    const then = Math.abs(+s.v[a.id] || 0); if (!(then > 0)) continue;
-    // the quantity must be the one that day's value was counted with
-    const moved = (events || []).some((e) => !e.undone && (e.at || 0) > (s.at || 0) && e.changes?.some((c) => c.assetId === a.id && ['quantity', 'value', 'add'].includes(c.field)));
-    if (moved) continue;
-    const adj = (+a.price.factor || 1) * (1 + (+a.price.adjustPct || 0) / 100);
-    const r = then / (+a.quantity) / adj / q.prev;
-    const tol = Math.min(0.08, 0.02 + 0.015 * (Math.max(1, daysBetween(day, q.asOf)) - 1));
-    let k = null;
-    if (r >= 1.8) { const kr = Math.round(r); if (kr >= 2 && kr <= 1000 && Math.abs(r / kr - 1) <= tol) k = kr; }
-    else if (r > 0 && r <= 0.56) { const kr = Math.round(1 / r); if (kr >= 2 && kr <= 1000 && Math.abs(1 / r / kr - 1) <= tol) k = 1 / kr; }
-    if (!k) continue;
+    if (!isFundRef(a.price?.ref, quotes)) continue;
+    const b = priceBase(a, quotes, L.s, L.day, events); if (!b) continue;
+    // a NAV moves with the market too: a tighter window (no fund halves or doubles in a day otherwise)
+    const tol = b.nav ? 0.04 : Math.min(0.08, 0.02 + 0.015 * (Math.max(1, daysBetween(L.day, b.q.asOf)) - 1));
+    const k = wholeRatio(b.r, tol); if (!k) continue;
     const q0 = +a.quantity; const q1 = Math.round(q0 * k * 1e6) / 1e6;
     a.quantity = q1; a.updatedAt = now;
     const ratio = k >= 1 ? `۱ به ${num(k)}` : `${num(1 / k)} به ۱`;
     out.push({ asset: a, k, q0, q1, event: { id: uid('e'), kind: 'edit', date: today, at: now, title: `${k >= 1 ? 'تجزیه' : 'تجمیع'} واحدهای «${a.name}» (${ratio})`, amount: 0, auto: true,
       changes: [{ assetId: a.id, field: 'quantity', delta: q1 - q0, value: 0, split: k }] } });
+  }
+  return out;
+}
+
+/**
+ * Shares whose exchange base price was adjusted overnight — a capital increase (bonus shares or a rights issue) or a
+ * dividend: the drop is not the market's, but Dara can't tell which it was. Returned for «نیاز به توجه» so the owner
+ * records it: [{ assetId, name, r (old ÷ new base), k (a whole ratio, when it is one), day }].
+ */
+export function priceAdjustments(assets, quotes, snaps, events, today = todayIso()) {
+  const L = lastSaved(snaps, today); if (!L) return [];
+  const out = [];
+  for (const a of assets) {
+    if (a.price?.ref?.provider !== 'tsetmc' || isFundRef(a.price.ref, quotes)) continue;
+    const b = priceBase(a, quotes, L.s, L.day, events); if (!b || b.nav) continue;
+    if (b.r < 1.05 && b.r > 0.95) continue; // an ordinary day (and the last saved value taken a little before the close)
+    out.push({ assetId: a.id, name: a.name, r: b.r, k: wholeRatio(b.r, 0.03), day: b.q.asOf });
   }
   return out;
 }

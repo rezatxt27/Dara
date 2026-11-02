@@ -696,6 +696,15 @@ export function attentionItems(st, pf, today = todayIso(), now = Date.now()) {
   if (delayed.length === 1) items.push({ tone: 'info', text: `قیمت آنلاین «${delayed[0].asset.name}» قدیمی است`, assetId: delayed[0].asset.id, rank: 6 });
   else if (delayed.length > 1) items.push({ tone: 'info', text: `قیمت آنلاین ${num(delayed.length)} دارایی قدیمی است`, href: '#/assets?f=attention', rank: 6, n: delayed.length });
 
+  // a share's base price adjusted overnight by the exchange (capital increase, dividend): the drop isn't the market's
+  for (const [id, x] of Object.entries(st.meta?.priceAdjust || {})) {
+    const a = st.assets.find((y) => y.id === id); if (!a || a.archived) continue;
+    const done = (st.events || []).some((e) => !e.undone && (e.at || 0) > (x.at || 0) && e.changes?.some((c) => c.assetId === id && c.field === 'quantity'));
+    if (done) continue;
+    items.push({ tone: 'warn', assetId: id, rank: 1, text: x.k >= 2
+      ? `قیمت پایهٔ «${a.name}» در بورس ۱ به ${num(x.k)} تعدیل شد (افزایش سرمایه)؛ اگر سهام جایزه گرفتی، مقدار را ${num(x.k)} برابر کن و «تجزیه یا تجمیع واحدها» را بزن`
+      : `قیمت پایهٔ «${a.name}» در بورس ${pct(1 - 1 / x.r, { sign: false, digits: 0 })} پایین آمد (سود نقدی یا افزایش سرمایه)، نه از معاملات؛ سود نقدی را به‌عنوان «مطالبات» و حق تقدم را جدا ثبت کن تا زیان حساب نشود` });
+  }
   const byId = Object.fromEntries(st.assets.map((a) => [a.id, a]));
   const valueOf = Object.fromEntries(pf.rows.map((r) => [r.asset.id, r.value]));
   const up = E.upcoming(st.assets, st.flows || [], 14, today);

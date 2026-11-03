@@ -104,7 +104,7 @@ async def main():
             txt = await pg.inner_text('.page')
             for sig in ['روند قوی، ۱۲ ماه', 'حجم غیرعادی', 'ارزان نسبت به گروه', 'نزدیک کف سالانه، سودده', 'صندوق زیر NAV', 'درآمد ثابت بهتر از سپرده', 'پربازده‌ترین صندوق‌ها']:
                 check(f'section «{sig}»', sig in txt)
-            hot = pg.locator('.rd-card:has-text("داغ")').first
+            hot = pg.locator('.rd-sec:has(h4:text-is("روند قوی، ۱۲ ماه")) .rd-card:has-text("داغ")').first
             ht = await hot.inner_text()
             check('a card says why it showed up and what to check', 'چرا دیده شد' in ht and 'پیش از تصمیم ببین' in ht and '۲۰۰٪' in ht and 'گران‌تر از هم‌گروه‌ها' in ht, ht[:200].replace('\n', ' | '))
             check('new since last session is marked «تازه»', await hot.locator('.pill:has-text("تازه")').count() == 1)
@@ -164,7 +164,7 @@ async def main():
             check('holdings: a fixed-income fund under the deposit is flagged', 'کمتر از سپرده' in dep, dep.replace('\n', ' | '))
             last = await mine.locator('.rd-mrow').last.inner_text()
             check('holdings: rows with warnings first, unknown ones last', 'هنوز در داده‌های رادار نیست' in last or 'پوشش نمی‌دهد' in last, last[:80])
-            card = pg.locator('.rd-card:has-text("شرکت رشد تند")').first
+            card = pg.locator('.rd-sec:has(h4:text-is("روند قوی، ۱۲ ماه")) .rd-card:has-text("شرکت رشد تند")').first
             check('cards: a year sparkline and the year bar', await card.locator('.rd-spark svg path').count() >= 1 and await card.locator('.yb-t i').count() == 1)
             pos = await card.locator('.yb-t i').evaluate("e => parseFloat(e.style.left)")
             check('year bar: a stock at its high sits at the right end', pos >= 99, pos)
@@ -202,7 +202,7 @@ async def main():
             check('it opens the whole list', n1 > 6 and str(n1) in mtxt.translate(FA), (n1, mtxt))
             await more.click(); await pg.wait_for_timeout(300)
             check('every section has its ⓘ', await pg.locator('.rd-sec-h .tipbtn').count() >= 6)
-            hot = await pg.locator('.rd-card:has-text("شرکت رشد تند")').first.inner_text()
+            hot = await pg.locator('.rd-sec:has(h4:text-is("روند قوی، ۱۲ ماه")) .rd-card:has-text("شرکت رشد تند")').first.inner_text()
             check('momentum card: index and dollar over the same 12 months', 'در همین ۱۲ ماه: شاخص کل' in hot and 'دلار' in hot, hot[:300].replace('\n', ' | '))
             check('card: earnings yield against the deposit, and risk in plain words', 'سود برآوردی سالانهٔ هر سهم' in hot and 'نوسان روزانه' in hot, hot[:400].replace('\n', ' | '))
             check('header: how fresh the funds are', 'صندوق‌ها' in ' '.join(await pg.locator('.rd-top .sub').all_inner_texts()))

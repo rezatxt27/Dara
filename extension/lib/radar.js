@@ -17,6 +17,7 @@ export const FULL_ROWS = 270;          // trading days fetched to build a stock'
 export const LIQ = 1e10;               // average daily value (Rial) below which a stock is too thin to rank
 export const MIN_SECTOR = 5;           // stocks with a positive P/E a sector needs before its median means anything
 export const FINAL_AFTER = 13 * 60 + 30; // Tehran minutes after which a session's closing prices are final
+export const BRK = 126;                // sessions (~6 months) whose highest close a breakout passes
 
 /* ---------------------------------------- days ---------------------------------------- */
 export const dayNum = (iso) => Math.round(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 864e5);
@@ -247,14 +248,20 @@ function flowMetrics(rec, D, sess) {
   const s5 = lastSessions(sess, D, 5), s20 = lastSessions(sess, D, 20);
   const fl = (rec.fl || []).filter((x) => x[0] <= D);
   const l5 = fl.filter((x) => s5.has(x[0])), l20 = fl.filter((x) => s20.has(x[0]));
-  if (!l5.length) return { flowN: 0, flow5: null, flow20: l20.length ? l20.reduce((a, x) => a + x[1], 0) : null, flowShare5: null, flowPos5: null, power: null, flowToday: null };
+  // persistence: the last 7 sessions (money in on most of them), and buyer power over the last 3
+  const s7 = lastSessions(sess, D, 7), s3 = lastSessions(sess, D, 3);
+  const l7 = fl.filter((x) => s7.has(x[0])), l3 = fl.filter((x) => s3.has(x[0]));
+  const pw3 = l3.map((x) => x[2]).filter((v) => v !== null && v !== undefined && isFinite(v));
+  const run = { flowN7: l7.length, flowPos7: l7.filter((x) => x[1] > 0).length, flow7: l7.length ? l7.reduce((a, x) => a + x[1], 0) : null,
+    flow3: l3.length ? l3.reduce((a, x) => a + x[1], 0) : null, powerN3: pw3.length, powerMin3: pw3.length ? Math.min(...pw3) : null, powerMax3: pw3.length ? Math.max(...pw3) : null };
+  if (!l5.length) return { flowN: 0, flow5: null, flow20: l20.length ? l20.reduce((a, x) => a + x[1], 0) : null, flowShare5: null, flowPos5: null, power: null, flowToday: null, ...run };
   const val = new Map((rec.h || []).map((x) => [x[0], x[2]]));
   const sum = (l) => l.reduce((a, x) => a + x[1], 0);
   const both = l5.filter((x) => val.get(x[0]) > 0);
   const v5 = both.reduce((a, x) => a + val.get(x[0]), 0);
   const last = fl[fl.length - 1];
   return { flowN: l5.length, flow5: sum(l5), flow20: sum(l20), flowShare5: v5 > 0 ? sum(both) / v5 : null, flowPos5: l5.filter((x) => x[1] > 0).length,
-    flowToday: last[0] === D ? last[1] : null, power: last[0] === D ? last[2] : null };
+    flowToday: last[0] === D ? last[1] : null, power: last[0] === D ? last[2] : null, ...run };
 }
 
 /* --------------------------------------- numbers --------------------------------------- */
@@ -289,6 +296,12 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
   let peak = 0, dd = 0; for (const v of yr) { if (v > peak) peak = v; else if (peak > 0) dd = Math.min(dd, v / peak - 1); }
   const rr = []; for (let i = Math.max(1, n - 120); i < n; i++) if (rec.d[i] >= D - 200 && rec.p[i - 1] > 0 && rec.p[i] !== rec.p[i - 1]) rr.push(Math.log(rec.p[i] / rec.p[i - 1]));
   const mu = rr.length ? rr.reduce((a, b) => a + b, 0) / rr.length : 0;
+  // the highest close of the BRK sessions before the last one; a breakout is the first close above it (the close before
+  // was not above its own ceiling) on this very session
+  const ceil = (end) => { if (end < BRK) return null; let mx = -Infinity; for (let i = end - BRK; i < end; i++) if (rec.p[i] > mx) mx = rec.p[i]; return mx; };
+  const hi6 = n ? ceil(n - 1) : null, hi6Prev = n > 1 ? ceil(n - 2) : null;
+  const brkFresh = hi6 !== null && hi6Prev !== null && rec.d[n - 1] === D && rec.p[n - 1] > hi6 && !(rec.p[n - 2] > hi6Prev);
+  let lo10 = null; if (n >= 10) { lo10 = Infinity; for (let i = n - 10; i < n; i++) lo10 = Math.min(lo10, rec.p[i]); }
   const dvol = rr.length >= 30 ? Math.sqrt(rr.reduce((a, b) => a + (b - mu) ** 2, 0) / (rr.length - 1)) : null;
   return {
     close, ret7: ret(7), ret30: ret(30), ret91: ret(91), ret182: ret(182), ret365: ret(365),
@@ -297,6 +310,7 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
     traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
     peRel: isFinite(rec.pe) && rec.pe > 0 && mPE > 0 ? rec.pe / mPE : null, dayChange: rec.today?.py > 0 ? rec.today.close / rec.today.py - 1 : null,
     dd1y: fullYear && yr.length > 20 ? dd : null, dvol, ey: isFinite(rec.pe) && rec.pe > 0 && rec.eps > 0 ? 1 / rec.pe : null,
+    hi6, brk: brkFresh, lo10,
     ...flowMetrics(rec, D, sess),
   };
 }
@@ -489,8 +503,13 @@ const N = (x, d = 1) => (x === null || !isFinite(x) ? '—' : (+x.toFixed(d)).to
 const fa = (s) => String(s).replace(/\d/g, (c) => '۰۱۲۳۴۵۶۷۸۹'[c]).replace(/\./g, '٫');
 
 export const SIGNALS = {
+  cand: { t: 'کاندیداهای رشد', kind: 'stock' },
   top: { t: 'بالاترین امتیاز ترکیبی امروز', kind: 'stock' },
   inflow: { t: 'ورود پول حقیقی', kind: 'stock' },
+  flowRun: { t: 'پول حقیقی پیاپی', kind: 'stock' },
+  buyerPower: { t: 'قدرت خریدار پیاپی', kind: 'stock' },
+  breakout: { t: 'شکست سقف ۶ ماه با حجم', kind: 'stock' },
+  strength: { t: 'قوی‌تر از شاخص', kind: 'stock' },
   momentum12: { t: 'روند قوی، ۱۲ ماه', kind: 'stock' },
   momentum3: { t: 'روند قوی، ۳ ماه', kind: 'stock' },
   volume: { t: 'حجم غیرعادی', kind: 'stock' },
@@ -533,6 +552,132 @@ function fundChecks(f, m, money) {
   c.push('بازدهی گذشته است و تضمینی برای آینده نیست');
   return c;
 }
+/* ------------------------------------- red flags ------------------------------------- */
+/**
+ * What argues against a stock, whatever brought it up: [{ k, t, severe }]. A severe one (not traded, heavy individual
+ * selling, a fall on heavy volume) keeps it off the candidates; the others are only said.
+ */
+export function stockFlags(m) {
+  const f = []; const add = (k, t, severe = false) => f.push({ k, t, severe });
+  if (!m) return f;
+  if (!m.traded) add('idle', 'بیش از یک هفته معامله نشده؛ شاید متوقف است', true);
+  if (m.flowN >= 3 && m.flowShare5 !== null && m.flowShare5 <= -0.08 && m.flowPos5 <= 1) add('outflow', `خروج سنگین پول حقیقی: ${fa(P0(-m.flowShare5))} ارزش معاملات ${fa(Math.min(5, m.flowN))} جلسهٔ اخیر`, true);
+  if (m.dayChange !== null && m.dayChange <= -0.03 && m.volRatio >= 2) add('dump', `امروز ${fa(P(m.dayChange, 1))} با حجم ${fa(N(m.volRatio))} برابر معمول`, true);
+  if (m.powerN3 >= 3 && m.powerMax3 !== null && m.powerMax3 <= 0.8) add('sellers', 'سه جلسهٔ پیاپی سرانهٔ فروش حقیقی بیشتر از سرانهٔ خرید بوده');
+  if (m.ret30 !== null && m.ret30 >= 0.4) add('hot', `${fa(P(m.ret30))} در یک ماه؛ بعد از رشد تند، ریسک اصلاح بالاست`);
+  if ((m.eps !== null && m.eps !== undefined && isFinite(m.eps) && m.eps <= 0) || m.pe < 0) add('loss', 'زیان‌ده است (سود هر سهم منفی یا صفر)');
+  else if (m.peRel !== null && m.peRel >= 1.5) add('pe', `P/E ${fa(N(m.peRel))} برابر میانهٔ گروه`);
+  if (m.traded && !m.liquid) add('thin', 'معاملاتش کم است؛ خرید آسان است، فروش یک‌جا سخت');
+  return f;
+}
+
+/* -------------------------------- the newer signals' tests -------------------------------- */
+export const isBreakout = (m) => !!m.brk && m.liquid && m.volRatio >= 1.5;
+export const isStrong = (m) => m.liquid && m.rel91 !== null && m.rel91 !== undefined && m.rel91 >= 0.1 && m.rel30 >= 0.02 && m.ret30 > 0;
+export const isFlowRun = (m) => m.liquid && m.flowN7 >= 6 && m.flowPos7 >= 5 && m.flow7 > 0;
+export const isPowerRun = (m) => m.liquid && m.powerN3 >= 3 && m.powerMin3 >= 1.2 && m.flow3 > 0;
+const isValue = (m) => m.eps > 0 && m.pe > 0 && m.peRel !== null && m.peRel <= 0.8;
+const isCalm = (m, volMed) => m.dvol !== null && volMed > 0 && m.dvol <= volMed && m.dd1y !== null && m.dd1y > -0.35;
+
+/**
+ * «کاندیداهای رشد»: five separate checks; a candidate passes three or more — at least one of them not about price
+ * (money or value), so price alone can't make one — with no severe red flag. A check whose signal did worse than the
+ * index in the record doesn't count. rec: the signal's record, by the check's key.
+ */
+export const CAND_CHECKS = [
+  { k: 'breakout', t: 'شکست سقف ۶ ماه با حجم', sig: 'breakout', price: true },
+  { k: 'money', t: 'پول حقیقی پیاپی', sig: 'flowRun', price: false },
+  { k: 'strength', t: 'قوی‌تر از شاخص', sig: 'strength', price: true },
+  { k: 'value', t: 'ارزان‌تر از هم‌گروه‌ها', sig: 'cheap', price: false },
+  { k: 'calm', t: 'نوسان و افت کمتر از میانهٔ بازار', sig: null, price: true },
+];
+export const CAND_MIN = 3, CAND_MAX = 8;
+export function candidateChecks(m, volMed, weak = new Set()) {
+  const on = { breakout: isBreakout(m), money: isFlowRun(m) || isPowerRun(m), strength: isStrong(m), value: isValue(m), calm: isCalm(m, volMed) };
+  // money counts when either of its two signals has a record that isn't weak
+  const off = (c) => (c.k === 'money' ? weak.has('flowRun') && weak.has('buyerPower') : c.sig && weak.has(c.sig));
+  return CAND_CHECKS.map((c) => ({ k: c.k, t: c.t, on: !!on[c.k], weak: !!off(c), price: c.price }));
+}
+export function isCandidate(m, checks, flags) {
+  if (!m.liquid || !m.traded || flags.some((f) => f.severe)) return false;
+  const hit = checks.filter((c) => c.on && !c.weak);
+  return hit.length >= CAND_MIN && hit.some((c) => !c.price);
+}
+
+/* -------------------------------------- the record -------------------------------------- */
+// a record says little below these: samples, and different stocks
+export const REC_MIN_N = 30, REC_MIN_STOCKS = 10;
+const quant = (l, q) => { const s = l.slice().sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.max(0, Math.floor(q * (s.length - 1))))] : null; };
+/** Average, share that beat the index over the same days, and the worst tenth — from [return, index return|null]. */
+function recSummary(pairs, ids, since) {
+  const ex = pairs.filter(([, i]) => i !== null).map(([r, i]) => r - i);
+  const mean = (l) => (l.length ? l.reduce((a, b) => a + b, 0) / l.length : null);
+  return { since, n: pairs.length, stocks: ids.size, avg: mean(pairs.map((x) => x[0])), index: ex.length ? mean(pairs.filter(([, i]) => i !== null).map((x) => x[1])) : null,
+    excess: mean(ex), hit: ex.length ? ex.filter((x) => x > 0).length / ex.length : null, p10: quant(pairs.map((x) => x[0]), 0.1) };
+}
+/**
+ * What a price-only signal would have done over the stored year, had it run each session: every 3rd session, each stock
+ * where it fired, its close `horizon` days later against the index (a stock counts once per window). Volume and P/E
+ * aren't kept that far back, so the breakout is tested on price alone. Uses today's busiest stocks (who survived), which
+ * flatters a little. sig: breakout | strength | nearLow. Returns the summary, or null when there isn't enough of it.
+ */
+export function backtest(radar, sig, list, horizon = 30) {
+  if (!radar?.day || !radar.bench?.index?.d?.length) return null;
+  const D = dayNum(radar.day); const ix = radar.bench.index;
+  const pairs = []; const ids = new Set(); let since = null;
+  for (const s of list) {
+    const rec = s.rec; const d = rec.d, p = rec.p; const n = d.length;
+    if (n < 140) continue;
+    let last = -Infinity;
+    for (let i = BRK + 1; i < n; i += 3) {
+      const t = d[i]; if (t > D - horizon) break;
+      if (t - last < horizon) continue;
+      let fire = false;
+      if (sig === 'breakout') {
+        let m1 = -Infinity, m0 = -Infinity;
+        for (let j = i - BRK; j < i; j++) if (p[j] > m1) m1 = p[j];
+        for (let j = i - 1 - BRK; j < i - 1; j++) if (p[j] > m0) m0 = p[j];
+        fire = p[i] > m1 && !(p[i - 1] > m0);
+      } else if (sig === 'strength') {
+        const a30 = closeOn(rec, t - 30), a91 = closeOn(rec, t - 91), b = benchAt(ix, t), b30 = benchAt(ix, t - 30), b91 = benchAt(ix, t - 91);
+        if (a30 > 0 && a91 > 0 && b > 0 && b30 > 0 && b91 > 0) { const r30 = p[i] / a30 - 1; fire = r30 > 0 && r30 - (b / b30 - 1) >= 0.02 && p[i] / a91 - 1 - (b / b91 - 1) >= 0.1; }
+      } else if (sig === 'nearLow') {
+        if (d[0] > t - 360) continue;
+        let lo = Infinity, hi = -Infinity; for (let j = i; j >= 0 && d[j] >= t - 365; j--) { lo = Math.min(lo, p[j]); hi = Math.max(hi, p[j]); }
+        fire = p[i] <= lo * 1.1 && p[i] <= hi * 0.85;
+      }
+      if (!fire) continue;
+      const z = closeOn(rec, t + horizon); if (!(z > 0)) continue;
+      const bi = benchAt(ix, t), bz = benchAt(ix, t + horizon);
+      pairs.push([z / p[i] - 1, bi > 0 && bz > 0 ? bz / bi - 1 : null]); ids.add(s.ins); last = t;
+      if (since === null || t < since) since = t;
+    }
+  }
+  if (pairs.length < REC_MIN_N || ids.size < REC_MIN_STOCKS) return null;
+  return { ...recSummary(pairs, ids, isoOf(since)), test: true };
+}
+export const TESTED = new Set(['breakout', 'strength', 'nearLow']);
+/** A record is weak when its signal did worse than the index on average and beat it less than half the time. */
+export const isWeak = (r) => !!r && r.excess !== null && r.hit !== null && r.excess < 0 && r.hit < 0.5;
+const recCache = new WeakMap();
+/**
+ * Each stock signal's record: { live: what its cards did a month later since the radar started (trackStats), test:
+ * the back-test (price-only signals), use: the one to go by (live once it is large enough), weak }. Cached per scan.
+ */
+export function signalRecords(radar, list) {
+  const c = recCache.get(radar); if (c && c.day === radar.day && c.track === radar.track) return c.out;
+  const out = {};
+  for (const [sig, d] of Object.entries(SIGNALS)) {
+    if (d.kind !== 'stock') continue;
+    const live = trackStats(radar, sig);
+    const test = TESTED.has(sig) ? backtest(radar, sig, list) : null;
+    const use = live.avg !== null && live.n >= REC_MIN_N ? live : test || (live.avg !== null ? live : null);
+    out[sig] = { live, test, use, weak: isWeak(use) };
+  }
+  recCache.set(radar, { day: radar.day, track: radar.track, out });
+  return out;
+}
+
 const stockRef = (ins, rec) => ({ provider: 'tsetmc', key: ins, symbol: rec.sym, field: 'close', label: rec.sym });
 const fundRef = (f) => (f.traded && f.insCode ? { provider: 'tsetmc', key: f.insCode, symbol: f.symbol, field: 'close', label: f.symbol || f.name }
   : { provider: 'fipiran', key: f.key, name: f.name, field: 'cancelNav', label: f.name });
@@ -547,6 +692,9 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const D = dayNum(day);
   const sectors = sectorMedians(radar.stocks);
   const stocks = Object.entries(radar.stocks).map(([ins, rec]) => ({ ins, rec, m: stockMetrics(rec, D, sectors, radar.sess) }));
+  // against the index over the same days (for «قوی‌تر از شاخص»)
+  const bx30 = benchRet(radar, 30, D).index, bx91 = benchRet(radar, 91, D).index;
+  for (const x of stocks) { x.m.rel30 = x.m.ret30 !== null && bx30 !== null ? x.m.ret30 - bx30 : null; x.m.rel91 = x.m.ret91 !== null && bx91 !== null ? x.m.ret91 - bx91 : null; }
   const ready = stocks.filter((s) => !s.rec.need).length;
   const cards = [];
   const sname = (rec) => radar.sectors?.[rec.sector] || '';
@@ -556,7 +704,7 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   // every card knows its place in its signal's list (rank 0 = first): the page shows SHOW of them, then «همه را ببین»
   const nth = {}; const at = (sig) => (nth[sig] = (nth[sig] ?? -1) + 1);
   const push = (sig, s, why) => cards.push({ id: `s:${s.ins}`, sig, rank: at(sig), kind: 'stock', sym: s.rec.sym, name: s.rec.name, sub: [marketOf(s.rec.isin), sname(s.rec)].filter(Boolean).join('، '),
-    ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins,
+    ref: stockRef(s.ins, s.rec), why: why.filter(Boolean), check: stockChecks(s.m, money, { depositPct, volMed }), m: s.m, ins: s.ins, flags: stockFlags(s.m),
     volRel: volMed > 0 && s.m.dvol !== null ? s.m.dvol / volMed : null });
   const b12 = benchLine(radar, 365, '۱۲ ماه'), b3 = benchLine(radar, 91, '۳ ماه');
   // 0) the combined score: the highest few (with enough of it known), whatever brought them up
@@ -592,6 +740,36 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     .sort((a, b) => a.m.fromLow - b.m.fromLow).slice(0, max)
     .forEach((s) => push('nearLow', s, [`${s.m.fromLow < 0.005 ? 'روی کمترین قیمت سال' : `${fa(P0(s.m.fromLow))} بالاتر از کمترین قیمت سال`}`, `EPS مثبت (${fa(Math.round(s.m.eps))} ریال)، P/E ${fa(N(s.m.pe))}${s.m.ret365 !== null ? `؛ بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}` : ''}`]));
 
+  // 5) persistence and breakouts
+  const flowWord = (m) => `${fa(m.flowPos7)} جلسه از ${fa(m.flowN7)} جلسهٔ اخیر ورود پول حقیقی؛ جمعاً ${money(m.flow7)}`;
+  live.filter((s) => isFlowRun(s.m)).sort((a, b) => b.m.flowPos7 - a.m.flowPos7 || b.m.flow7 - a.m.flow7).slice(0, max)
+    .forEach((s) => push('flowRun', s, [flowWord(s.m), s.m.power ? `امروز هر خریدار حقیقی به‌طور میانگین ${fa(N(s.m.power))} برابر هر فروشنده خرید کرد` : '']));
+  live.filter((s) => isPowerRun(s.m)).sort((a, b) => b.m.powerMin3 - a.m.powerMin3).slice(0, max)
+    .forEach((s) => push('buyerPower', s, [`سه جلسهٔ پیاپی سرانهٔ خرید حقیقی دست‌کم ${fa(N(s.m.powerMin3))} برابر سرانهٔ فروش`, `ورود پول حقیقی در همین سه جلسه ${money(s.m.flow3)}`]));
+  live.filter((s) => isBreakout(s.m)).sort((a, b) => b.m.volRatio - a.m.volRatio).slice(0, max)
+    .forEach((s) => push('breakout', s, [`امروز بالاتر از بالاترین قیمت ۶ ماه گذشته (${money(s.m.hi6)}) بسته شد`, `حجم امروز ${fa(N(s.m.volRatio))} برابر حجم معمول؛ تغییر قیمت امروز ${fa(P(s.m.dayChange, 1))}`]));
+  live.filter((s) => isStrong(s.m)).sort((a, b) => b.m.rel91 - a.m.rel91).slice(0, max)
+    .forEach((s) => push('strength', s, [`۳ ماه ${fa(P(s.m.ret91))} در برابر شاخص کل ${fa(P(s.m.ret91 - s.m.rel91))}؛ ${fa(P0(s.m.rel91))} جلوتر`, `یک ماه اخیر هم ${fa(P0(s.m.rel30))} جلوتر از شاخص`]));
+
+  // 6) candidates: several separate checks agree, nothing severe against it, and the checks' records aren't weak
+  const recs = signalRecords(radar, live.filter((s) => s.m.liquid));
+  const weak = new Set(Object.entries(recs).filter(([, r]) => r.weak).map(([k]) => k));
+  const cands = live.map((s) => { const checks = candidateChecks(s.m, volMed, weak); return { s, checks, flags: stockFlags(s.m) }; })
+    .filter((x) => isCandidate(x.s.m, x.checks, x.flags))
+    .sort((a, b) => b.checks.filter((c) => c.on && !c.weak).length - a.checks.filter((c) => c.on && !c.weak).length || (scores.get(b.s.ins)?.score ?? 0) - (scores.get(a.s.ins)?.score ?? 0) || a.s.ins.localeCompare(b.s.ins))
+    .slice(0, Math.min(CAND_MAX, max));
+  for (const x of cands) {
+    const m = x.s.m; const on = x.checks.filter((c) => c.on && !c.weak);
+    const detail = { breakout: `سقف ۶ ماه (${money(m.hi6)}) را با حجم ${fa(N(m.volRatio))} برابر معمول شکست`, money: isFlowRun(m) ? flowWord(m) : `سه جلسه سرانهٔ خرید حقیقی ${fa(N(m.powerMin3))} برابر فروش یا بیشتر`,
+      strength: `۳ ماه ${fa(P0(m.rel91))} و یک ماه ${fa(P0(m.rel30))} جلوتر از شاخص`, value: `P/E ${fa(N(m.pe))} در برابر میانهٔ گروه ${fa(N(m.sectorPE))}`,
+      calm: `نوسان روزانه و افت سالانه کمتر از میانهٔ بازار` };
+    push('cand', x.s, [`${fa(on.length)} نشانه از ${fa(CAND_CHECKS.length)}: ${on.map((c) => detail[c.k]).join('؛ ')}`]);
+    const c = cards[cards.length - 1];
+    c.checks = x.checks;
+    // what would undo it: back under the ceiling it broke, else under the last 10 sessions' low
+    c.stop = m.brk && m.hi6 > 0 ? { price: m.hi6, t: 'سقفی که شکست' } : m.lo10 > 0 ? { price: m.lo10, t: 'کمترین قیمت ۱۰ جلسهٔ اخیر' } : null;
+  }
+
   // funds
   const funds = (radar.funds || []).map((f) => ({ f, m: fundMetrics(f, radar, D) }));
   const fpush = (sig, x, why) => cards.push({ id: `f:${x.f.key}`, sig, rank: at(sig), kind: 'fund', sym: x.f.symbol || '', name: x.f.name, sub: [FUND_KIND[x.f.fundType] || x.f.type, x.f.traded ? 'قابل معامله' : 'صدور و ابطالی'].filter(Boolean).join('، '),
@@ -614,10 +792,10 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const sigsOf = {}; for (const c of cards) if (c.kind === 'stock' && c.sig !== 'top') (sigsOf[c.id] ||= new Set()).add(c.sig);
   for (const c of cards) if (c.kind === 'stock') { const sc = scores.get(c.ins); if (sc) { c.score = sc.score; c.parts = sc.parts; } c.lit = [...(sigsOf[c.id] || [])]; }
   const count = {}; for (const c of cards) count[c.sig] = (count[c.sig] || 0) + 1;
-  return { day, cards, count, ready, total: stocks.length, funds: funds.length, scored: scores.size, level: SCORE_W[level] ? level : 'mid' };
+  return { day, cards, count, ready, total: stocks.length, funds: funds.length, scored: scores.size, level: SCORE_W[level] ? level : 'mid', records: recs, weak };
 }
 // short lists by design (three gold funds; two per fund type) are never folded
-const NOCAP = new Set(['topFund', 'goldBubble']);
+const NOCAP = new Set(['topFund', 'goldBubble', 'cand']);
 export const BIG_DISCOUNT = 0.1; // a fund this far under its NAV: the gap is most likely a lasting one
 /** Shown before «همه را ببین»: the first SHOW of each signal. */
 export const isFirst = (c) => NOCAP.has(c.sig) || !(c.rank >= SHOW);
@@ -882,6 +1060,8 @@ export function mine(radar, refs = [], { depositPct = 25, cards = null } = {}) {
       if (m.volRatio >= 3) add('vol', `حجم امروز ${fa(N(m.volRatio))} برابر حجم معمول`);
       if (m.flowN >= 3 && m.flowShare5 !== null && m.flowShare5 <= -0.08 && m.flowPos5 <= 1) add('outflow', `خروج پول حقیقی: ${fa(P0(-m.flowShare5))} ارزش معاملات ${fa(Math.min(5, m.flowN))} جلسهٔ اخیر`, true);
       else if (m.flowN >= 3 && m.flowShare5 >= 0.08 && m.flowPos5 >= 3) add('inflow', 'ورود پول حقیقی در جلسه‌های اخیر');
+      // the red flags the cards carry that aren't said above (a fall on heavy volume, sellers stronger, a steep run-up)
+      for (const x of stockFlags(m)) if (['dump', 'sellers', 'hot'].includes(x.k)) add(x.k, x.t, x.k !== 'hot');
       if (!(m.eps > 0)) add('eps', 'سودده نیست یا P/E ندارد', true);
       else if (m.peRel !== null && m.peRel >= 1.5) add('pe', `P/E ${fa(N(m.peRel))} برابر میانهٔ گروه`, true);
       if (!m.traded) add('idle', 'بیش از یک هفته معامله نشده', true);
@@ -964,12 +1144,31 @@ export function recordTrack(radar, cards) {
   for (const k of Object.keys(t)) if (dayNum(k) < D - TRACK_DAYS) delete t[k];
   return radar;
 }
+/**
+ * The candidates of the last `days` days, each from the first session it showed up: [{ id, ins, sym, day, change, index }]
+ * — change: its adjusted close since then; index: the total index over the same days. Newest first.
+ */
+export function candHistory(radar, days = 30) {
+  const t = radar?.track || {}; if (!radar?.day) return [];
+  const D = dayNum(radar.day); const first = new Map();
+  for (const day of Object.keys(t).sort()) {
+    if (dayNum(day) < D - days || day === radar.day) continue;
+    for (const [id] of t[day].cand || []) if (!first.has(id)) first.set(id, day);
+  }
+  const ix = radar.bench?.index; const bz = benchAt(ix, D);
+  return [...first.entries()].map(([id, day]) => {
+    const rec = radar.stocks?.[id.slice(2)];
+    const change = rec ? changeSince(radar, id, day, null) : null;
+    const bi = benchAt(ix, dayNum(day));
+    return { id, ins: id.slice(2), sym: rec?.sym || '', name: rec?.name || '', day, change, index: bi > 0 && bz > 0 ? bz / bi - 1 : null, ref: rec ? stockRef(id.slice(2), rec) : null };
+  }).sort((a, b) => b.day.localeCompare(a.day) || a.sym.localeCompare(b.sym));
+}
 /** How a signal's stock cards did over the following 30 days, on average, against the index: { since, n, avg, index }. */
 export function trackStats(radar, sig, horizon = 30) {
   const t = radar?.track || {}; const days = Object.keys(t).sort();
-  const out = { since: days[0] || null, n: 0, avg: null, index: null };
+  const out = { since: days[0] || null, n: 0, avg: null, index: null, excess: null, hit: null, p10: null };
   if (!radar?.day) return out;
-  const D = dayNum(radar.day); const r = [], ix = []; const last = {}; const ids = new Set();
+  const D = dayNum(radar.day); const r = []; const last = {}; const ids = new Set();
   for (const day of days) {
     const d0 = dayNum(day); if (d0 > D - horizon) break;
     const bi = benchAt(radar.bench?.index, d0), bz = benchAt(radar.bench?.index, d0 + horizon);
@@ -979,10 +1178,9 @@ export function trackStats(radar, sig, horizon = 30) {
       // a stock that stays on the list counts once per window (its first day there), not once per session
       if (last[id] !== undefined && d0 - last[id] < horizon) continue;
       const a = closeOn(rec, d0), z = closeOn(rec, d0 + horizon);
-      if (a > 0 && z > 0) { last[id] = d0; ids.add(id); r.push(z / a - 1); if (bi > 0 && bz > 0) ix.push(bz / bi - 1); }
+      if (a > 0 && z > 0) { last[id] = d0; ids.add(id); r.push([z / a - 1, bi > 0 && bz > 0 ? bz / bi - 1 : null]); }
     }
   }
-  if (r.length < 20 || ids.size < 8) return { ...out, n: r.length, stocks: ids.size };
-  const mean = (l) => l.reduce((a, b) => a + b, 0) / l.length;
-  return { ...out, n: r.length, stocks: ids.size, avg: mean(r), index: ix.length ? mean(ix) : null };
+  if (r.length < 20 || ids.size < 8) return { ...out, n: r.length, stocks: ids.size, excess: null, hit: null, p10: null };
+  return { ...recSummary(r, ids, out.since) };
 }

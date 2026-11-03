@@ -371,7 +371,11 @@ export function makeTools(ctx) {
           cards: RD.shown(b.cards).filter((c) => kind === 'all' || c.kind === kind).slice(0, 25).map((c) => {
             const r = c.kind === 'stock' ? [c.m.ret30, c.m.ret91, c.m.ret182, c.m.ret365] : [c.m.m1, c.m.m3, c.m.m6, c.m.y1];
             const p = (v) => (v === null || v === undefined || !isFinite(v) ? null : pct(v));
-            return { signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check, returns_pct: { m1: p(r[0]), m3: p(r[1]), m6: p(r[2]), m12: p(r[3]) } };
+            const rec = b.records?.[c.sig]?.use;
+            return { signal: RD.SIGNALS[c.sig].t, symbol: c.sym, name: c.name, why: c.why, check: c.check, returns_pct: { m1: p(r[0]), m3: p(r[1]), m6: p(r[2]), m12: p(r[3]) },
+              ...(c.flags?.length ? { red_flags: c.flags.map((f) => (f.severe ? 'جدی: ' : '') + f.t) } : {}),
+              ...(c.stop ? { invalidated_if_closes_below: `${disp(c.stop.price, s)?.toLocaleString('en-US')} ${unitName(s)}` } : {}),
+              ...(rec && rec.excess !== null ? { signal_record: { beat_index_pct: rec.hit === null ? null : pct(rec.hit), avg_excess_vs_index_pct: pct(rec.excess), samples: rec.n, from_backtest: !!rec.test, weak: !!b.records[c.sig].weak } } : {}) };
           }) };
       },
     },

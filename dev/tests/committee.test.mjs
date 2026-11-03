@@ -104,13 +104,34 @@ test('assistant: investment_committee shows the card and gives the model the fac
   const t = tools.find((x) => x.name === 'investment_committee');
   assert.ok(t && A.TOOL_STEPS.investment_committee);
   const r = await t.run({ amount: 5e6 }); // toman
-  assert.equal(shown.amount, 50e6); assert.ok(r.blocks.length && r.note.includes('تکرار نکن'));
+  assert.equal(shown.main.amount, 50e6); assert.equal(shown.variants.length, 4); assert.ok(r.blocks.length && r.note.includes('تکرار نکن'));
   assert.equal(r.amount, 5e6, 'back in the display unit');
   const fromAcc = await t.run({ amount: 1e6, from_account: 'b' });
-  assert.equal(fromAcc.from_account, 'b'); assert.equal(shown.source, 'b');
+  assert.equal(fromAcc.from_account, 'b'); assert.equal(shown.main.source, 'b');
   const priv = A.makeTools({ getState: () => st, privacy: 'percent', getRadar: () => null, onCommittee: () => {} }).find((x) => x.name === 'investment_committee');
   const p = await priv.run({ amount: 5e6 });
   assert.equal(p.amount, undefined); assert.ok(!JSON.stringify(p).match(/\d{6,}/));
   assert.ok((await t.run({ amount: 0 })).error);
   assert.match(A.systemPrompt(st), /investment_committee/);
+});
+
+test('risk levels side by side: the owner\'s basis plus low, mid and high; the profile\'s own level not repeated; none for one symbol', () => {
+  const held = [bal('b', 'bank', 20e6), manual('g', 'gold', 30e6), manual('s', 'stock', 50e6)];
+  const withTargets = C.committeeSet(state(held, { targets: { gold: 40, stock: 30, fixed: 30 } }), { amount: 50e6, now });
+  assert.deepEqual(withTargets.variants.map((v) => v.id), ['targets', 'low', 'mid', 'high']);
+  const rows = withTargets.variants.map(C.variantRow);
+  // more risk, more of the money in the stock market and a deeper fall in the shock
+  const low = rows.find((r) => r.id === 'low'), high = rows.find((r) => r.id === 'high');
+  assert.ok((high.split.bourse || 0) > (low.split.bourse || 0), rows);
+  assert.ok(high.stressPct < low.stressPct, rows);
+  for (const r of rows) close(Object.values(r.split).reduce((a, b) => a + b, 0), 1);
+  // the same cash reserve whatever the mix
+  assert.ok(withTargets.variants.every((v) => v.c.cash.reserve === withTargets.main.cash.reserve));
+  const prof = C.committeeSet(state(held, { profile: { goal: 'grow', horizon: 'mid', drop: 'wait' } }), { amount: 10e6, now });
+  assert.deepEqual(prof.variants.map((v) => v.id), ['profile', 'low', 'high'], 'mid is the profile: shown once');
+  assert.ok(prof.variants.find((v) => v.id === 'low').c.basis.name.includes('کم'));
+  const one = C.committeeSet(state(held), { amount: 10e6, now, focus: { id: 's:X', kind: 'stock', sym: 'نمونه', name: 'نمونه', why: [], flags: [] } });
+  assert.equal(one.variants.length, 0);
+  const fm = C.forModel(withTargets.main, { variants: withTargets.variants, percentOnly: true });
+  assert.equal(fm.risk_variants.length, 4); assert.ok(fm.risk_variants[0].owners_basis);
 });

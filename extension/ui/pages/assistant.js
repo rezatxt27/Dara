@@ -8,7 +8,7 @@ import * as A from '../../lib/assistant.js';
 import { uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
 import { ProposalCard } from '../proposals.js';
-import { CommitteeCard } from '../committee.js';
+import { CommitteeView } from '../committee.js';
 
 const STEP = A.TOOL_STEPS;
 const SUGGESTIONS = [
@@ -186,7 +186,7 @@ export function AssistantPage({ st, s, route, openPrice }) {
           ${msgs.map((m) => html`<div class=${'msg ' + (m.role === 'user' ? 'user' : 'bot') + (m.error ? ' err' : '')} key=${m.id}>
             ${m.role === 'user' ? m.content : html`<${Markdown} text=${m.content} />`}
             ${m.steps?.length > 0 && html`<div class="steps">${m.steps.map((x) => html`<span class="pill"><${Icon} n="check" cls="sm" />${STEP[x] || x}</span>`)}</div>`}
-            ${m.committee && html`<${CommitteeCard} c=${m.committee} s=${s} openPrice=${openPrice} />`}
+            ${m.committee && html`<${CommitteeView} ...${m.committee.main ? { set: m.committee } : { c: m.committee }} s=${s} openPrice=${openPrice} />`}
             ${(m.charts || []).map((c) => html`<${ChatChart} c=${c} s=${s} key=${c.id} />`)}
             ${(m.links || []).length > 0 && html`<div class="row" style="gap:6px;margin-top:8px">${m.links.map((l) => html`<a class="btn sm primary" href=${l.href}><${Icon} n="layers" cls="sm" />${l.label}</a>`)}</div>`}
             ${(m.proposals || []).map((p) => html`<${ProposalCard} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}

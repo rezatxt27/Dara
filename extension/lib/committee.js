@@ -52,8 +52,13 @@ export function cashNeeds(st, pf, { amount = 0, source = 'new', days = HORIZON_D
 }
 
 /** What the new money is steered by: the owner's targets, else the risk profile's mix, else the mix held today. */
-export function basisOf(st, pf) {
+export function basisOf(st, pf, risk = null) {
   const s = st.settings || {};
+  // a risk level asked for by name: that level's mix, whatever the targets or the profile say
+  if (PR.RISK[risk]) {
+    const mine = PR.riskLevel(s.profile) === risk;
+    return { id: risk, name: `ترکیب ریسک ${PR.RISK[risk]}${mine ? ' (مطابق پروفایلت)' : ''}`, w: PB.mixWeights(PR.mixFor(risk, !!s.profile?.noCrypto)), level: risk };
+  }
   const t = Object.fromEntries(Object.entries(s.targets || {}).filter(([k, v]) => +v > 0 && PB.CAT_CLASS[k]).map(([k, v]) => [k, +v]));
   if (Object.keys(t).length) return { id: 'targets', name: 'ترکیب هدفی که تعیین کرده‌ای', w: PB.mixWeights(t) };
   const level = PR.riskLevel(s.profile);
@@ -92,14 +97,14 @@ function candOption(c, rec) {
  * owner asked about ({ sig, kind, sym, name, ref, why, flags, stop }) — then all of it is looked at in that one place.
  * radar / cards / records: the radar scan and its built cards (optional). R: builder.returnsFrom() (optional).
  */
-export function committee(st, { amount, source = 'new', focus = null, radar = null, cards = null, records = null, R = null, depositPct = 25, today = todayIso(), now = Date.now() } = {}) {
+export function committee(st, { amount, source = 'new', risk = null, focus = null, radar = null, cards = null, records = null, R = null, depositPct = 25, today = todayIso(), now = Date.now() } = {}) {
   amount = +amount;
   if (!(amount > 0)) return null;
   const s = st.settings || {};
   const pf = E.portfolio(st.assets, st.quotes, s, now);
   const cash = cashNeeds(st, pf, { amount, source, today });
   const invest = amount - cash.reserve;
-  const basis = basisOf(st, pf);
+  const basis = basisOf(st, pf, focus ? null : risk);
   const h = PB.holdings(pf);
   // a focused look: the whole sum (after the reserve) goes where that one card is
   const focusBlock = focus ? (focus.kind === 'fund' ? fundBlock(focus, radar) : 'bourse') : null;
@@ -183,8 +188,10 @@ function fundBlock(card, radar) {
 }
 
 /** The same, as plain facts for the assistant (amounts left out in percent-only privacy). */
-export function forModel(c, { disp = (v) => Math.round(v), percentOnly = false } = {}) {
+export function forModel(c, { disp = (v) => Math.round(v), percentOnly = false, variants = null } = {}) {
   if (!c) return null;
+  const alt = variants && variants.length > 1 ? { risk_variants: variants.map(variantRow).map((r) => ({ name: r.name, owners_basis: r.mine || undefined, fits_profile: r.fitsProfile || undefined,
+    split_pct: Object.fromEntries(Object.entries(r.split).map(([k, v]) => [PB.CLASS[k].short, Math.round(v * 100)])), shock_result_pct: pct1(r.stressPct), past_bad_year_pct: pct1(r.histBadPct), inflation_protected_after_pct: pct1(r.protAfter) })) } : {};
   const m = (v) => (percentOnly ? undefined : disp(v));
   return {
     amount: m(c.amount), basis: c.basis.name,
@@ -197,7 +204,32 @@ export function forModel(c, { disp = (v) => Math.round(v), percentOnly = false }
     if_wrong: c.wrong && { shock_assumed: 'طلا و دلار −۱۵٪، بورس −۳۰٪، رمزارز −۵۰٪ در یک سال', shock_result: m(c.wrong.stress.loss), shock_result_pct: pct1(c.wrong.stress.pct),
       past_bad_year_pct: c.wrong.history ? pct1(c.wrong.history.badPct) : null, past_typical_year_pct: c.wrong.history ? pct1(c.wrong.history.midPct) : null, past_years: c.wrong.history?.years ?? null,
       riskiest_place: c.wrong.worst && { name: c.wrong.worst.name, worst_12_months_pct: pct1(c.wrong.worst.fall) }, deposit_same_money_pct: pct1(c.wrong.depositPct) },
-    notes: c.notes,
+    notes: c.notes, ...alt,
   };
 }
 const pct1 = (x) => (x === null || x === undefined || !isFinite(x) ? null : Math.round(x * 1000) / 10);
+
+export const RISK_LEVELS = ['low', 'mid', 'high'];
+/**
+ * The committee for the owner's own basis and for each risk level, side by side: { main, variants: [{ id, name, c,
+ * mine }] } — main is the owner's basis (targets, profile or today's mix); a level that is the same as main isn't
+ * repeated (main says it fits the profile). A look at one symbol has no variants (all of it goes to that one place).
+ */
+export function committeeSet(st, opts = {}) {
+  const main = committee(st, opts);
+  if (!main || opts.focus) return main ? { main, variants: [] } : null;
+  const level = PR.riskLevel(st.settings?.profile);
+  const variants = [{ id: main.basis.id, name: main.basis.id === 'targets' ? 'هدف تو' : main.basis.id === 'profile' ? `پروفایل تو (${PR.RISK[level]})` : main.basis.id === 'current' ? 'ترکیب فعلی' : 'پیش‌فرض', c: main, mine: true }];
+  for (const lv of RISK_LEVELS) {
+    if (main.basis.id === 'profile' && lv === level) continue;
+    variants.push({ id: lv, name: `ریسک ${PR.RISK[lv]}`, c: committee(st, { ...opts, risk: lv }), mine: false, fitsProfile: lv === level });
+  }
+  return { main, variants };
+}
+/** One line per variant for a side-by-side view: where the money goes (share by block), the bad cases, the effect. */
+export function variantRow(v) {
+  const c = v.c;
+  return { id: v.id, name: v.name, mine: v.mine, fitsProfile: !!v.fitsProfile, split: Object.fromEntries(c.blocks.map((b) => [b.id, b.share])),
+    stressPct: c.wrong?.stress?.pct ?? 0, histBadPct: c.wrong?.history?.badPct ?? null, histMidPct: c.wrong?.history?.midPct ?? null,
+    protAfter: c.impact.protAfter, largestAfter: c.impact.largest?.after ?? null };
+}

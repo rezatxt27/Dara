@@ -1059,3 +1059,17 @@ svg.rot { transform: rotate(180deg); }
 .cmt-notes .xs { display: flex; gap: 5px; align-items: flex-start; } .cmt-notes .i { flex: none; margin-top: 2px; color: var(--accent); }
 .cmt-cta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); margin: 10px 0; }
 .msg.bot .cmt { max-width: 640px; }
+
+/* committee: the risk levels side by side */
+.cmt-wrap { display: flex; flex-direction: column; gap: 10px; }
+.cmt-cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; }
+.cmt-col { display: flex; flex-direction: column; align-items: stretch; gap: 5px; text-align: start; padding: 10px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--surface); color: inherit; font: inherit; cursor: pointer; min-width: 0; }
+.cmt-col:hover { border-color: var(--line-2); }
+.cmt-col.on { border-color: var(--accent); background: var(--accent-soft); }
+.cmt-col .acc { color: var(--accent); }
+.cmt-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-3); gap: 1px; }
+.cmt-bar i { display: block; height: 100%; }
+.cmt-split { display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--ink-2); }
+.cmt-split > span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.cmt-split i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+.cmt-kv { display: flex; justify-content: space-between; gap: 6px; }

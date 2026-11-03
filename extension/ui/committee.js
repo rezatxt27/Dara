@@ -8,8 +8,40 @@ import * as I from '../lib/insights.js';
 import * as PR from '../lib/profile.js';
 
 const P = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : pct(x, { sign: false, digits: d }));
-const PS = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : pct(x, { digits: d }));
+// signed, and a rounding to nothing shown as a plain zero (not «−۰٪»)
+const PS = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : pct(Math.abs(x) < 0.5 * Math.pow(10, -2 - d) ? 0 : x, { digits: d }));
 const arrow = (a, b, d = 0) => html`<span class="num">${P(a, d)}</span> ← <b class="num">${P(b, d)}</b>`;
+
+/**
+ * The committee with its risk levels side by side: the owner's basis and low / mid / high, each a column; picking one
+ * shows its four parts below. set: committeeSet(); a lone result (older saved answers) is shown as it is.
+ */
+export function CommitteeView({ set = null, c = null, s, openPrice = null }) {
+  const variants = set?.variants || [];
+  const [sel, setSel] = useState(variants[0]?.id || null);
+  const cur = variants.find((v) => v.id === sel)?.c || set?.main || c;
+  if (!cur) return null;
+  return html`<div class="cmt-wrap">
+    ${variants.length > 1 && html`<${RiskCompare} variants=${variants} sel=${sel} onSel=${setSel} />`}
+    <${CommitteeCard} c=${cur} s=${s} openPrice=${openPrice} />
+  </div>`;
+}
+function RiskCompare({ variants, sel, onSel }) {
+  const rows = variants.map(C.variantRow);
+  const hasPast = rows.some((r) => r.histBadPct !== null);
+  return html`<div class="cmt-cmp" role="radiogroup" aria-label="ترکیب‌ها">
+    <div class="xs muted" style="grid-column:1/-1">همین پول با ${variants.length === 4 ? 'چهار' : 'سه'} ترکیب. چون دارایی‌های فعلی‌ات هم حساب می‌شوند، پول تازه اول جاهای خالی هر ترکیب را پر می‌کند؛ برای همین تقسیم پول تازه با درصدهای خود ترکیب فرق دارد. روی هرکدام بزن تا جزئیاتش پایین بیاید.</div>
+    ${rows.map((r) => html`<button class=${'cmt-col' + (sel === r.id ? ' on' : '')} role="radio" aria-checked=${sel === r.id ? 'true' : 'false'} onClick=${() => onSel(r.id)}>
+      <span class="sb small">${r.name}</span>
+      <span class=${'xs ' + (r.mine || r.fitsProfile ? 'acc' : 'muted')}>${r.mine ? 'مبنای خودت' : r.fitsProfile ? 'مطابق پروفایلت' : '\u00a0'}</span>
+      <span class="cmt-bar">${PB.CLASSES.filter((k) => r.split[k.id] > 0.004).map((k) => html`<i style=${`flex:${r.split[k.id]};background:${k.color}`} title=${`${k.short} ${P(r.split[k.id])}`}></i>`)}</span>
+      <span class="cmt-split xs">${PB.CLASSES.filter((k) => r.split[k.id] > 0.004).map((k) => html`<span><i style=${`background:${k.color}`}></i>${k.short} ${P(r.split[k.id])}</span>`)}</span>
+      <span class="cmt-kv xs"><span class="muted">در فرض ریزش</span><b class=${'num ' + (r.stressPct < 0 ? 'neg' : '')}>${PS(r.stressPct, 0)}</b></span>
+      ${hasPast && html`<span class="cmt-kv xs"><span class="muted">سال بد گذشته</span><b class="num">${PS(r.histBadPct, 0)}</b></span>`}
+      <span class="cmt-kv xs"><span class="muted">محافظت از تورم</span><b class="num">${P(r.protAfter)}</b></span>
+    </button>`)}
+  </div>`;
+}
 
 /** The four parts. c: committee() result. openPrice: optional (a way in with a symbol opens its chart). */
 export function CommitteeCard({ c, s, openPrice = null }) {
@@ -78,7 +110,8 @@ export function CommitteeModal({ st, s, amount: amount0 = null, focus = null, on
   const accounts = st.assets.filter((a) => !a.archived && a.category === 'bank' && a.mode === 'balance' && +a.balance > 0);
   const depositPct = I.defaultDepositPct(st);
   const built = useMemo(() => (radar?.day ? RD.buildCards(radar, { depositPct, level: PR.riskLevel(s.profile) || 'mid' }) : null), [radar]);
-  const c = useMemo(() => (amount > 0 ? C.committee(st, { amount, source, focus, radar, cards: built?.cards, records: built?.records, R, depositPct }) : null), [amount, source, R, built, st.assets, st.quotes]);
+  const set = useMemo(() => (amount > 0 ? C.committeeSet(st, { amount, source, focus, radar, cards: built?.cards, records: built?.records, R, depositPct }) : null), [amount, source, R, built, st.assets, st.quotes]);
+  const c = set?.main || null;
   const q = focus ? `«${focus.sym || focus.name}» با ${Math.round(amount / (s.currency === 'rial' ? 1 : 10)).toLocaleString('en-US')} ${s.currency === 'rial' ? 'ریال' : 'تومان'} به سبد من می‌خورد؟ با کمیتهٔ سرمایه‌گذاری بررسی کن.`
     : `${Math.round((amount || 0) / (s.currency === 'rial' ? 1 : 10)).toLocaleString('en-US')} ${s.currency === 'rial' ? 'ریال' : 'تومان'} پول دارم؛ کجا ببرم؟ با کمیتهٔ سرمایه‌گذاری بررسی کن.`;
   return html`<${Modal} title=${focus ? `به سبد من می‌خورد؟ ${focus.sym || focus.name}` : 'کمیتهٔ سرمایه‌گذاری'} onClose=${onClose}
@@ -88,6 +121,6 @@ export function CommitteeModal({ st, s, amount: amount0 = null, focus = null, on
       ${accounts.length > 0 && html`<div class="field" style="min-width:180px"><label>این پول کجاست؟</label><select class="input" value=${source} onChange=${(e) => setSource(e.target.value)}>
         <option value="new">پول تازه (هنوز در دارا نیست)</option>${accounts.map((a) => html`<option value=${a.id}>در «${a.name}»</option>`)}</select></div>`}
     </div>
-    ${c ? html`<${CommitteeCard} c=${c} s=${s} openPrice=${openPrice} />` : html`<div class="xs muted">مبلغ را بنویس تا نیاز نقدینگی، گزینه‌ها، اثر روی سبد و حالت اشتباه را ببینی.</div>`}
+    ${c ? html`<${CommitteeView} set=${set} s=${s} openPrice=${openPrice} key=${`${amount}|${source}`} />` : html`<div class="xs muted">مبلغ را بنویس تا نیاز نقدینگی، گزینه‌ها، اثر روی سبد و حالت اشتباه را ببینی.</div>`}
   </${Modal}>`;
 }

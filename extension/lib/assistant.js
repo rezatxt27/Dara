@@ -455,11 +455,11 @@ export function makeTools(ctx) {
         }
         let R = null;
         try { const data = ctx.pbData ? await ctx.pbData() : null; if (data && !data.error) R = PB.returnsFrom(PB.seriesOf(data), depositPct); } catch { R = null; }
-        const c = CM.committee(s, { amount, source: acc?.id || 'new', focus, radar, cards: built?.cards, records: built?.records, R, depositPct });
-        if (!c) return { error: 'مبلغ نامعتبر است' };
-        ctx.onCommittee?.(c);
-        return { ...CM.forModel(c, { disp: (v) => disp(v, s.settings), percentOnly: P() }), unit: unitName(s.settings), from_account: acc ? acc.name : undefined,
-          note: 'کارت کامل کمیته زیر جوابت نشان داده شد؛ عددها و گزینه‌ها را تکرار نکن. در ۳ تا ۵ خط بگو: چقدر نقد بماند و چرا، کدام بخش بیشترین سهم را می‌گیرد، مهم‌ترین ریسک، و یک سؤال که کاربر باید پیش از تصمیم از خودش بپرسد. توصیهٔ قطعی خرید نکن.' };
+        const set = CM.committeeSet(s, { amount, source: acc?.id || 'new', focus, radar, cards: built?.cards, records: built?.records, R, depositPct });
+        if (!set) return { error: 'مبلغ نامعتبر است' };
+        ctx.onCommittee?.(set);
+        return { ...CM.forModel(set.main, { disp: (v) => disp(v, s.settings), percentOnly: P(), variants: set.variants }), unit: unitName(s.settings), from_account: acc ? acc.name : undefined,
+          note: 'کارت کامل کمیته (با مقایسهٔ ترکیب خودش و ریسک کم، متوسط و زیاد) زیر جوابت نشان داده شد؛ عددها و گزینه‌ها را تکرار نکن. اگر کاربر دربارهٔ ریسک کمتر یا بیشتر پرسید، از risk_variants بگو. در ۳ تا ۵ خط بگو: چقدر نقد بماند و چرا، کدام بخش بیشترین سهم را می‌گیرد، مهم‌ترین ریسک، و یک سؤال که کاربر باید پیش از تصمیم از خودش بپرسد. توصیهٔ قطعی خرید نکن.' };
       },
     },
     {

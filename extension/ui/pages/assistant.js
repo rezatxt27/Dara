@@ -8,6 +8,7 @@ import * as A from '../../lib/assistant.js';
 import { uid, ago } from '../../lib/format.js';
 import { act } from '../actions.js';
 import { ProposalCard } from '../proposals.js';
+import { CommitteeCard } from '../committee.js';
 
 const STEP = A.TOOL_STEPS;
 const SUGGESTIONS = [
@@ -16,7 +17,7 @@ const SUGGESTIONS = [
   'چند درصد از دارایی‌ام ریالی است و چه ریسکی دارد؟',
   'تا یک ماه آینده چه سودها و پرداخت‌هایی دارم؟',
   'در سه ماه گذشته واقعاً پولدارتر شدم؟ با طلا، دلار و سپرده مقایسه کن',
-  'اگر ۵۰۰ میلیون تومان پول جدید داشته باشم، طبق هدفم کجا بگذارم؟',
+  'پول بعدی را کجا ببرم؟ مثلاً ۵۰ میلیون تومان',
 ];
 
 function Reports({ st, s }) {
@@ -66,7 +67,7 @@ function Threads({ chat, onOpen, onDelete, onClose }) {
   </${Modal}>`;
 }
 
-export function AssistantPage({ st, s, route }) {
+export function AssistantPage({ st, s, route, openPrice }) {
   // the open conversation; every change is saved into its thread (see lib/chats.js)
   const chatRef = useRef(CH.normalize(st.chat));
   const [threadId, setThreadId] = useState(() => uid('t')) // a fresh id until the saved conversations are read;
@@ -136,18 +137,19 @@ export function AssistantPage({ st, s, route }) {
     const proposals = [];
     const charts = [];
     const links = [];
+    let committee = null;
     const steps = [];
     setBusy({ steps: [], conn: active });
     const ctl = new AbortController(); ctlRef.current = ctl;
     try {
-      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); }, onLink: (l) => { if (links.length < 2 && /^#\//.test(l.href)) links.push(l); }, pbData: () => send('pbData'), history: (ref, days) => send('history', { ref, days }),
+      const tools = A.makeTools({ getState: () => stRef.current, privacy, onProposal: (p) => proposals.push(p), onChart: (c) => { if (charts.length < 3) charts.push(c); }, onLink: (l) => { if (links.length < 2 && /^#\//.test(l.href)) links.push(l); }, onCommittee: (c) => { committee = c; }, pbData: () => send('pbData'), history: (ref, days) => send('history', { ref, days }),
         bubbleStats: async (keys) => { const r = await send('bubbleStats', { keys, days: 90 }); return r?.ok ? r.stats : {}; } });
       // in «only percentages» mode, earlier answers written with full amounts are not sent again
       const history = base.slice(-10).filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.error && (privacy !== 'percent' || m.privacy === 'percent'))).map((m) => ({ role: m.role, content: m.content }));
       const res = await AI.runAgent({ ai: stRef.current.ai, system: A.systemPrompt(stRef.current, privacy), messages: history, tools, signal: ctl.signal,
         onStep: (st2) => { if (st2.type === 'tool') { steps.push(st2.name); setBusy((b) => ({ ...b, steps: [...steps] })); } if (st2.type === 'conn') setBusy((b) => ({ ...b, conn: st2.conn })); },
         onConnUpdate: (id, patch) => act.patchConnection(id, patch) });
-      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, charts, links, privacy, by: `${res.conn.name}، ${res.model}` }]);
+      persist((m) => [...m, { id: uid('m'), role: 'assistant', content: res.text || '…', at: Date.now(), steps: [...new Set(steps)], proposals, charts, links, ...(committee ? { committee } : {}), privacy, by: `${res.conn.name}، ${res.model}` }]);
     } catch (e) {
       persist((m) => [...m, { id: uid('m'), role: 'assistant', error: true, content: e.message + (e.detail ? `\n\n${String(e.detail).slice(0, 200)}` : ''), at: Date.now() }]);
     }
@@ -184,6 +186,7 @@ export function AssistantPage({ st, s, route }) {
           ${msgs.map((m) => html`<div class=${'msg ' + (m.role === 'user' ? 'user' : 'bot') + (m.error ? ' err' : '')} key=${m.id}>
             ${m.role === 'user' ? m.content : html`<${Markdown} text=${m.content} />`}
             ${m.steps?.length > 0 && html`<div class="steps">${m.steps.map((x) => html`<span class="pill"><${Icon} n="check" cls="sm" />${STEP[x] || x}</span>`)}</div>`}
+            ${m.committee && html`<${CommitteeCard} c=${m.committee} s=${s} openPrice=${openPrice} />`}
             ${(m.charts || []).map((c) => html`<${ChatChart} c=${c} s=${s} key=${c.id} />`)}
             ${(m.links || []).length > 0 && html`<div class="row" style="gap:6px;margin-top:8px">${m.links.map((l) => html`<a class="btn sm primary" href=${l.href}><${Icon} n="layers" cls="sm" />${l.label}</a>`)}</div>`}
             ${(m.proposals || []).map((p) => html`<${ProposalCard} p=${p} st=${st} s=${s} onStatus=${(stt) => setPropStatus(m.id, p.id, stt)} />`)}

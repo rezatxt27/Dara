@@ -13,6 +13,7 @@ import { thinPoints } from './chats.js';
 import * as PR from './profile.js';
 import * as PB from './builder.js';
 import * as GL from './glossary.js';
+import * as CM from './committee.js';
 
 const unitName = (s) => (s?.currency === 'rial' ? 'ریال' : 'تومان');
 /** Rial → display unit, rounded */
@@ -44,7 +45,7 @@ export function systemPrompt(st, privacy = 'full') {
 - برای مقایسهٔ چند گزینه یا چند عدد، یک جدول کوتاه مارک‌داون (حداکثر ۵ ستون) بنویس؛ برای روند، ترکیب یا مقایسهٔ تصویری، show_chart را صدا بزن.
 - توصیه قطعی خرید و فروش نده؛ گزینه‌ها، اثر و ریسک هرکدام را بگو و تصمیم را به کاربر بسپار.
 - دربارهٔ هر سهم یا صندوق، اول get_symbol_report را صدا بزن و فقط با همان عددها حرف بزن؛ منبع و تاریخ را بگو. هرگز نگو «بخر» یا «بفروش»؛ حداکثر بگو «ارزش بررسی دارد» و کنار دلیلش، ریسک‌ها و چیزهایی را که باید بررسی شود بیاور. بازدهی گذشته تضمینی برای آینده نیست.
-- وقتی کاربر می‌پرسد یک مبلغ را کجا بگذارد یا چه سبدی بچیند، build_portfolio را صدا بزن (نه plan_new_money)، مگر فقط تقسیم طبق ترکیب هدفش را بخواهد.
+- وقتی کاربر می‌پرسد یک مبلغ یا «پول بعدی» را کجا ببرد، یا آیا یک سهم یا صندوق به سبدش می‌خورد، investment_committee را صدا بزن (focus_symbol برای یک نماد). build_portfolio فقط وقتی که مقایسهٔ چند سبد روی گذشتهٔ بازار را می‌خواهد؛ plan_new_money فقط وقتی فقط تقسیم طبق درصدهای هدفش را می‌خواهد.
 - برای تغییر داده‌ها فقط ابزارهای propose_* را صدا بزن؛ تغییر بعد از تأیید کاربر اعمال می‌شود. بعد از پیشنهاد، به کاربر بگو دکمه تأیید را بزند.
 ${privacy === 'percent' ? '- حالت حریم خصوصی «فقط درصد» فعال است: مبالغ مطلق در دسترس تو نیست؛ با درصدها پاسخ بده.\n' : ''}
 امروز: ${fmtJ(todayIso())}. واحد نمایش: ${unit}.
@@ -73,7 +74,7 @@ export const TOOL_STEPS = {
   plan_new_money: 'تقسیم پول جدید', get_symbol_report: 'خواندن کارنامهٔ نماد', get_radar_today: 'بررسی رادار فرصت‌ها',
   calc_loan: 'محاسبهٔ هزینهٔ وام', calc_instalments: 'مقایسهٔ قسطی و نقدی', calc_savings_goal: 'محاسبهٔ هدف پس‌انداز', calc_average_buy: 'محاسبهٔ میانگین خرید',
   calc_stock_trade: 'محاسبهٔ کارمزد معامله', calc_deposit: 'محاسبهٔ سپرده', calc_rent: 'محاسبهٔ رهن و اجاره',
-  show_chart: 'آماده‌کردن نمودار', explain_term: 'خواندن واژه‌نامه', build_portfolio: 'امتحان سبدها روی گذشتهٔ بازار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
+  investment_committee: 'جلسهٔ کمیتهٔ سرمایه‌گذاری', show_chart: 'آماده‌کردن نمودار', explain_term: 'خواندن واژه‌نامه', build_portfolio: 'امتحان سبدها روی گذشتهٔ بازار', propose_update: 'آماده‌کردن پیشنهاد', propose_trade: 'آماده‌کردن پیشنهاد',
 };
 
 export function makeTools(ctx) {
@@ -424,6 +425,41 @@ export function makeTools(ctx) {
         const hits = GL.search(term).slice(0, 2);
         if (!hits.length) return { error: 'این واژه در واژه‌نامهٔ دارا نیست؛ با دانش عمومی و ساده توضیح بده' };
         return { entries: hits.map((t) => ({ term: t.term, short: t.short, explanation: t.long, example: t.example })) };
+      },
+    },
+    {
+      name: 'investment_committee',
+      description: '«کمیتهٔ سرمایه‌گذاری»: برای «این مبلغ را کجا ببرم؟» یا «فلان نماد به سبدم می‌خورد؟». چهار بخش با دادهٔ واقعی: ۱) نیاز نقدینگی ۹۰ روز آینده (قسط، سررسید، درآمد) و مبلغی که باید نقد بماند، ۲) تقسیم بقیه طبق هدف یا پروفایل و برای هر بخش گزینه‌های امروز (صندوق، سکه، کاندیدای رادار) با دلیل موافق و مخالف، ۳) اثر روی سبد، ۴) حالت اشتباه (فرض ریزش و بدترین سال‌های گذشته). یک کارت کامل زیر جواب نشان داده می‌شود.',
+      schema: { type: 'object', properties: { amount: { type: 'number', description: 'به واحد نمایش' }, from_account: { type: 'string', description: 'اگر پول همین حالا در یکی از حساب‌های بانکی کاربر است، نام آن حساب' },
+        focus_symbol: { type: 'string', description: 'اگر کاربر دربارهٔ یک سهم یا صندوق مشخص می‌پرسد: نماد یا نام آن' } }, required: ['amount'] },
+      run: async (a = {}) => {
+        const s = st(); const k = s.settings.currency === 'rial' ? 1 : 10;
+        const amount = (+a.amount || 0) * k;
+        if (!(amount > 0)) return { error: 'مبلغ را بگو' };
+        const acc = a.from_account ? s.assets.find((x) => !x.archived && x.category === 'bank' && normSym(x.name).includes(normSym(a.from_account))) : null;
+        const radar = await radarOf(ctx);
+        const depositPct = I.defaultDepositPct(s);
+        const built = radar?.day ? RD.buildCards(radar, { depositPct, level: PR.riskLevel(s.settings.profile) || 'mid' }) : null;
+        let focus = null;
+        if (a.focus_symbol) {
+          if (!radar?.day) return { error: 'رادار هنوز اسکنی ندارد؛ نماد را نمی‌شناسم' };
+          const want = normSym(a.focus_symbol);
+          focus = built.cards.find((c) => normSym(c.sym) === want) || built.cards.find((c) => normSym(c.name).includes(want));
+          if (!focus) {
+            // not on today's cards: its report card from the radar, as a plain way in
+            const hit = RD.find(radar, a.focus_symbol);
+            const rep = hit?.fundKey ? RD.report(radar, { fundKey: hit.fundKey }) : hit?.ins ? RD.report(radar, { ins: hit.ins }) : null;
+            if (!rep) return { error: 'این نماد را در دادهٔ رادار پیدا نکردم' };
+            focus = { id: rep.kind === 'stock' ? `s:${hit.ins}` : `f:${hit.fundKey}`, sig: null, kind: rep.kind, sym: rep.sym || '', name: rep.name, why: [], check: [], flags: rep.kind === 'stock' ? RD.stockFlags(rep.m) : [] };
+          }
+        }
+        let R = null;
+        try { const data = ctx.pbData ? await ctx.pbData() : null; if (data && !data.error) R = PB.returnsFrom(PB.seriesOf(data), depositPct); } catch { R = null; }
+        const c = CM.committee(s, { amount, source: acc?.id || 'new', focus, radar, cards: built?.cards, records: built?.records, R, depositPct });
+        if (!c) return { error: 'مبلغ نامعتبر است' };
+        ctx.onCommittee?.(c);
+        return { ...CM.forModel(c, { disp: (v) => disp(v, s.settings), percentOnly: P() }), unit: unitName(s.settings), from_account: acc ? acc.name : undefined,
+          note: 'کارت کامل کمیته زیر جوابت نشان داده شد؛ عددها و گزینه‌ها را تکرار نکن. در ۳ تا ۵ خط بگو: چقدر نقد بماند و چرا، کدام بخش بیشترین سهم را می‌گیرد، مهم‌ترین ریسک، و یک سؤال که کاربر باید پیش از تصمیم از خودش بپرسد. توصیهٔ قطعی خرید نکن.' };
       },
     },
     {

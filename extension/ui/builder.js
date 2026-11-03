@@ -10,6 +10,7 @@ import { T } from './tips.js';
 import { act } from './actions.js';
 import { uid } from '../lib/format.js';
 import { TermTip } from './glossary.js';
+import { CommitteeModal } from './committee.js';
 
 const H_OPTS = [[6, '۶ ماه'], [12, '۱ سال'], [24, '۲ سال'], [36, '۳ سال']];
 const monthFa = (m) => (m ? fmtJ(m + '-15', 'my') : '');
@@ -193,6 +194,7 @@ function Explain({ st, r, pick }) {
 export function Builder({ st, pf, s, route }) {
   const q = route?.q || {};
   const [amount, setAmount] = useState(() => (+q.pb > 0 ? +q.pb : null));
+  const [cmt, setCmt] = useState(false);
   const [horizon, setHorizon] = useState(() => ([6, 12, 24, 36].includes(+q.m) ? +q.m : 24));
   const [mode, setMode] = useState(() => (q.mode === 'alone' ? 'alone' : 'with'));
   const [years, setYears] = useState(5);
@@ -226,6 +228,8 @@ export function Builder({ st, pf, s, route }) {
       <div class="field"><label class="ltip">حساب کن${T('pbMode')}</label><${Seg} value=${mode} onChange=${setMode} options=${[['with', 'کنار دارایی‌هایم'], ['alone', 'فقط همین پول']]} /></div>
       <div class="field"><label class="ltip">گذشته${T('pbYears')}</label><${Seg} value=${years} onChange=${setYears} options=${[[5, '۵ سال'], [10, '۱۰ سال']]} /></div>
     </div>
+    ${amount > 0 && html`<div class="cmt-cta"><${Icon} n="layers" cls="sm" /><span class="grow small">سبدساز ترکیب‌ها را روی گذشته می‌سنجد. <b>کمیتهٔ سرمایه‌گذاری</b> همین مبلغ را با قسط‌ها و سررسیدهای پیش رو، گزینه‌های امروز (صندوق، سکه، کاندیداهای رادار) و حالت اشتباه بررسی می‌کند.</span>
+      <button class="btn sm primary" onClick=${() => setCmt(true)}>بررسی کامل در کمیته</button></div>`}
     ${!PR.isSet(s.profile) && !prefs?.risk && html`<div class="callout" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>پروفایل سرمایه‌گذاری‌ات را بساز تا سبدِ هم‌خوان با ریسکت مشخص شود و خط قرمزهایت رعایت شود. <a href="#/settings?to=profile">ساختن ←</a></div></div>`}
     ${!data ? html`<div class="empty small">در حال خواندن ۱۰ سال قیمت طلا، دلار، بورس و رمزارز…</div>`
       : data.error ? html`<div class="callout warn" style="margin-top:10px"><${Icon} n="wifi" cls="sm" /><div>${data.error}. کمی بعد دوباره امتحان کن.</div></div>`
@@ -254,5 +258,6 @@ export function Builder({ st, pf, s, route }) {
         </ul></details>
         ${chosen && html`<${Plan} c=${chosen} r=${r} s=${s} st=${st} radar=${radar} data=${data} onSaved=${() => setPick(null)} />`}`}
     ${data && !data.error && html`<${Saved} s=${s} data=${data} />`}
+    ${cmt && html`<${CommitteeModal} st=${st} s=${s} amount=${amount} onClose=${() => setCmt(false)} />`}
   </div>`;
 }

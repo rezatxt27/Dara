@@ -1037,3 +1037,25 @@ svg.rot { transform: rotate(180deg); }
 .rd-hist-l { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
 .rd-hrow { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: 10px; background: var(--surface-2); border: 0; color: inherit; font: inherit; cursor: pointer; text-align: start; }
 .rd-hrow:hover { background: var(--surface-3); }
+
+/* «کمیتهٔ سرمایه‌گذاری» */
+.cmt { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.modal .cmt { margin-top: 0; }
+.cmt-h { display: flex; align-items: center; gap: 10px; }
+.cmt-s { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.cmt-s h4 { margin: 0; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.cmt-n { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; }
+.cmt-key { display: flex; align-items: flex-start; gap: 6px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
+.cmt-key.warn { background: var(--warn-bg); } .cmt-key.warn .i { color: var(--warn); }
+.cmt-key.ok { background: var(--pos-bg); } .cmt-key.ok .i { color: var(--pos); }
+.cmt-key .i { flex: none; margin-top: 2px; }
+.cmt-b { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+.cmt-o { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--surface); }
+.cmt-pro, .cmt-con { display: flex; align-items: flex-start; gap: 4px; }
+.cmt-pro .i { color: var(--pos); flex: none; margin-top: 2px; } .cmt-con { color: var(--ink-2); } .cmt-con .i { color: var(--warn); flex: none; margin-top: 2px; }
+.cmt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.cmt-grid > div { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.cmt-notes { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--info-bg); }
+.cmt-notes .xs { display: flex; gap: 5px; align-items: flex-start; } .cmt-notes .i { flex: none; margin-top: 2px; color: var(--accent); }
+.cmt-cta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); margin: 10px 0; }
+.msg.bot .cmt { max-width: 640px; }

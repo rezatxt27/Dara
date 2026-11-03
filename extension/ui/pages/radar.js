@@ -9,6 +9,7 @@ import * as I from '../../lib/insights.js';
 import { act } from '../actions.js';
 import * as PR from '../../lib/profile.js';
 import { Terms } from '../glossary.js';
+import { CommitteeModal } from '../committee.js';
 
 const ORDER = ['cand', 'top', 'gold', 'negBubble', 'goldBubble', 'fixedBeat', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
 const STOCK_SIGS = new Set(['cand', 'top', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
@@ -85,6 +86,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   const [showAll, setShowAll] = useState({});
   const [run, setRun] = useState(null); // { pending, total } while gathering
   const [editRule, setEditRule] = useState(null);
+  const [fit, setFit] = useState(null); // a card asked «به سبد من می‌خورد؟»
   const fmt = (v) => money(v, s, { compact: true });
   const day = radar?.day || null;
 
@@ -149,24 +151,25 @@ export function RadarPage({ st, s, openPrice, route }) {
         if (sig === 'gold') return only === 'stock' ? null : gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />`
           : html`<section class="rd-sec"><div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4></div><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div></section>`;
         const all = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
-        if (sig === 'cand' && only !== 'fund' && !pending) return html`<${Candidates} cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} />`;
+        if (sig === 'cand' && only !== 'fund' && !pending) return html`<${Candidates} cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} onFit=${setFit} />`;
         if (!all.length) return null;
         const list = showAll[sig] ? all : all.filter(RD.isFirst);
         const more = all.length - list.length;
         const weak = built.weak?.has(sig);
         return html`<section class=${'rd-sec' + (weak ? ' weak' : '')}><div class="rd-sec-h"><h4>${RD.SIGNALS[sig].t}</h4><${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />${weak && html`<span class="pill stale" title="میانگین کارت‌های این بخش یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}<span class="xs muted">${SIG_D[sig]}</span></div>
           ${STOCK_SIGS.has(sig) && ((tt) => tt && html`<div class=${'rd-track' + (tt.weak ? ' bad' : tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`)(recLines(built.records?.[sig]))}
-          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div>
+          <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${setFit} />`)}</div>
           ${(more > 0 || (showAll[sig] && all.some((c) => !RD.isFirst(c)))) && html`<button class="btn sm ghost rd-more" aria-expanded=${showAll[sig] ? 'true' : 'false'} onClick=${() => setShowAll({ ...showAll, [sig]: !showAll[sig] })}>${showAll[sig] ? 'کمتر' : `همه را ببین (${num(all.length)})`}<${Icon} n="chevronDown" cls=${'sm' + (showAll[sig] ? ' rot' : '')} /></button>`}</section>`;
       })}
       ${!built.cards.filter((c) => only === 'all' || c.kind === only).length && html`<div class="card"><div class="empty small">امروز چیزی از این قاعده‌ها رد نشد.</div></div>`}`}
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} s=${s} openPrice=${openPrice} onEdit=${setEditRule} />`}
     ${tab === 'marks' && html`<${Marks} radar=${radar} user=${user} s=${s} openPrice=${openPrice} />`}
     ${editRule && html`<${RuleModal} rule=${editRule} sectors=${radar.sectors || {}} onClose=${() => setEditRule(null)} />`}
+    ${fit && html`<${CommitteeModal} st=${st} s=${s} focus=${fit} onClose=${() => setFit(null)} openPrice=${(r) => { setFit(null); openPrice(r); }} />`}
   </div>`;
 }
 
-function Card({ c, radar, s, isNew, marked, onMark, openPrice }) {
+function Card({ c, radar, s, isNew, marked, onMark, openPrice, onFit = null }) {
   const q = c.kind === 'stock' ? `نماد «${c.sym}» (${c.name}) امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`
     : `صندوق «${c.name}» امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`;
   return html`<article class="card rd-card">
@@ -184,17 +187,17 @@ function Card({ c, radar, s, isNew, marked, onMark, openPrice }) {
     ${c.kind === 'stock' && c.sig !== 'inflow' && html`<${Flow} m=${c.m} s=${s} />`}
     ${((seen) => html`<div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small"><${Terms} text=${t} seen=${seen} /></div>`)}</div>
     <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs"><${Terms} text=${t} seen=${seen} /></div>`)}</div>`)(new Set())}
-    <div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار و کارنامه</button><span class="grow"></span><${AskBtn} q=${q} label="از دستیار بپرس" /></div>
+    <div class="row wrap" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار و کارنامه</button>${onFit && html`<button class="btn sm ghost" title="کمیتهٔ سرمایه‌گذاری: نقدینگی، اثر روی سبد و حالت اشتباه" onClick=${() => onFit(c)}><${Icon} n="layers" cls="sm" />به سبد من می‌خورد؟</button>`}<span class="grow"></span><${AskBtn} q=${q} label="از دستیار بپرس" /></div>
   </article>`;
 }
 
 /** «کاندیداهای رشد»: the short list (or why it's empty), its record, and where the last month's candidates are now. */
-function Candidates({ cards, radar, s, rec, isNew, marked, mark, openPrice }) {
+function Candidates({ cards, radar, s, rec, isNew, marked, mark, openPrice, onFit }) {
   const hist = useMemo(() => RD.candHistory(radar, 30), [radar]);
   const tt = recLines(rec);
   return html`<section class="rd-sec rd-cand"><div class="rd-sec-h"><h4>${RD.SIGNALS.cand.t}</h4><${Tip} title=${RD.SIGNALS.cand.t} text=${SIG_TIP.cand} /><span class="xs muted">${SIG_D.cand}</span></div>
     ${tt && html`<div class=${'rd-track' + (tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`}
-    ${cards.length ? html`<div class="rd-grid">${cards.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} />`)}</div>`
+    ${cards.length ? html`<div class="rd-grid">${cards.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${onFit} />`)}</div>`
       : html`<div class="card"><div class="empty small" style="padding:18px">امروز کاندیدای محکمی نیست: هیچ سهمی سه نشانهٔ جدا (یکی‌اش پول یا ارزش) بدون پرچم قرمز جدی نداشت. فهرست به زور پر نمی‌شود.</div></div>`}
     ${hist.length > 0 && html`<div class="card rd-hist"><div class="row between wrap" style="gap:6px"><span class="small sb">کاندیداهای ۳۰ روز گذشته، از روز ورود تا امروز</span><span class="xs muted">قیمت تعدیل‌شده؛ شاخص کل در همان روزها</span></div>
       <div class="rd-hist-l">${hist.slice(0, 12).map((x) => html`<button class="rd-hrow" onClick=${() => x.ref && openPrice(x.ref)}><b>${x.sym}</b><span class="xs muted">${fmtJ(x.day, 'dm')}</span>

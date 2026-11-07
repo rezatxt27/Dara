@@ -267,7 +267,7 @@ function flowMetrics(rec, D, sess) {
 /* --------------------------------------- numbers --------------------------------------- */
 const median = (a) => { const s = a.filter(isFinite).sort((x, y) => x - y); if (!s.length) return NaN; const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 /** Close on or before day number `t` (null if the series starts later). */
-function closeOn(rec, t) {
+export function closeOn(rec, t) {
   let lo = 0, hi = rec.d.length - 1, ans = -1;
   while (lo <= hi) { const m = (lo + hi) >> 1; if (rec.d[m] <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
   return ans >= 0 ? rec.p[ans] : null;
@@ -325,7 +325,7 @@ export function sectorMedians(stocks) {
 
 /* ------------------------------------- benchmarks ------------------------------------- */
 /** radar.bench: { index: {d, p}, usd: {d, p} } — the total index and the dollar, daily, as day numbers and values. */
-function benchAt(b, t) { if (!b?.d?.length) return null; let lo = 0, hi = b.d.length - 1, a = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (b.d[m] <= t) { a = m; lo = m + 1; } else hi = m - 1; } return a >= 0 ? b.p[a] : null; }
+export function benchAt(b, t) { if (!b?.d?.length) return null; let lo = 0, hi = b.d.length - 1, a = -1; while (lo <= hi) { const m = (lo + hi) >> 1; if (b.d[m] <= t) { a = m; lo = m + 1; } else hi = m - 1; } return a >= 0 ? b.p[a] : null; }
 /** The index's and the dollar's change over the `days` before the radar's session: { index, usd } (fractions or null). */
 export function benchRet(radar, days, D = radar?.day ? dayNum(radar.day) : null) {
   const out = { index: null, usd: null };

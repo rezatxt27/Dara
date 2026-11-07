@@ -10,6 +10,7 @@ import { act } from '../actions.js';
 import * as PR from '../../lib/profile.js';
 import { Terms } from '../glossary.js';
 import { CommitteeModal } from '../committee.js';
+import { ModelCard } from '../model.js';
 
 const ORDER = ['cand', 'top', 'gold', 'negBubble', 'goldBubble', 'fixedBeat', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
 const STOCK_SIGS = new Set(['cand', 'top', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
@@ -87,6 +88,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   const [run, setRun] = useState(null); // { pending, total } while gathering
   const [editRule, setEditRule] = useState(null);
   const [fit, setFit] = useState(null); // a card asked «به سبد من می‌خورد؟»
+  const [fitModel, setFitModel] = useState(null); // the model of a risk level, taken to the committee
   const fmt = (v) => money(v, s, { compact: true });
   const day = radar?.day || null;
 
@@ -147,6 +149,7 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'today' && pulse && html`<${Pulse} p=${pulse} s=${s} />`}
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} />
+      ${only !== 'fund' && !pending && html`<${ModelCard} radar=${radar} built=${built} st=${st} s=${s} openPrice=${openPrice} onFit=${setFitModel} />`}
       ${ORDER.map((sig) => {
         if (sig === 'gold') return only === 'stock' ? null : gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} />`
           : html`<section class="rd-sec"><div class="rd-sec-h"><h4>ارزان‌ترین راه خرید طلا، امروز</h4></div><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div></section>`;
@@ -165,6 +168,7 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} s=${s} openPrice=${openPrice} onEdit=${setEditRule} />`}
     ${tab === 'marks' && html`<${Marks} radar=${radar} user=${user} s=${s} openPrice=${openPrice} />`}
     ${editRule && html`<${RuleModal} rule=${editRule} sectors=${radar.sectors || {}} onClose=${() => setEditRule(null)} />`}
+    ${fitModel && html`<${CommitteeModal} st=${st} s=${s} risk=${fitModel} onClose=${() => setFitModel(null)} openPrice=${(r) => { setFitModel(null); openPrice(r); }} />`}
     ${fit && html`<${CommitteeModal} st=${st} s=${s} focus=${fit} onClose=${() => setFit(null)} openPrice=${(r) => { setFit(null); openPrice(r); }} />`}
   </div>`;
 }

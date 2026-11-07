@@ -1073,3 +1073,16 @@ svg.rot { transform: rotate(180deg); }
 .cmt-split > span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .cmt-split i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 .cmt-kv { display: flex; justify-content: space-between; gap: 6px; }
+
+/* radar: «سبد مدل امروز» */
+.md-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+.md-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.md-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); min-width: 0; }
+.md-stats b { font-size: 17px; }
+.md-bar { height: 10px; }
+.md-group { display: flex; flex-direction: column; gap: 6px; }
+.md-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
+.md-w { flex: none; min-width: 42px; font-weight: 700; font-size: 15px; color: var(--accent); }
+.md-role { padding: 1px 7px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); }
+.md-chg { display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--info-bg); }
+.md-chg .i { flex: none; margin-top: 2px; }

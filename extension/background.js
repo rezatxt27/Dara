@@ -13,6 +13,7 @@ import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
 import * as RD from './lib/radar.js';
+import * as MD from './lib/model.js';
 import { riskLevel } from './lib/profile.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir', 'api.bitpin.ir'];
@@ -629,10 +630,13 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     const year = Object.values(radar.stocks).filter((r) => r.need >= 60).length; // still gathering a whole year
     if (changed && radar.day) {
       const depositPct = I.defaultDepositPct({ settings, assets });
-      cards = RD.buildCards(radar, { depositPct, level: riskLevel(settings.profile) || 'mid' }).cards;
+      const built = RD.buildCards(radar, { depositPct, level: riskLevel(settings.profile) || 'mid' });
+      cards = built.cards;
       const ids = [...new Set(cards.map(RD.cardKey))];
       // the radar's own track record: what it showed on each complete scan, to say later how it did
       if (!pending) RD.recordTrack(radar, cards);
+      // «سبد مدل» for each risk level, logged with prices (kept picks, what changed, its own record)
+      if (!pending) { try { const { quotes = {} } = await chrome.storage.local.get('quotes'); MD.updateModels(radar, built, { quotes, depositPct, noCrypto: !!settings.profile?.noCrypto }); } catch (e) { console.warn('model', e); } }
       const prev = radar.results || {};
       // «تازه» compares with the last COMPLETE day (a day whose prices were still being gathered lacks most stocks)
       const before = prev.day === radar.day ? prev.before || [] : prev.complete !== false ? prev.ids || [] : prev.before || [];

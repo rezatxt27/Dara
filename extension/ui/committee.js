@@ -16,9 +16,9 @@ const arrow = (a, b, d = 0) => html`<span class="num">${P(a, d)}</span> ← <b c
  * The committee with its risk levels side by side: the owner's basis and low / mid / high, each a column; picking one
  * shows its four parts below. set: committeeSet(); a lone result (older saved answers) is shown as it is.
  */
-export function CommitteeView({ set = null, c = null, s, openPrice = null }) {
+export function CommitteeView({ set = null, c = null, s, openPrice = null, initial = null }) {
   const variants = set?.variants || [];
-  const [sel, setSel] = useState(variants[0]?.id || null);
+  const [sel, setSel] = useState((initial && variants.some((v) => v.id === initial) ? initial : null) || variants[0]?.id || null);
   const cur = variants.find((v) => v.id === sel)?.c || set?.main || c;
   if (!cur) return null;
   return html`<div class="cmt-wrap">
@@ -102,7 +102,7 @@ export function usePast(st) {
 }
 
 /** The committee in a window: an amount (and where it is), then the card. focus: a radar card asked about. */
-export function CommitteeModal({ st, s, amount: amount0 = null, focus = null, onClose, openPrice = null }) {
+export function CommitteeModal({ st, s, amount: amount0 = null, focus = null, risk = null, onClose, openPrice = null }) {
   const [amount, setAmount] = useState(amount0);
   const [source, setSource] = useState('new');
   const radar = useRadar();
@@ -121,6 +121,6 @@ export function CommitteeModal({ st, s, amount: amount0 = null, focus = null, on
       ${accounts.length > 0 && html`<div class="field" style="min-width:180px"><label>این پول کجاست؟</label><select class="input" value=${source} onChange=${(e) => setSource(e.target.value)}>
         <option value="new">پول تازه (هنوز در دارا نیست)</option>${accounts.map((a) => html`<option value=${a.id}>در «${a.name}»</option>`)}</select></div>`}
     </div>
-    ${c ? html`<${CommitteeView} set=${set} s=${s} openPrice=${openPrice} key=${`${amount}|${source}`} />` : html`<div class="xs muted">مبلغ را بنویس تا نیاز نقدینگی، گزینه‌ها، اثر روی سبد و حالت اشتباه را ببینی.</div>`}
+    ${c ? html`<${CommitteeView} set=${set} s=${s} openPrice=${openPrice} initial=${risk} key=${`${amount}|${source}`} />` : html`<div class="xs muted">مبلغ را بنویس تا نیاز نقدینگی، گزینه‌ها، اثر روی سبد و حالت اشتباه را ببینی.</div>`}
   </${Modal}>`;
 }

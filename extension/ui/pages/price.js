@@ -71,7 +71,17 @@ export function PriceDetail({ st, s, refOf, onClose }) {
   // opened from the radar, a price may not be one Dara fetches: the last close of its history (or its NAV) stands in
   const lastPt = hist?.points?.length ? hist.points[hist.points.length - 1] : null;
   const price = q?.price > 0 ? (usdNative ? q.price * (rate || 0) : q.price) : lastPt ? lastPt[1] : rep?.kind === 'fund' ? rep.nav || null : rep?.kind === 'stock' ? rep.m.close || null : null; // in Rial
-  const stale = !price || !E.quoteOk(q) || Date.now() - (q?.at || q?.fetchedAt || 0) > 3 * DAY;
+  // a price Dara fetches is stale after 3 days without an update; one that stands in from the history (a symbol the owner
+  // doesn't hold, opened from the radar) is stale only when its last close is older than the latest session the radar
+  // knows (or, outside the exchange, older than 4 days — a weekend and a holiday)
+  const live = q?.price > 0;
+  // (the day of what stands in: the history's last close, else the radar's close of its session, or a fund's NAV day)
+  const histDay = live ? null : lastPt ? lastPt[0] : rep?.kind === 'stock' ? radar.day : rep?.kind === 'fund' ? rep.navDay || null : null;
+  const histStale = !histDay || (ref.provider === 'tsetmc' && radar?.day ? histDay < radar.day : (Date.parse(today) - Date.parse(histDay)) / DAY > 4);
+  const stale = !price || (live ? !E.quoteOk(q) || Date.now() - (q?.at || q?.fetchedAt || 0) > 3 * DAY : histStale);
+  // its day's change, from the last two closes, when it stands in from the history
+  const pts = hist?.points || [];
+  const histChange = lastPt && histDay && pts.length > 1 && pts[pts.length - 2][1] > 0 ? lastPt[1] / pts[pts.length - 2][1] - 1 : null;
   const name = refLabel(ref);
   // what's special about this price
   const coin = BB.isCoinRef(ref) ? BB.coinBubble(ref.key, st.quotes) : null;
@@ -89,9 +99,9 @@ export function PriceDetail({ st, s, refOf, onClose }) {
         <div class="col" style="gap:2px">
           <span class="xs muted">${perUnit(ref)}${usdNative ? ' (به دلار)' : ''}</span>
           ${usdNative ? html`<b class="num ltr pd-big">$${num(q?.price || 0, 2)}</b>` : html`<${Money} v=${price} s=${s} cls="pd-big" />`}
-          <span class="small"><${Delta} p=${q?.changePct} showAbs=${false} /> <span class="xs muted">امروز</span></span>
+          <span class="small"><${Delta} p=${live ? q?.changePct : histChange} showAbs=${false} /> <span class="xs muted">${!live && histDay && histDay !== today ? `جلسهٔ ${fmtJ(histDay, 'dm')}` : 'امروز'}</span></span>
         </div>
-        <span class="xs muted" style="text-align:left">${providerName(ref)}<br />${q?.at ? (Date.now() - q.at < DAY ? `ساعت ${timeHM(q.at || q.fetchedAt)}` : ago(q.at)) : ''}${stale && price ? html`<br /><span class="warn">قیمت به‌روز نیست</span>` : ''}</span>
+        <span class="xs muted" style="text-align:left">${providerName(ref)}<br />${live && q?.at ? (Date.now() - q.at < DAY ? `ساعت ${timeHM(q.at || q.fetchedAt)}` : ago(q.at)) : histDay ? `قیمت پایانی ${fmtJ(histDay, 'dm')}` : ''}${stale && price ? html`<br /><span class="warn">قیمت به‌روز نیست</span>` : ''}</span>
       </div>
 
       <div class="pd-ctl">

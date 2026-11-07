@@ -17,6 +17,7 @@ export const FULL_ROWS = 270;          // trading days fetched to build a stock'
 export const LIQ = 1e10;               // average daily value (Rial) below which a stock is too thin to rank
 export const MIN_SECTOR = 5;           // stocks with a positive P/E a sector needs before its median means anything
 export const FINAL_AFTER = 13 * 60 + 30; // Tehran minutes after which a session's closing prices are final
+export const NAV_STALE_DAYS = 7;           // a fund whose NAV is older than this is left out of the fund lists
 export const BRK = 126;                // sessions (~6 months) whose highest close a breakout passes
 
 /* ---------------------------------------- days ---------------------------------------- */
@@ -365,7 +366,9 @@ export function fundMetrics(f, radar, D) {
   // traded enough to matter: its value traded when known (a reset market watch has none), else a large fund
   const etfVal = etf ? etf.val ?? null : 0;
   const tradable = etfVal !== null ? etfVal >= 1e9 : (f.size || 0) >= 5e12;
-  return { y1: frac(r.y1), m6: frac(r.m6), m3: frac(r.m3), m1: frac(r.m1), w1: frac(r.w1), ageDays, size: f.size || 0, bubble, etfVal, tradable, navDay, marketPrice: etf?.close || null, gold: isGoldFund(f) };
+  // a NAV more than a week old: Fipiran stopped updating the fund (suspended, being wound up…) — its returns are old too
+  const navAge = navDay ? D - dayNum(navDay) : null;
+  return { y1: frac(r.y1), m6: frac(r.m6), m3: frac(r.m3), m1: frac(r.m1), w1: frac(r.w1), ageDays, size: f.size || 0, bubble, etfVal, tradable, navDay, navAge, navStale: navAge === null || navAge > NAV_STALE_DAYS, marketPrice: etf?.close || null, gold: isGoldFund(f) };
 }
 
 /* ---------------------------------- the combined score ---------------------------------- */
@@ -782,10 +785,10 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   // the three smallest bubbles (those under NAV already have their own card above)
   if (gold.length >= 3) gold.slice(0, 3).forEach((x, i) => { if (!(x.m.bubble <= -0.01)) fpush('goldBubble', x, [`حباب ${fa(P(x.m.bubble, 1))}؛ ${i === 0 ? 'کمترین' : `رتبهٔ ${fa(i + 1)}`} از ${fa(gold.length)} صندوق طلای پرمعامله`, 'بیشتر دارایی این صندوق‌ها طلا و گواهی سکه است؛ حباب کمتر یعنی بهای کمتری بالای ارزش دارایی‌ها']); });
   const depEff = Math.pow(1 + depositPct / 100 / 12, 12) - 1;
-  funds.filter((x) => x.f.fundType === 4 && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, max)
+  funds.filter((x) => x.f.fundType === 4 && !x.m.navStale && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, max)
     .forEach((x) => fpush('fixedBeat', x, [`بازدهی ۱۲ ماه ${fa(P(x.m.y1, 1))} در برابر ${fa(P(depEff, 1))} سپرده ${fa(depositPct)}٪ با سود ماهانه`, b12]));
   for (const t of [6, 7, 5, 23, 21, 22]) {
-    funds.filter((x) => x.f.fundType === t && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 2)
+    funds.filter((x) => x.f.fundType === t && !x.m.navStale && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 2)
       .forEach((x, i) => fpush('topFund', x, [`${i === 0 ? 'بیشترین' : 'دومین'} بازدهی ۱۲ ماه در صندوق‌های ${FUND_KIND[t]}: ${fa(P(x.m.y1))}`, b12]));
   }
   // every stock card carries its score and the other signals it is in

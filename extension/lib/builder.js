@@ -227,13 +227,13 @@ export function vehicles(classId, { radar = null, quotes = {}, depositPct = 25 }
   const depEff = Math.pow(1 + depositPct / 1200, 12) - 1;
   if (classId === 'deposit') {
     out.push({ kind: 'note', name: 'سپردهٔ بانکی', note: `سود حدود ${depositPct}٪ در سال؛ شکستن پیش از سررسید هزینه دارد` });
-    funds.filter((x) => x.f.fundType === 4 && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 3).forEach((x) => out.push(fund(x)));
+    funds.filter((x) => x.f.fundType === 4 && !x.m.navStale && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 2e12 && x.m.y1 > depEff).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 3).forEach((x) => out.push(fund(x)));
   } else if (classId === 'gold') {
     for (const k of ['sekee', 'nim', 'rob']) { const b = BB.coinBubble(k, quotes); if (b && !b.stale) out.push({ kind: 'coin', name: b.name, bubble: b.bubble, note: 'هزینهٔ خرید و فروش حدود ۲ تا ۳٪' }); }
     funds.filter((x) => x.m.gold && x.m.bubble !== null && x.m.tradable).sort((a, b) => a.m.bubble - b.m.bubble).slice(0, 3).forEach((x) => out.push(fund(x)));
     out.push({ kind: 'note', name: 'طلای آب‌شده یا آنلاین', note: 'بدون حباب سکه؛ فاصلهٔ خرید و فروش حدود ۱ تا ۲٪' });
   } else if (classId === 'bourse') {
-    funds.filter((x) => (x.f.fundType === 6 || x.f.fundType === 23) && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 4).forEach((x) => out.push(fund(x)));
+    funds.filter((x) => (x.f.fundType === 6 || x.f.fundType === 23) && !x.m.navStale && x.m.y1 !== null && x.m.ageDays >= 365 && x.m.size >= 1e12).sort((a, b) => b.m.y1 - a.m.y1).slice(0, 4).forEach((x) => out.push(fund(x)));
     out.push({ kind: 'note', name: 'سهم تکی', note: 'از «رادار فرصت‌ها» و کارنامهٔ نماد بررسی کن؛ سقف یک دارایی را رعایت کن' });
   } else if (classId === 'usd') {
     out.push({ kind: 'note', name: 'دلار نقد یا حساب ارزی', note: 'فاصلهٔ خرید و فروش صرافی حدود ۲٪؛ نگهداری امن را در نظر بگیر' });

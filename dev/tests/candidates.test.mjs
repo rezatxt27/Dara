@@ -166,3 +166,13 @@ test('«برترین هر بخش»: the best of a part by combined score, nothin
   assert.equal(RD.bestOf(cards, { sigs: ['cand'] }), null);
   assert.equal(RD.bestOf(cards.map((c, i) => ({ ...c, id: 'x' + i })), trend, new Set(), new Set(['x1'])).sym, 'A', 'taken by an earlier part');
 });
+
+test('a fund whose NAV stopped (more than a week old) is left out of the fund lists', () => {
+  const R = market(); R.day = DAY0;
+  const f = (key, date) => ({ key, name: 'درآمد ثابت ' + key, fundType: 4, cancelNav: 1e4, date, size: 5e12, ret: { y1: 40 }, since: '2020-01-01', traded: false });
+  R.funds = [f('fresh', DAY0), f('old', addDaysIso(DAY0, -20))];
+  assert.equal(RD.fundMetrics(R.funds[1], R, D0).navStale, true);
+  assert.equal(RD.fundMetrics(R.funds[0], R, D0).navStale, false);
+  const fixed = RD.buildCards(R, { money, depositPct: 25 }).cards.filter((c) => c.sig === 'fixedBeat').map((c) => c.key);
+  assert.deepEqual(fixed, ['fresh']);
+});

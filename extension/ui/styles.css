@@ -1084,3 +1084,4 @@ svg.rot { transform: rotate(180deg); }
 .bo-why { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .bo-score { min-width: 30px; text-align: center; padding: 1px 7px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
 .bo-rec.good { color: var(--pos); } .bo-rec.bad { color: var(--neg); }
+.bo-fresh { margin-top: 8px; }

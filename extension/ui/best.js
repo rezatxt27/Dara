@@ -2,7 +2,8 @@
 // coming in, value, equity funds, the cheapest way into gold, fixed income, a fund under its NAV. «Best» is the section's
 // own rule, then the combined score among stocks that carry no severe red flag. Each tile: the one number that matters,
 // why, its red flags, how that section did in the record, and the way to check it against the owner's money.
-import { html, Icon, Tip, num } from './components.js';
+import { html, Icon, Tip, num, fmtJ } from './components.js';
+import { ago } from '../lib/format.js';
 import * as RD from '../lib/radar.js';
 
 const pctTxt = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : `${x > 0 ? '+' : x < 0 ? '−' : ''}${num(Math.abs(x * 100), d)}٪`);
@@ -19,7 +20,7 @@ const TILES = [
   { id: 'nav', t: 'صندوق زیر ارزش واقعی', sigs: ['negBubble'], head: (c) => `${num(Math.abs(Math.round((c.m?.bubble || 0) * 1000)) / 10, 1)}٪ ارزان‌تر از NAV`, icon: 'target' },
 ];
 
-export function BestOfRadar({ built, gold, s, openPrice, onFit }) {
+export function BestOfRadar({ radar, built, gold, s, openPrice, onFit }) {
   const weak = built.weak || new Set();
   const taken = new Set();
   const tiles = TILES.map((t) => { const c = RD.bestOf(built.cards, t, weak, taken); if (c) taken.add(c.id); return { t, c }; }).filter((x) => x.c);
@@ -35,6 +36,7 @@ export function BestOfRadar({ built, gold, s, openPrice, onFit }) {
         <button class="bo-name" onClick=${() => openPrice(c.ref)}><b>${c.sym || c.name}</b>${c.sym && html`<span class="xs muted ellipsis">${c.name}</span>`}</button>
         <div class="bo-head">${t.head(c)}</div>
         <div class="xs muted bo-why">${c.why?.[0] || ''}</div>
+        ${c.kind === 'fund' && c.m?.navDay && html`<div class="xs faint">NAV فیپیران تا ${fmtJ(c.m.navDay)}</div>`}
         ${c.flags?.length > 0 && html`<div class="rd-flags">${c.flags.slice(0, 2).map((f) => html`<span class="rd-flag"><${Icon} n="alert" cls="xs" />${f.t}</span>`)}</div>`}
         ${c.stop?.price > 0 && html`<div class="xs faint">باطل زیر قیمت ${num(Math.round(c.stop.price / (s.currency === 'rial' ? 1 : 10)))} ${s.currency === 'rial' ? 'ریال' : 'تومان'}</div>`}
         ${r ? html`<div class=${'xs bo-rec ' + (r.weak ? 'bad' : r.hit >= 0.5 ? 'good' : '')}>${r.weak ? 'این بخش در گذشته جواب نداده؛ ' : ''}کارنامهٔ بخش: ${num(Math.round(r.hit * 100))}٪ مواقع جلوتر از شاخص${r.test ? ' (آزمون روی گذشته)' : ''}</div>` : c.kind === 'stock' ? html`<div class="xs faint">کارنامهٔ این بخش هنوز کافی نیست</div>` : ''}
@@ -49,5 +51,6 @@ export function BestOfRadar({ built, gold, s, openPrice, onFit }) {
         ${g.ref && html`<div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(g.ref)}><${Icon} n="chart" cls="sm" />نمودار</button></div>`}
       </article>`}
     </div>
+    <div class="xs faint bo-fresh">جلسهٔ ${fmtJ(radar.day)}${radar.at > 1e12 && radar.at <= Date.now() ? `؛ آخرین بررسی رادار ${ago(radar.at)}` : ''}${radar.fundsAt > 1e12 && radar.fundsAt <= Date.now() ? `؛ فهرست صندوق‌ها ${ago(radar.fundsAt)}` : ''}${gold ? '؛ قیمت طلا و سکه از به‌روزرسانی قیمت‌ها' : ''}. هر ۱۵ دقیقه (تا وقتی کروم باز است) دوباره بررسی می‌شود.</div>
   </section>`;
 }

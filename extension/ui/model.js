@@ -25,11 +25,13 @@ export function ModelCard({ radar, built, st, s, openPrice, onFit }) {
   const stats = useMemo(() => MD.modelStats(model, radar, { R, depositPct }), [model, R]);
   const rec = useMemo(() => MD.modelRecord(radar, lv, st.quotes), [radar, lv, st.quotes]);
   if (!model) return null;
+  // «آزمایشی» until its own record covers PROVEN_DAYS; then that record, not the test on the past, leads
+  const proven = rec?.pct !== null && rec?.pct !== undefined && rec.days >= MD.PROVEN_DAYS;
   const core = model.items.filter((i) => i.role !== MD.ROLE.sat), sat = model.items.filter((i) => i.role === MD.ROLE.sat);
   const corrWord = (c) => (c === null ? '' : c < 0.25 ? 'کم' : c < 0.5 ? 'متوسط' : 'زیاد');
   const m = stats?.markets || {};
   return html`<section class="rd-sec md">
-    <div class="rd-sec-h"><h4>سبد مدل امروز</h4><${Tip} title="سبد مدل" text=${TIP} /><span class="xs muted">یک ترکیب متنوع از همین رادار، برای هر سطح ریسک؛ مدل است، نه پیشنهاد خرید.</span></div>
+    <div class="rd-sec-h"><h4>سبد مدل امروز</h4>${!proven && html`<span class="pill stale" title=${`تا وقتی کارنامهٔ واقعی این سبد کمتر از ${num(MD.PROVEN_DAYS)} روز است`}>آزمایشی</span>`}<${Tip} title="سبد مدل" text=${TIP} /><span class="xs muted">یک ترکیب متنوع از همین رادار، برای هر سطح ریسک؛ مدل است، نه پیشنهاد خرید.</span></div>
     <div class="card md-card">
       <div class="row between wrap" style="gap:8px">
         <div class="seg" role="tablist">${MD.LEVELS.map((l) => html`<button role="tab" aria-selected=${lv === l ? 'true' : 'false'} class=${lv === l ? 'on' : ''} onClick=${() => setLv(l)}>ریسک ${PR.RISK[l]}${mine === l ? ' ✓' : ''}</button>`)}</div>
@@ -37,8 +39,9 @@ export function ModelCard({ radar, built, st, s, openPrice, onFit }) {
       </div>
 
       <div class="md-stats">
-        <div><span class="xs muted">۱۲ ماه گذشته (آزمون)</span><b class=${'num ' + (stats?.y1 > 0 ? 'pos' : stats?.y1 < 0 ? 'neg' : '')}>${P(stats?.y1)}</b>
-          <span class="xs muted">شاخص ${P(m.index)}${m.gold !== null ? `، طلا ${P(m.gold)}` : ''}${m.usd !== null ? `، دلار ${P(m.usd)}` : ''}، سپرده ${P(m.deposit)}</span></div>
+        <div><span class="xs muted">${proven ? `کارنامهٔ واقعی از ${fmtJ(rec.since)}` : 'کارنامهٔ واقعی'}</span>
+          ${rec?.pct !== null && rec?.pct !== undefined ? html`<b class=${'num ' + (proven ? (rec.pct > 0 ? 'pos' : rec.pct < 0 ? 'neg' : '') : 'md-dim')}>${P(rec.pct, 1)}</b><span class="xs muted">${num(rec.days)} روز${proven ? '' : '؛ هنوز کم است'}</span>` : html`<b class="md-dim">—</b><span class="xs muted">از امروز ثبت می‌شود</span>`}
+          <span class="xs faint">آزمون ۱۲ ماه روی گذشته: ${P(stats?.y1)} (خوش‌بینانه)؛ همین مدت شاخص ${P(m.index)}${m.gold !== null ? `، طلا ${P(m.gold)}` : ''}${m.usd !== null ? `، دلار ${P(m.usd)}` : ''}، سپرده ${P(m.deposit)}</span></div>
         <div><span class="xs muted">بدترین ماه</span><b class=${'num ' + (stats?.worst < 0 ? 'neg' : '')}>${P(stats?.worst, 1)}</b><span class="xs muted">${stats?.vol !== null && stats?.vol !== undefined ? `نوسان سالانه ${P0(stats.vol)}` : 'تاریخچهٔ بازارها هنوز نیامده'}</span></div>
         <div><span class="xs muted">هم‌حرکتی اجزا</span><b>${stats?.avgCorr !== null ? `${corrWord(stats.avgCorr)} (${num(Math.round(stats.avgCorr * 100) / 100, 2)})` : '—'}</b><span class="xs muted">${num(stats?.blocks || 0)} بخش${stats?.sectors ? `، ${num(stats.sectors)} صنعت` : ''}</span></div>
         <div><span class="xs muted">محافظت از تورم</span><b class="num">${P0(stats?.protectedShare)}</b><span class="xs muted">هزینهٔ خرید حدود ${P0(stats?.cost, 1)}</span></div>

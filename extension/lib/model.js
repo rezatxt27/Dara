@@ -16,6 +16,7 @@ export const SAT = { low: 0.25, mid: 0.4, high: 0.5 }; // share of the stock-mar
 export const MAX_STOCK = 0.08, MAX_STOCKS = 3;
 export const SPLIT_AT = 0.2;                           // a part this large is split between two instruments
 export const LOG_EVERY_DAYS = 7;
+export const PROVEN_DAYS = 60;                        // «آزمایشی» until its own record is this long
 export const ROLE = { deposit: 'ستون ثابت', gold: 'محافظ تورم', bourse: 'سهم بازار', usd: 'محافظ ارزی', btc: 'بخش پرریسک', sat: 'موتور رشد' };
 // rough round-trip costs of getting in (percent of the money), for the «هزینهٔ خرید» line
 const COST = { stock: 0.6, etf: 0.3, fund: 0, fx: 1.5, crypto: 0.5, deposit: 0, coin: 2.5 };

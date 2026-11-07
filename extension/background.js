@@ -13,7 +13,6 @@ import * as U from './lib/update.js';
 import * as BB from './lib/bubble.js';
 import * as BK from './lib/backup.js';
 import * as RD from './lib/radar.js';
-import * as MD from './lib/model.js';
 import { riskLevel } from './lib/profile.js';
 
 const PROVIDER_HOSTS = ['call1.tgju.org', 'api.tgju.org', 'cdn.tsetmc.com', 'www.fipiran.com', 'api.nobitex.ir', 'api.bitpin.ir'];
@@ -532,6 +531,8 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     if (!tse && !fip) return { error: 'منبع‌های «بورس تهران» و «فیپیران» در تنظیمات خاموش‌اند' };
     const radar = await loadRadar();
     const prevError = radar.error ?? null;
+    // (1.30.0 kept a model portfolio here; it was replaced by «برترین هر بخش», which needs nothing stored)
+    let dropped = false; if (radar.model) { delete radar.model; dropped = true; }
     let changed = false; radar.error = tse ? null : 'منبع «بورس تهران» در تنظیمات خاموش است؛ فقط صندوق‌ها بررسی می‌شوند';
     // 1) the latest session, once its closing prices are final (never an older one than we already have)
     if (tse) try {
@@ -635,8 +636,6 @@ async function runRadar({ force = false, batch = 40 } = {}) {
       const ids = [...new Set(cards.map(RD.cardKey))];
       // the radar's own track record: what it showed on each complete scan, to say later how it did
       if (!pending) RD.recordTrack(radar, cards);
-      // «سبد مدل» for each risk level, logged with prices (kept picks, what changed, its own record)
-      if (!pending) { try { const { quotes = {} } = await chrome.storage.local.get('quotes'); MD.updateModels(radar, built, { quotes, depositPct, noCrypto: !!settings.profile?.noCrypto }); } catch (e) { console.warn('model', e); } }
       const prev = radar.results || {};
       // «تازه» compares with the last COMPLETE day (a day whose prices were still being gathered lacks most stocks)
       const before = prev.day === radar.day ? prev.before || [] : prev.complete !== false ? prev.ids || [] : prev.before || [];
@@ -688,7 +687,7 @@ async function runRadar({ force = false, batch = 40 } = {}) {
     const newCount = res.before?.length ? new Set((res.ids || []).filter((x) => firstIds.has(x) && !res.before.includes(x)).map((x) => x.split('|')[1])).size : 0;
     await store.update('meta', (m) => ({ ...m, radar: { day: radar.day, newCount, pending, at: Date.now() } }));
     // the store is several MB: written only when something changed (closes kept to 8 significant digits)
-    if (changed || radar.error !== prevError) {
+    if (changed || dropped || radar.error !== prevError) {
       for (const r of Object.values(radar.stocks)) r.p = r.p.map((v) => +v.toPrecision(8));
       radar.at = Date.now();
       await chrome.storage.local.set({ radar });

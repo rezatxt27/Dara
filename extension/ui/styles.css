@@ -1074,16 +1074,13 @@ svg.rot { transform: rotate(180deg); }
 .cmt-split i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 .cmt-kv { display: flex; justify-content: space-between; gap: 6px; }
 
-/* radar: «سبد مدل امروز» */
-.md-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; }
-.md-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-.md-stats > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); min-width: 0; }
-.md-stats b { font-size: 17px; }
-.md-bar { height: 10px; }
-.md-group { display: flex; flex-direction: column; gap: 6px; }
-.md-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
-.md-w { flex: none; min-width: 42px; font-weight: 700; font-size: 15px; color: var(--accent); }
-.md-role { padding: 1px 7px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); }
-.md-chg { display: flex; gap: 6px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--info-bg); }
-.md-chg .i { flex: none; margin-top: 2px; }
-.md-dim { color: var(--muted); }
+/* radar: «برترین هر بخش، امروز» */
+.bo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.bo-tile { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; margin: 0; min-width: 0; }
+.bo-name { display: flex; flex-direction: column; align-items: flex-start; gap: 0; border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: start; min-width: 0; max-width: 100%; }
+.bo-name b { font-size: 17px; }
+.bo-name:hover b { color: var(--accent); }
+.bo-head { font-weight: 700; font-size: 14px; color: var(--accent); }
+.bo-why { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.bo-score { min-width: 30px; text-align: center; padding: 1px 7px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
+.bo-rec.good { color: var(--pos); } .bo-rec.bad { color: var(--neg); }

@@ -1184,3 +1184,17 @@ export function trackStats(radar, sig, horizon = 30) {
   if (r.length < 20 || ids.size < 8) return { ...out, n: r.length, stocks: ids.size, excess: null, hit: null, p10: null };
   return { ...recSummary(r, ids, out.since) };
 }
+
+/**
+ * «برترین هر بخش»: the best card of a part of the radar (tile: { sigs, fund? }), not one an earlier part took — among cards with no severe red flag,
+ * a section whose record is weak last, then stocks by combined score, then the order the sections are given in and each
+ * section's own rank (funds come ranked by their rule). null when the part has nothing today.
+ */
+export function bestOf(cards, tile, weak = new Set(), taken = new Set()) {
+  // (taken: picked by an earlier part — each part shows a different name)
+  const list = cards.filter((c) => tile.sigs.includes(c.sig) && (!tile.fund || tile.fund(c)) && !(c.flags || []).some((f) => f.severe) && !taken.has(c.id));
+  if (!list.length) return null;
+  const order = (c) => tile.sigs.indexOf(c.sig);
+  return list.slice().sort((a, b) => (weak.has(a.sig) ? 1 : 0) - (weak.has(b.sig) ? 1 : 0)
+    || (a.kind === 'stock' ? (b.score ?? -1) - (a.score ?? -1) : 0) || order(a) - order(b) || (a.rank ?? 0) - (b.rank ?? 0))[0];
+}

@@ -150,3 +150,19 @@ test('candidates\' history: from the first day each showed up, against the index
   assert.ok(Math.abs(s10.change - (rec.p[rec.p.length - 1] / rec.p[i] - 1)) < 1e-9);
   assert.ok(Math.abs(s10.index - ((1399) / (1379) - 1)) < 1e-9);
 });
+
+test('«برترین هر بخش»: the best of a part by combined score, nothing with a severe flag, a weak section last', () => {
+  const cards = [
+    { sig: 'breakout', kind: 'stock', sym: 'A', score: 60, flags: [] },
+    { sig: 'strength', kind: 'stock', sym: 'B', score: 80, flags: [] },
+    { sig: 'strength', kind: 'stock', sym: 'C', score: 95, flags: [{ t: 'خروج سنگین', severe: true }] },
+    { sig: 'topFund', kind: 'fund', sym: 'F1', sub: 'سهامی، قابل معامله', rank: 0 },
+    { sig: 'topFund', kind: 'fund', sym: 'F2', sub: 'مختلط، قابل معامله', rank: 1 },
+  ];
+  const trend = { sigs: ['breakout', 'strength'] };
+  assert.equal(RD.bestOf(cards, trend).sym, 'B', 'the higher score, not the severe one');
+  assert.equal(RD.bestOf(cards, trend, new Set(['strength'])).sym, 'A', 'a weak section goes last');
+  assert.equal(RD.bestOf(cards, { sigs: ['topFund'], fund: (c) => /سهامی/.test(c.sub) }).sym, 'F1');
+  assert.equal(RD.bestOf(cards, { sigs: ['cand'] }), null);
+  assert.equal(RD.bestOf(cards.map((c, i) => ({ ...c, id: 'x' + i })), trend, new Set(), new Set(['x1'])).sym, 'A', 'taken by an earlier part');
+});

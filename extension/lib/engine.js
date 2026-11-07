@@ -956,6 +956,11 @@ export function eventEffects(events, s, byId, nowById = {}) {
  * flow semantics: contribution to the asset's signed value from events (transfers, deposits, buys…).
  * Each row also carries `moves`: the dated non-market amounts (Σ moves = flow + edit), used by performance().
  */
+/** True when every day after d0 up to and including d1 is a Thursday or Friday — days the Tehran exchange is closed. */
+export function onlyWeekendBetween(d0, d1) {
+  for (let d = addDaysIso(d0, 1); d <= d1; d = addDaysIso(d, 1)) { const w = new Date(d + 'T00:00:00Z').getUTCDay(); if (w !== 4 && w !== 5) return false; }
+  return true;
+}
 export function attribution(assets, quotes, settings, snaps, events, days = 1, today = todayIso(), pf = null) {
   const s = snapshotBefore(snaps, days, today);
   if (!s) return null;
@@ -1018,7 +1023,12 @@ export function attribution(assets, quotes, settings, snaps, events, days = 1, t
     r.interest = earns ? r.market : 0; r.price = r.market - r.interest;
     // the starting point used an old price: this move covers the days since that price, not just the period
     const o = s.snap.old?.[r.id];
-    if (o > 0 && !r.removed) { const d0 = isoFromDate(new Date(o)); if (d0 < s.date) r.since = d0; }
+    if (o > 0 && !r.removed) {
+      const d0 = isoFromDate(new Date(o));
+      // (an exchange price from the last session before a weekend isn't late: no session was missed in between)
+      const exch = ['tsetmc', 'fipiran'].includes(a?.price?.ref?.provider);
+      if (d0 < s.date && !(exch && onlyWeekendBetween(d0, s.date))) r.since = d0;
+    }
   }
   const total = pf.net - s.snap.t;
   const editsTotal = rows.reduce((x, r) => x + r.edit, 0);

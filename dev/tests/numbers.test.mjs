@@ -154,3 +154,12 @@ test('price sources: ok, some failed, down, idle — only the latest round count
   const b = I.providerHealth({ 'nobitex:btc': Q(1), 'nobitex:tsla': { price: 5, source: 'bitpin', fetchedAt: now - 3600e3, error: 'HTTP 502', errorAt: now } }, now);
   assert.equal(b.nobitex.status, 'ok'); assert.equal(b.bitpin.status, 'down');
 });
+
+test('an exchange price from Wednesday, read on Friday, is not «late»: only the weekend lies between', async () => {
+  const E = await import('../../extension/lib/engine.js');
+  // 2026-11-04 is a Wednesday; Thursday and Friday the Tehran exchange is closed
+  assert.equal(E.onlyWeekendBetween('2026-11-04', '2026-11-06'), true);
+  assert.equal(E.onlyWeekendBetween('2026-11-04', '2026-11-07'), false, 'Saturday is a session');
+  assert.equal(E.onlyWeekendBetween('2026-11-03', '2026-11-06'), false, 'Wednesday was missed');
+  assert.equal(E.onlyWeekendBetween('2026-11-06', '2026-11-06'), true, 'nothing between');
+});

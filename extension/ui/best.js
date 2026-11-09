@@ -36,7 +36,7 @@ export function BestOfRadar({ radar, built, gold, s, openPrice, onFit }) {
         <button class="bo-name" onClick=${() => openPrice(c.ref)}><b>${c.sym || c.name}</b>${c.sym && html`<span class="xs muted ellipsis">${c.name}</span>`}</button>
         <div class="bo-head">${t.head(c)}</div>
         <div class="xs muted bo-why">${c.why?.[0] || ''}</div>
-        ${c.kind === 'fund' && c.m?.navDay && html`<div class="xs faint">NAV فیپیران تا ${fmtJ(c.m.navDay)}</div>`}
+        ${c.kind === 'fund' && c.m?.navDay && html`<div class="xs faint">NAV ${c.m.navSrc === 'tsetmc' ? 'بورس تهران' : 'فیپیران'} تا ${fmtJ(c.m.navDay)}</div>`}
         ${c.flags?.length > 0 && html`<div class="rd-flags">${c.flags.slice(0, 2).map((f) => html`<span class="rd-flag"><${Icon} n="alert" cls="xs" />${f.t}</span>`)}</div>`}
         ${c.stop?.price > 0 && html`<div class="xs faint">باطل زیر قیمت ${num(Math.round(c.stop.price / (s.currency === 'rial' ? 1 : 10)))} ${s.currency === 'rial' ? 'ریال' : 'تومان'}</div>`}
         ${r ? html`<div class=${'xs bo-rec ' + (r.weak ? 'bad' : r.hit >= 0.5 ? 'good' : '')}>${r.weak ? 'این بخش در گذشته جواب نداده؛ ' : ''}کارنامهٔ بخش: ${num(Math.round(r.hit * 100))}٪ مواقع جلوتر از شاخص${r.test ? ' (آزمون روی گذشته)' : ''}</div>` : c.kind === 'stock' ? html`<div class="xs faint">کارنامهٔ این بخش هنوز کافی نیست</div>` : ''}

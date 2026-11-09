@@ -472,16 +472,35 @@ export function findFund(items, ref) {
   return same.find((x) => squash(x.name) === want) || same.find((x) => { const s = squash(x.name); return s.includes(want) || want.includes(s); }) || null;
 }
 
+/** How far the exchange's NAV may be from Fipiran's and still be taken as the same unit's (a week's move fits easily). */
+export const NAV_RATIO = [0.75, 1.35];
+/** Is `nav` (from the exchange) plausibly the same unit as Fipiran's `fipNav`? Leveraged funds (22) never: their classes differ. */
+export const sameNav = (nav, fipNav, fundType) => fundType !== 22 && nav > 0 && fipNav > 0 && nav / fipNav >= NAV_RATIO[0] && nav / fipNav <= NAV_RATIO[1];
+
+/**
+ * Fipiran sometimes stops updating a fund's NAV for days; an exchange-traded fund's redemption NAV is on TSETMC every
+ * session. Taken instead when it is for a later day and plausibly the same unit (see sameNav), else null.
+ */
+async function exchangeNav(f, day) {
+  if (!f?.insCode || !f.traded || f.fundType === 22) return null;
+  try {
+    const q = await tsetmcQuote(f.insCode, 'nav');
+    return q.asOf && q.asOf > day && sameNav(q.price, f.cancelNav, f.fundType) ? q : null;
+  } catch { return null; }
+}
+
 export async function fipiranQuotes(refs) {
   const out = {}; const errors = {};
   if (!refs.length) return { quotes: out, errors };
   const idOf = (r) => `${r.key}${r.field ? ':' + r.field : ''}`;
   try {
     const items = await fipiranFunds(10 * 60 * 1000);
-    for (const r of refs) {
+    const fresh = await Promise.all(refs.map((r) => { const f = findFund(items, r); return !r.field || r.field === 'cancelNav' ? exchangeNav(f, String(f?.date || '').slice(0, 10)) : null; }));
+    for (const [i, r] of refs.entries()) {
       const f = findFund(items, r);
       const price = f && f[r.field || 'cancelNav'];
-      if (price > 0) {
+      if (fresh[i]) out[idOf(r)] = { ...fresh[i], navFrom: 'tsetmc' };
+      else if (price > 0) {
         const day = String(f.date || '').slice(0, 10);
         out[idOf(r)] = { price, change: 0, changePct: 0, at: day ? tehranDayEnd(day) : undefined, asOf: day, source: 'fipiran' };
       } else if (f) errors[idOf(r)] = 'فیپیران برای این صندوق قیمتی اعلام نکرده';

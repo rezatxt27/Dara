@@ -589,6 +589,8 @@ async function runRadar({ force = false, batch = 40 } = {}) {
       try { radar.funds = (await P.fipiranFunds(10 * 60e3)).map(RD.slimFund); radar.fundsAt = Date.now(); changed = true; }
       catch (e) { radar.error = radar.error || `صندوق‌ها: فیپیران فعلاً جواب نداد (${e.message})؛ چند دقیقهٔ دیگر خودکار دوباره امتحان می‌شود. سهام جدا بررسی می‌شوند.`; }
     }
+    // 2a) Fipiran can lag a week on some funds: exchange-traded ones take the NAV the exchange showed in a newer session
+    { const had = (radar.funds || []).some((f) => f.fip); if (RD.patchNavs(radar) || had) changed = true; }
     // 2b) exchange-traded funds whose NAV is for a day the radar has no close of (Fipiran is usually a day behind): their
     // own short daily lists, so the bubble (price ÷ NAV of the same day) can be told — gold funds first
     if (tse && radar.day) {

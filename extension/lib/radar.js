@@ -8,7 +8,7 @@
 // Price series are ADJUSTED for capital increases and dividends (see providers.adjustDaily): each stock keeps one
 // close per trading day for about 13 months; when a new session's «priceYesterday» differs from the last stored close,
 // an event happened and every earlier close is scaled by that ratio, so returns never show a capital increase as a fall.
-import { persianize } from './providers.js';
+import { persianize, sameNav } from './providers.js';
 import { GOLD_ETFS } from './catalog.js';
 
 export const VERSION = 1;
@@ -46,7 +46,7 @@ export function mwRow(r) {
     ins: String(r.insCode), isin: String(r.insID || ''), sym: persianize(r.lva), name: persianize(r.lvc), sector: String(r.csv || '').trim(),
     close: num(r.pcl), last: num(r.pdv), py: num(r.py), eps: num(r.eps), pe: r.pe === null || r.pe === undefined || r.pe === '' ? NaN : num(r.pe),
     vol: Math.max(num(r.qtj) || 0, num(r.qTotTran5J) || 0), val: Math.max(num(r.qtc) || 0, num(r.qTotCap) || 0),
-    cap: (num(r.ztd) || 0) * (num(r.pcl) || 0),
+    cap: (num(r.ztd) || 0) * (num(r.pcl) || 0), nav: num(r.pRedTran) || 0,
   };
 }
 
@@ -107,7 +107,10 @@ export function applySession(radar, rows, day, sessions = [], mode = 'live') {
       const old = radar.etf[r.ins];
       const hist = { ...(old?.hist || {}), [day]: r.close };
       const keep = Object.keys(hist).sort().slice(-7);
-      radar.etf[r.ins] = { sym: r.sym, name: r.name, close: r.close, val: live ? r.val : old?.val ?? null, day, hist: Object.fromEntries(keep.map((k) => [k, hist[k]])) };
+      // the fund's NAV (redemption) the exchange shows for that session: fresher than Fipiran's, which can lag a week
+      const navs = { ...(old?.navs || {}) }; if (r.nav > 0) navs[day] = r.nav;
+      const keepN = Object.keys(navs).sort().slice(-7);
+      radar.etf[r.ins] = { sym: r.sym, name: r.name, close: r.close, val: live ? r.val : old?.val ?? null, day, hist: Object.fromEntries(keep.map((k) => [k, hist[k]])), navs: Object.fromEntries(keepN.map((k) => [k, navs[k]])) };
       continue;
     }
     if (!isStockIsin(r.isin) || !(r.close > 0)) continue;
@@ -368,7 +371,7 @@ export function fundMetrics(f, radar, D) {
   const tradable = etfVal !== null ? etfVal >= 1e9 : (f.size || 0) >= 5e12;
   // a NAV more than a week old: Fipiran stopped updating the fund (suspended, being wound up…) — its returns are old too
   const navAge = navDay ? D - dayNum(navDay) : null;
-  return { y1: frac(r.y1), m6: frac(r.m6), m3: frac(r.m3), m1: frac(r.m1), w1: frac(r.w1), ageDays, size: f.size || 0, bubble, etfVal, tradable, navDay, navAge, navStale: navAge === null || navAge > NAV_STALE_DAYS, marketPrice: etf?.close || null, gold: isGoldFund(f) };
+  return { y1: frac(r.y1), m6: frac(r.m6), m3: frac(r.m3), m1: frac(r.m1), w1: frac(r.w1), ageDays, size: f.size || 0, bubble, etfVal, tradable, navDay, navAge, navStale: navAge === null || navAge > NAV_STALE_DAYS, navSrc: f.navSrc || 'fipiran', marketPrice: etf?.close || null, gold: isGoldFund(f) };
 }
 
 /* ---------------------------------- the combined score ---------------------------------- */
@@ -488,6 +491,33 @@ export function fillEtf(radar, ins, rows, navDay, failed = false) {
   const keep = Object.keys(hist).sort().slice(-7);
   e.hist = Object.fromEntries(keep.map((k) => [k, hist[k]]));
   if (navDay) e.tried = navDay;
+}
+
+/**
+ * Fipiran sometimes stops updating a fund's NAV for days while the exchange shows it every session. Each exchange-traded
+ * fund whose NAV the radar saw in a session newer than Fipiran's date takes that NAV and that day, and its returns are
+ * carried forward by the same move (the period's start isn't moved: a few days' error over a year). The daily and weekly
+ * returns are dropped — they would span more than their name says. When the two NAVs are too far apart to be the same unit,
+ * Fipiran's stays. Fipiran's own numbers are kept in `fip`, so running it again gives the same. Mutates; returns how many.
+ */
+export function patchNavs(radar) {
+  let n = 0;
+  for (const f of radar.funds || []) {
+    const fip = f.fip || { nav: f.cancelNav, date: f.date, ret: f.ret };
+    // start from Fipiran's own: a newer Fipiran day, or a session dropped from the kept few, undoes an earlier patch
+    f.cancelNav = fip.nav; f.date = fip.date; f.ret = fip.ret; delete f.fip; delete f.navSrc;
+    const navs = f.insCode ? radar.etf?.[f.insCode]?.navs : null;
+    if (!navs) continue;
+    const fd = String(fip.date || '').slice(0, 10);
+    const day = Object.keys(navs).filter((d) => !radar.day || d <= radar.day).sort().pop();
+    if (!day || (fd && day <= fd) || !sameNav(navs[day], fip.nav, f.fundType)) continue;
+    const k = navs[day] / fip.nav;
+    const roll = (v) => (typeof v === 'number' && isFinite(v) ? ((1 + v / 100) * k - 1) * 100 : undefined);
+    f.fip = fip; f.cancelNav = navs[day]; f.date = day; f.navSrc = 'tsetmc';
+    f.ret = Object.fromEntries(Object.entries(fip.ret || {}).filter(([p]) => p !== 'd1' && p !== 'w1').map(([p, v]) => [p, roll(v)]));
+    n++;
+  }
+  return n;
 }
 
 /** Gold funds that trade, with today's bubble (price against the same day's NAV), lowest first — for «ارزان‌ترین راه طلا». */

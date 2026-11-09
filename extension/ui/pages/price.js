@@ -184,7 +184,7 @@ function Report({ rep, info, price, s, depositPct = 25 }) {
       ${rep.mix && isFinite(rep.mix.stock) && line('ترکیب', `${num(rep.mix.stock, 0)}٪ سهام، ${num((rep.mix.bond || 0) + (rep.mix.deposit || 0), 0)}٪ اوراق و سپرده، ${num((rep.mix.cash || 0) + (rep.mix.other || 0), 0)}٪ سایر`)}
       ${line(`NAV ابطال${rep.navDay ? ` (${fmtJ(rep.navDay, 'dm')})` : ''}`, html`<${Money} v=${rep.nav} s=${s} />`)}
       ${m.bubble !== null && line('حباب در همان روز', html`<b class="ltr">${pct(m.bubble, { digits: 1 })}</b>`)}
-      <div class="xs muted">منبع: فیپیران${rep.navDay ? `، ${fmtJ(rep.navDay)}` : ''}. بازدهی‌ها مال گذشته‌اند.</div></div>`;
+      <div class="xs muted">منبع: فیپیران${m.navSrc === 'tsetmc' ? `؛ NAV از بورس تهران${rep.navDay ? `، ${fmtJ(rep.navDay)}` : ''} (فیپیران عقب بود؛ بازدهی‌ها با همان تغییر جلو برده شده‌اند)` : rep.navDay ? `، ${fmtJ(rep.navDay)}` : ''}. بازدهی‌ها مال گذشته‌اند.</div></div>`;
   }
   if (rep?.kind === 'stock') {
     const m = rep.m;

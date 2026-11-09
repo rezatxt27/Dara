@@ -149,6 +149,23 @@ export function useOnce() {
 export function Toggle({ on, onChange, title }) {
   return html`<button type="button" class=${'toggle' + (on ? ' on' : '')} title=${title} role="switch" aria-checked=${on ? 'true' : 'false'} aria-label=${title || undefined} onClick=${() => onChange(!on)}></button>`;
 }
+/**
+ * A page section that folds (radar): its head is one button. Closed, it is a single row — title, how many items and a
+ * peek of the first few names — so a long page reads as a list of headings; open, the description and the content.
+ * `tip` and `after` (a ⓘ, a badge) sit beside the button, never inside it.
+ */
+export function Fold({ open, onToggle, title, count = 0, peek = '', tip = null, after = null, sub = '', cls = '', children }) {
+  return html`<section class=${'rd-sec fold' + (open ? ' open' : '') + (cls ? ' ' + cls : '')}>
+    <div class="rd-sec-h fold-h">
+      <button type="button" class="fold-btn" aria-expanded=${open ? 'true' : 'false'} onClick=${onToggle}>
+        <${Icon} n="chevronDown" cls="sm fold-chev" /><h4>${title}</h4>${count > 0 && html`<span class="fold-n">${num(count)}</span>`}
+        ${!open && peek && html`<span class="fold-peek xs muted ellipsis">${peek}</span>`}
+      </button>
+      ${open && tip}${after}${open && sub && html`<span class="xs muted fold-sub">${sub}</span>`}
+    </div>
+    ${open && children}
+  </section>`;
+}
 export function Seg({ value, options, onChange, cls = '' }) {
   // a radio group: one tab stop (the chosen option), arrow keys move the choice — in RTL, ← is «next»
   const key = (e, i) => {

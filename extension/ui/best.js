@@ -2,7 +2,7 @@
 // coming in, value, equity funds, the cheapest way into gold, fixed income, a fund under its NAV. «Best» is the section's
 // own rule, then the combined score among stocks that carry no severe red flag. Each tile: the one number that matters,
 // why, its red flags, how that section did in the record, and the way to check it against the owner's money.
-import { html, Icon, Tip, num, fmtJ } from './components.js';
+import { html, Icon, Tip, Fold, num, fmtJ } from './components.js';
 import { ago } from '../lib/format.js';
 import * as RD from '../lib/radar.js';
 
@@ -20,7 +20,7 @@ const TILES = [
   { id: 'nav', t: 'صندوق زیر ارزش واقعی', sigs: ['negBubble'], head: (c) => `${num(Math.abs(Math.round((c.m?.bubble || 0) * 1000)) / 10, 1)}٪ ارزان‌تر از NAV`, icon: 'target' },
 ];
 
-export function BestOfRadar({ radar, built, gold, s, openPrice, onFit }) {
+export function BestOfRadar({ radar, built, gold, s, openPrice, onFit, fold }) {
   const weak = built.weak || new Set();
   const taken = new Set();
   const tiles = TILES.map((t) => { const c = RD.bestOf(built.cards, t, weak, taken); if (c) taken.add(c.id); return { t, c }; }).filter((x) => x.c);
@@ -28,8 +28,9 @@ export function BestOfRadar({ radar, built, gold, s, openPrice, onFit }) {
   const g = gold ? [...(gold.rows || []), ...(gold.funds || []).slice(0, 1)].sort((a, b) => a.buy - b.buy)[0] : null;
   if (!tiles.length && !g) return null;
   const rec = (sig) => { const r = built.records?.[sig]?.use; return r && r.hit !== null && r.hit !== undefined ? { hit: r.hit, n: r.n, weak: !!built.records[sig].weak, test: !!r.test } : null; };
-  return html`<section class="rd-sec bo">
-    <div class="rd-sec-h"><h4>برترین هر بخش، امروز</h4><${Tip} title="برترین هر بخش" text=${TIP} /><span class="xs muted">از هر بخش رادار، بهترین گزینهٔ امروز؛ پیشنهاد خرید نیست، نقطهٔ شروع بررسی است.</span></div>
+  const names = [...tiles.map(({ c }) => c.sym || c.name), g && g.name];
+  return html`<${Fold} ...${fold} cls="bo" title="برترین هر بخش، امروز" count=${tiles.length + (g ? 1 : 0)} peek=${names.filter(Boolean).slice(0, 4).join('، ')}
+    sub="از هر بخش رادار، بهترین گزینهٔ امروز؛ پیشنهاد خرید نیست، نقطهٔ شروع بررسی است." tip=${html`<${Tip} title="برترین هر بخش" text=${TIP} />`}>
     <div class="bo-grid">
       ${tiles.map(({ t, c }) => { const r = rec(c.sig); return html`<article class="card bo-tile">
         <div class="row between" style="gap:6px"><span class="xs sb muted"><${Icon} n=${t.icon} cls="xs" /> ${t.t}</span>${c.kind === 'stock' && c.score !== undefined && html`<span class="bo-score" title="امتیاز ترکیبی رادار">${num(Math.round(c.score))}</span>`}</div>
@@ -52,5 +53,5 @@ export function BestOfRadar({ radar, built, gold, s, openPrice, onFit }) {
       </article>`}
     </div>
     <div class="xs faint bo-fresh">جلسهٔ ${fmtJ(radar.day)}${radar.at > 1e12 && radar.at <= Date.now() ? `؛ آخرین بررسی رادار ${ago(radar.at)}` : ''}${radar.fundsAt > 1e12 && radar.fundsAt <= Date.now() ? `؛ فهرست صندوق‌ها ${ago(radar.fundsAt)}` : ''}${gold ? '؛ قیمت طلا و سکه از به‌روزرسانی قیمت‌ها' : ''}. هر ۱۵ دقیقه (تا وقتی کروم باز است) دوباره بررسی می‌شود.</div>
-  </section>`;
+  <//>`;
 }

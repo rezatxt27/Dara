@@ -12,7 +12,20 @@ import { Terms } from '../glossary.js';
 import { CommitteeModal } from '../committee.js';
 import { BestOfRadar } from '../best.js';
 
-const ORDER = ['cand', 'top', 'gold', 'negBubble', 'goldBubble', 'fixedBeat', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow', 'topFund'];
+// the page's sections: each answers one question, and holds the radar's lists for it as small tabs (their rules,
+// records and cards unchanged). Gold's cheapest route already compares the gold funds, so «کم‌حباب‌ترین صندوق‌های طلا»
+// lives there. A tab whose record did worse than the index goes last and is never the one a section opens on.
+const GROUPS = [
+  { id: 'stocks', t: 'سهم‌های برتر امروز', kind: 'stock', sigs: ['cand', 'top'], d: 'سهم‌هایی که چند نشانهٔ جدا با هم دارند، یا در جمع روند، ارزش، پول، توجه و ریسک بیشترین امتیاز را گرفته‌اند.' },
+  { id: 'trend', t: 'روند قوی', kind: 'stock', sigs: ['breakout', 'strength', 'momentum3', 'momentum12'], d: 'سهم‌هایی که قیمتشان از بازار جلوتر است: تازه از سقف ۶ ماه رد شده، از شاخص جلوترند، یا در ۳ و ۱۲ ماه پربازده بوده‌اند.' },
+  { id: 'money', t: 'ورود پول', kind: 'stock', sigs: ['inflow', 'flowRun', 'buyerPower', 'volume'], d: 'جایی که پول حقیقی و حجم معاملات می‌رود: ورود پول اخیر، ورود پیاپی، خریداران دست‌به‌نقدتر و حجم غیرعادی امروز.' },
+  { id: 'value', t: 'ارزنده', kind: 'stock', sigs: ['cheap', 'nearLow'], d: 'سهم‌های سودده‌ای که قیمتشان نسبت به سود یا به سقف سال پایین است.' },
+  { id: 'funds', t: 'صندوق‌ها', kind: 'fund', sigs: ['topFund', 'fixedBeat', 'negBubble'], d: 'پربازده‌ترین صندوق هر نوع، درآمد ثابت بهتر از سپرده، و صندوق‌های قابل معامله زیر ارزش دارایی‌هایشان.' },
+  { id: 'gold', t: 'طلا', kind: 'fund', sigs: [] },
+];
+// a list's name as a tab inside its section
+const TAB_T = { cand: 'کاندیداهای رشد', top: 'بالاترین امتیاز', breakout: 'شکست سقف ۶ ماه', strength: 'جلوتر از شاخص', momentum3: 'پربازده ۳ ماه', momentum12: 'پربازده ۱۲ ماه',
+  inflow: 'ورود پول اخیر', flowRun: 'ورود پیاپی', buyerPower: 'قدرت خریدار', volume: 'حجم غیرعادی', cheap: 'ارزان نسبت به گروه', nearLow: 'نزدیک کف سال', topFund: 'پربازده‌ترین هر نوع', fixedBeat: 'درآمد ثابت بهتر از سپرده', negBubble: 'زیر NAV' };
 const STOCK_SIGS = new Set(['cand', 'top', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
 const SIG_D = {
   cand: 'سهم‌هایی که چند نشانهٔ جدا از هم دربارهٔ آن‌ها یک چیز می‌گویند و پرچم قرمز جدی ندارند؛ فهرست بررسی است، نه خرید.',
@@ -81,6 +94,7 @@ const PRESETS = [
 const peekOf = (names, total = names.length) => { const l = names.filter(Boolean); if (!l.length) return ''; const head = l.slice(0, 3).join('، '); return total > 3 ? `${head} و ${num(total - 3)} مورد دیگر` : head; };
 // sections open the first time (the owner's own choice is kept after that); everything else starts as one row
 const FOLD_OPEN = new Set(['mine', 'best']);
+const FOLD_IDS = ['mine', 'best', ...GROUPS.map((g) => g.id)];
 const pctTxt = (x, d = 0) => (x === null || x === undefined || !isFinite(x) ? '—' : `${x > 0 ? '+' : x < 0 ? '−' : ''}${num(Math.abs(x * 100), d)}٪`);
 
 export function RadarPage({ st, s, openPrice, route }) {
@@ -89,6 +103,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   const [tab, setTab] = useState(route?.q?.tab || 'today');
   const [only, setOnly] = useState('all');
   const [showAll, setShowAll] = useState({});
+  const [tabOf, setTabOf] = useState({}); // the open tab of each section
   const [run, setRun] = useState(null); // { pending, total } while gathering
   const [editRule, setEditRule] = useState(null);
   const [fit, setFit] = useState(null); // a card asked «به سبد من می‌خورد؟»
@@ -126,7 +141,7 @@ export function RadarPage({ st, s, openPrice, route }) {
   // folded sections: the owner's choice per section, kept in radarUser
   const isOpen = (id) => user.fold?.[id] ?? FOLD_OPEN.has(id);
   const fold = (id) => ({ open: isOpen(id), onToggle: () => act.setRadarUser((u) => ({ fold: { ...(u.fold || {}), [id]: !(u.fold?.[id] ?? FOLD_OPEN.has(id)) } })) });
-  const setAllFolds = (open) => act.setRadarUser({ fold: Object.fromEntries(['mine', 'best', ...ORDER].map((id) => [id, open])) });
+  const setAllFolds = (open) => act.setRadarUser({ fold: Object.fromEntries(FOLD_IDS.map((id) => [id, open])) });
   const force = async () => { setRun({ busy: true }); const r = await send('radar', { force: true, batch: 40 }); setRun(r?.ok ? r : { error: r?.error }); if (!r?.ok) toast(r?.error || 'بررسی انجام نشد'); };
 
   const head = html`<div class="card rd-top">
@@ -155,23 +170,30 @@ export function RadarPage({ st, s, openPrice, route }) {
   return html`<div class="page">${head}
     ${tab === 'today' && pulse && html`<${Pulse} p=${pulse} s=${s} />`}
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}
-        <span class="grow"></span>${((anyOpen) => html`<button class="btn sm ghost" onClick=${() => setAllFolds(!anyOpen)}><${Icon} n="chevronDown" cls=${'sm' + (anyOpen ? ' rot' : '')} />${anyOpen ? 'بستن همه' : 'باز کردن همه'}</button>`)(['mine', 'best', ...ORDER].some(isOpen))}</div>
+        <span class="grow"></span>${((anyOpen) => html`<button class="btn sm ghost" onClick=${() => setAllFolds(!anyOpen)}><${Icon} n="chevronDown" cls=${'sm' + (anyOpen ? ' rot' : '')} />${anyOpen ? 'بستن همه' : 'باز کردن همه'}</button>`)(FOLD_IDS.some(isOpen))}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} fold=${fold('mine')} />
       ${only === 'all' && !pending && html`<${BestOfRadar} radar=${radar} built=${built} gold=${gold} s=${s} openPrice=${openPrice} onFit=${setFit} fold=${fold('best')} />`}
-      ${ORDER.map((sig) => {
-        if (sig === 'gold') return only === 'stock' ? null : gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} fold=${fold('gold')} />`
-          : html`<${Fold} ...${fold('gold')} title="ارزان‌ترین راه خرید طلا، امروز" peek="منتظر قیمت‌های تازه"><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div><//>`;
-        const all = built.cards.filter((c) => c.sig === sig && (only === 'all' || c.kind === only));
-        if (sig === 'cand' && only !== 'fund' && !pending) return html`<${Candidates} cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} onFit=${setFit} fold=${fold('cand')} />`;
-        if (!all.length) return null;
+      ${GROUPS.map((g) => {
+        if (only !== 'all' && only !== g.kind) return null;
+        if (g.id === 'gold') return gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} fold=${fold('gold')} />`
+          : html`<${Fold} ...${fold('gold')} title="طلا: ارزان‌ترین راه خرید امروز" peek="منتظر قیمت‌های تازه"><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div><//>`;
+        // its tabs: lists with cards today (candidates even when empty — it says why), weak ones last
+        const tabs = g.sigs.map((sig) => ({ sig, all: built.cards.filter((c) => c.sig === sig), weak: !!built.weak?.has(sig) }))
+          .filter((x) => x.all.length || (x.sig === 'cand' && !pending)).sort((a, b) => a.weak - b.weak);
+        if (!tabs.length) return null;
+        const cur = tabs.find((x) => x.sig === tabOf[g.id]) || tabs.find((x) => !x.weak && x.all.length) || tabs[0];
+        const ids = new Set(); const names = [];
+        for (const x of tabs) for (const c of x.all) if (!ids.has(c.id)) { ids.add(c.id); names.push(c.sym || c.name); }
+        const { sig, all, weak } = cur;
         const list = showAll[sig] ? all : all.filter(RD.isFirst);
         const more = all.length - list.length;
-        const weak = built.weak?.has(sig);
-        return html`<${Fold} ...${fold(sig)} cls=${weak ? 'weak' : ''} title=${RD.SIGNALS[sig].t} count=${all.length} peek=${peekOf(all.map((c) => c.sym || c.name))} sub=${SIG_D[sig]}
-          tip=${html`<${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />`} after=${weak && html`<span class="pill stale" title="میانگین کارت‌های این بخش یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}>
-          ${STOCK_SIGS.has(sig) && ((tt) => tt && html`<div class=${'rd-track' + (tt.weak ? ' bad' : tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`)(recLines(built.records?.[sig]))}
+        return html`<${Fold} ...${fold(g.id)} title=${g.t} count=${ids.size} peek=${peekOf(names)} sub=${g.d}>
+          ${tabs.length > 1 && html`<div class="rd-tabs" role="tablist">${tabs.map((x) => html`<button role="tab" aria-selected=${x === cur ? 'true' : 'false'} class=${'chip' + (x === cur ? ' on' : '') + (x.weak ? ' weak' : '')} title=${x.weak ? 'در گذشته جواب نداده: میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده' : SIG_D[x.sig]} onClick=${() => setTabOf({ ...tabOf, [g.id]: x.sig })}>${TAB_T[x.sig] || RD.SIGNALS[x.sig].t}<span class="rd-tab-n">${num(x.all.length)}</span>${x.weak && html`<${Icon} n="alert" cls="xs" />`}</button>`)}</div>`}
+          <div class="row" style="gap:6px;align-items:flex-start"><span class="xs muted grow">${SIG_D[sig]}</span><${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />${weak && html`<span class="pill stale" title="میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}</div>
+          ${sig === 'cand' ? html`<${Candidates} bare cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} onFit=${setFit} />`
+            : html`${STOCK_SIGS.has(sig) && ((tt) => tt && html`<div class=${'rd-track' + (tt.weak ? ' bad' : tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`)(recLines(built.records?.[sig]))}
           <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${setFit} />`)}</div>
-          ${(more > 0 || (showAll[sig] && all.some((c) => !RD.isFirst(c)))) && html`<button class="btn sm ghost rd-more" aria-expanded=${showAll[sig] ? 'true' : 'false'} onClick=${() => setShowAll({ ...showAll, [sig]: !showAll[sig] })}>${showAll[sig] ? 'کمتر' : `همه را ببین (${num(all.length)})`}<${Icon} n="chevronDown" cls=${'sm' + (showAll[sig] ? ' rot' : '')} /></button>`}<//>`;
+          ${(more > 0 || (showAll[sig] && all.some((c) => !RD.isFirst(c)))) && html`<button class="btn sm ghost rd-more" aria-expanded=${showAll[sig] ? 'true' : 'false'} onClick=${() => setShowAll({ ...showAll, [sig]: !showAll[sig] })}>${showAll[sig] ? 'کمتر' : `همه را ببین (${num(all.length)})`}<${Icon} n="chevronDown" cls=${'sm' + (showAll[sig] ? ' rot' : '')} /></button>`}`}<//>`;
       })}
       ${!built.cards.filter((c) => only === 'all' || c.kind === only).length && html`<div class="card"><div class="empty small">امروز چیزی از این قاعده‌ها رد نشد.</div></div>`}`}
     ${tab === 'rules' && html`<${Rules} radar=${radar} user=${user} s=${s} openPrice=${openPrice} onEdit=${setEditRule} />`}
@@ -204,17 +226,18 @@ function Card({ c, radar, s, isNew, marked, onMark, openPrice, onFit = null }) {
 }
 
 /** «کاندیداهای رشد»: the short list (or why it's empty), its record, and where the last month's candidates are now. */
-function Candidates({ cards, radar, s, rec, isNew, marked, mark, openPrice, onFit, fold }) {
+function Candidates({ cards, radar, s, rec, isNew, marked, mark, openPrice, onFit, fold, bare = false }) {
   const hist = useMemo(() => RD.candHistory(radar, 30), [radar]);
   const tt = recLines(rec);
-  return html`<${Fold} ...${fold} cls="rd-cand" title=${RD.SIGNALS.cand.t} count=${cards.length} peek=${cards.length ? peekOf(cards.map((c) => c.sym || c.name)) : 'امروز کاندیدای محکمی نیست'} sub=${SIG_D.cand} tip=${html`<${Tip} title=${RD.SIGNALS.cand.t} text=${SIG_TIP.cand} />`}>
+  const body = html`
     ${tt && html`<div class=${'rd-track' + (tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`}
     ${cards.length ? html`<div class="rd-grid">${cards.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${onFit} />`)}</div>`
       : html`<div class="card"><div class="empty small" style="padding:18px">امروز کاندیدای محکمی نیست: هیچ سهمی سه نشانهٔ جدا (یکی‌اش پول یا ارزش) بدون پرچم قرمز جدی نداشت. فهرست به زور پر نمی‌شود.</div></div>`}
     ${hist.length > 0 && html`<div class="card rd-hist"><div class="row between wrap" style="gap:6px"><span class="small sb">کاندیداهای ۳۰ روز گذشته، از روز ورود تا امروز</span><span class="xs muted">قیمت تعدیل‌شده؛ شاخص کل در همان روزها</span></div>
       <div class="rd-hist-l">${hist.slice(0, 12).map((x) => html`<button class="rd-hrow" onClick=${() => x.ref && openPrice(x.ref)}><b>${x.sym}</b><span class="xs muted">${fmtJ(x.day, 'dm')}</span>
-        <span class=${'num small ' + (x.change > 0 ? 'pos' : x.change < 0 ? 'neg' : '')}>${pctTxt(x.change, 1)}</span>${x.index !== null && html`<span class="xs muted">شاخص ${pctTxt(x.index, 1)}</span>`}</button>`)}</div></div>`}
-  <//>`;
+        <span class=${'num small ' + (x.change > 0 ? 'pos' : x.change < 0 ? 'neg' : '')}>${pctTxt(x.change, 1)}</span>${x.index !== null && html`<span class="xs muted">شاخص ${pctTxt(x.index, 1)}</span>`}</button>`)}</div></div>`}`;
+  if (bare) return html`<div class="rd-cand">${body}</div>`;
+  return html`<${Fold} ...${fold} cls="rd-cand" title=${RD.SIGNALS.cand.t} count=${cards.length} peek=${cards.length ? peekOf(cards.map((c) => c.sym || c.name)) : 'امروز کاندیدای محکمی نیست'} sub=${SIG_D.cand} tip=${html`<${Tip} title=${RD.SIGNALS.cand.t} text=${SIG_TIP.cand} />`}>${body}<//>`;
 }
 
 const PART_ORDER = ['trend', 'value', 'flow', 'attention', 'safety'];
@@ -227,9 +250,9 @@ function Score({ c, full }) {
       <span class=${'rd-sc-n ' + tone} title="امتیاز ترکیبی از ۱۰۰"><b class="num">${num(c.score)}</b><span class="xs">از ۱۰۰</span></span>
       ${full ? html`<div class="rd-parts grow">${PART_ORDER.filter((k) => c.parts?.[k] !== undefined).map((k) => html`<div class="rd-part" title=${`${RD.SCORE_PARTS[k]}: بهتر از ${num(Math.round(c.parts[k] * 100))}٪ ${k === 'value' ? 'نمادهای پرمعاملهٔ سودده (زیان‌ده صفر می‌گیرد)' : k === 'flow' ? 'نمادهای پرمعامله‌ای که آمار پول حقیقی‌شان هست' : 'نمادهای پرمعامله'}`}>
           <span class="xs muted">${RD.SCORE_PARTS[k]}</span><span class="rd-pbar"><i style=${`width:${Math.max(4, Math.round(c.parts[k] * 100))}%`}></i></span></div>`)}</div>`
-        : html`<span class="xs muted grow">امتیاز ترکیبی${c.parts ? ` · قوی در ${PART_ORDER.filter((k) => c.parts[k] >= 0.7).map((k) => RD.SCORE_PARTS[k]).join('، ') || '—'}` : ''}</span>`}
+        : html`<span class="xs muted grow">امتیاز ترکیبی${c.parts ? `؛ قوی در ${PART_ORDER.filter((k) => c.parts[k] >= 0.7).map((k) => RD.SCORE_PARTS[k]).join('، ') || '—'}` : ''}</span>`}
     </div>
-    ${full && lit.length > 0 && html`<div class="row wrap" style="gap:4px">${lit.map((g) => html`<span class="pill auto xs" title=${SIG_D[g]}>${RD.SIGNALS[g].t}</span>`)}</div>`}
+    ${((other) => other.length > 0 && html`<div class="row wrap" style="gap:4px">${!full ? html`<span class="xs faint">در فهرست‌های دیگر هم هست:</span>` : ''}${other.map((g) => html`<span class="pill auto xs" title=${SIG_D[g]}>${TAB_T[g] || RD.SIGNALS[g].t}</span>`)}</div>`)(full ? lit : lit.filter((g) => g !== c.sig))}
   </div>`;
 }
 /** Individual money over the last sessions, on a stock card — or how far its gathering has got. */
@@ -285,7 +308,7 @@ function GoldRoutes({ g, s, openPrice, fold }) {
   const gr = (x) => num(x, 2);
   const pct = (x) => pctTxt(x, 1);
   const tip = `همه با یک خط‌کش سنجیده می‌شوند: قیمت جهانی طلا (اونس × دلار بازار آزاد). برای هر سکه وزن طلای خالص داخلش (مثلاً سکهٔ امامی ۸٫۱۳۳ گرم با عیار ۹۰۰) به قیمت جهانی حساب می‌شود و قیمت بازارش با آن مقایسه می‌شود؛ اختلاف همان «حباب» است. بعد نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش، تخمینی: ۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکهٔ امامی ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪) که موقع خرید می‌دهی اضافه می‌شود. «با ${budget} می‌گیری» یعنی بعد از این هزینه، چند گرم طلای ۱۸ عیار به قیمت جهانی می‌ارزد؛ عدد بیشتر یعنی طلای بیشتر برای همان پول. قیمت ۱۸ عیار، قیمت آب‌شده بدون اجرت ساخت است. صندوق‌های طلا جدا آمده‌اند: ارزش دارایی صندوق (NAV) با قیمت داخلی آنچه نگه می‌دارد (بیشتر گواهی سکه و شمش) حساب می‌شود، پس حبابشان فقط نسبت به NAV خودشان است. حباب‌ها هر روز عوض می‌شوند.`;
-  return html`<${Fold} ...${fold} title="ارزان‌ترین راه خرید طلا، امروز" peek=${best ? `امروز ${best.name}: با ${budget} حدود ${gr(best.grams18)} گرم طلای ۱۸ عیار` : ''} sub="کدام راه، برای همان پول طلای بیشتری می‌دهد" tip=${html`<${Tip} title="ارزان‌ترین راه خرید طلا" text=${tip} />`}>
+  return html`<${Fold} ...${fold} title="طلا، ارزان‌ترین راه خرید امروز" peek=${best ? `امروز ${best.name}: با ${budget} حدود ${gr(best.grams18)} گرم طلای ۱۸ عیار` : ''} sub="کدام راه، برای همان پول طلای بیشتری می‌دهد" tip=${html`<${Tip} title="ارزان‌ترین راه خرید طلا" text=${tip} />`}>
     <div class="card rd-gold">
       ${best && html`<div class="rd-ghero">امروز <b>${best.name}</b> ${best.premium < 0.01 && best.premium > -0.01 ? 'تقریباً هم‌قیمت طلای جهانی است' : `${pct(best.premium)} ${best.premium >= 0 ? 'گران‌تر' : 'ارزان‌تر'} از طلای جهانی است`}: با ${budget} حدود <b class="num">${gr(best.grams18)} گرم</b> طلای ۱۸ عیار می‌گیری${next ? html`؛ با ${next.name} <span class="num">${gr(next.grams18)} گرم</span>` : ''}.</div>`}
       <div class="rd-gref"><span>قیمت جهانی هر گرم طلای ۱۸ عیار: <b class="num">${money(g.gold.per18, s)}</b></span>

@@ -731,6 +731,10 @@ select.input.imp-sheet { width: auto; max-width: 45%; height: 32px; font-size: 1
 .fold:not(.open):hover { border-color: var(--line-2); }
 .fold.open > .fold-h { padding-top: 4px; }
 .fold:not(.open) + .fold:not(.open) { margin-top: -8px; }
+.rd-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.rd-tabs::-webkit-scrollbar { display: none; }
+.rd-tab-n { font-size: 11px; font-weight: 700; opacity: .7; }
+.rd-tabs .chip.weak:not(.on) { color: var(--muted); border-style: dashed; }
 .rd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
 .rd-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; margin: 0; }
 .rd-name { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; min-width: 0; border-radius: 8px; }

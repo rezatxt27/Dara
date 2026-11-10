@@ -17,6 +17,7 @@ import { BestOfRadar } from '../best.js';
 // lives there. A tab whose record did worse than the index goes last and is never the one a section opens on.
 const GROUPS = [
   { id: 'stocks', t: 'سهم‌های برتر امروز', kind: 'stock', sigs: ['cand', 'top'], d: 'سهم‌هایی که چند نشانهٔ جدا با هم دارند، یا در جمع روند، ارزش، پول، توجه و ریسک بیشترین امتیاز را گرفته‌اند.' },
+  { id: 'active', t: 'رشد خوب و پرمعامله', kind: 'stock', sigs: ['active'], d: 'سهم‌هایی که در یک سال خوب رشد کرده‌اند، سودده‌اند و هنوز هر روز خرید و فروش می‌شوند؛ نه سهمی که بازدهی‌اش را با چند معاملهٔ پراکنده ساخته.' },
   { id: 'trend', t: 'روند قوی', kind: 'stock', sigs: ['breakout', 'strength', 'momentum3', 'momentum12'], d: 'سهم‌هایی که قیمتشان از بازار جلوتر است: تازه از سقف ۶ ماه رد شده، از شاخص جلوترند، یا در ۳ و ۱۲ ماه پربازده بوده‌اند.' },
   { id: 'money', t: 'ورود پول', kind: 'stock', sigs: ['inflow', 'flowRun', 'buyerPower', 'volume'], d: 'جایی که پول حقیقی و حجم معاملات می‌رود: ورود پول اخیر، ورود پیاپی، خریداران دست‌به‌نقدتر و حجم غیرعادی امروز.' },
   { id: 'value', t: 'ارزنده', kind: 'stock', sigs: ['cheap', 'nearLow'], d: 'سهم‌های سودده‌ای که قیمتشان نسبت به سود یا به سقف سال پایین است.' },
@@ -25,8 +26,8 @@ const GROUPS = [
 ];
 // a list's name as a tab inside its section
 const TAB_T = { cand: 'کاندیداهای رشد', top: 'بالاترین امتیاز', breakout: 'شکست سقف ۶ ماه', strength: 'جلوتر از شاخص', momentum3: 'پربازده ۳ ماه', momentum12: 'پربازده ۱۲ ماه',
-  inflow: 'ورود پول اخیر', flowRun: 'ورود پیاپی', buyerPower: 'قدرت خریدار', volume: 'حجم غیرعادی', cheap: 'ارزان نسبت به گروه', nearLow: 'نزدیک کف سال', topFund: 'پربازده‌ترین هر نوع', fixedBeat: 'درآمد ثابت بهتر از سپرده', negBubble: 'زیر NAV' };
-const STOCK_SIGS = new Set(['cand', 'top', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
+  active: 'رشد خوب و پرمعامله', inflow: 'ورود پول اخیر', flowRun: 'ورود پیاپی', buyerPower: 'قدرت خریدار', volume: 'حجم غیرعادی', cheap: 'ارزان نسبت به گروه', nearLow: 'نزدیک کف سال', topFund: 'پربازده‌ترین هر نوع', fixedBeat: 'درآمد ثابت بهتر از سپرده', negBubble: 'زیر NAV' };
+const STOCK_SIGS = new Set(['cand', 'top', 'active', 'inflow', 'flowRun', 'buyerPower', 'breakout', 'strength', 'momentum12', 'momentum3', 'volume', 'cheap', 'nearLow']);
 const SIG_D = {
   cand: 'سهم‌هایی که چند نشانهٔ جدا از هم دربارهٔ آن‌ها یک چیز می‌گویند و پرچم قرمز جدی ندارند؛ فهرست بررسی است، نه خرید.',
   flowRun: 'پرمعامله‌هایی که در دست‌کم ۵ جلسه از ۷ جلسهٔ اخیر پول حقیقی واردشان شده؛ پایداری، نه یک روز.',
@@ -37,6 +38,7 @@ const SIG_D = {
   inflow: 'پرمعامله‌هایی که در جلسه‌های اخیر بیشتر روزها پول حقیقی واردشان شده، به اندازهٔ قابل‌توجهی از معاملاتشان.',
   momentum12: 'پرمعامله‌هایی که در ۱۲ ماه گذشته جزو ۱۰٪ پربازده بازار بوده‌اند.',
   momentum3: 'پرمعامله‌هایی که در ۳ ماه گذشته جزو ۱۰٪ پربازده بازار بوده‌اند.',
+  active: 'بازدهی ۱۲ ماه دست‌کم ۱۰ واحد جلوتر از شاخص، ۳ ماه اخیر مثبت، سودده، و امروز و تقریباً همهٔ جلسه‌های اخیر معامله شده.',
   volume: 'امروز دست‌کم ۳ برابر معمول معامله شده‌اند؛ دلیلش را در خبرها و اطلاعیه‌های شرکت ببین.',
   cheap: 'P/E آن‌ها کمتر از ۶۰٪ میانهٔ هم‌گروه‌های سودده است.',
   nearLow: 'تا ۱۰٪ بالای کمترین قیمت سال، ولی هنوز سودده.',
@@ -55,6 +57,7 @@ const SIG_TIP = {
   top: 'امتیاز ترکیبی (۰ تا ۱۰۰) جایگاه هر نماد پرمعامله را در پنج بخش در برابر بقیهٔ بازار می‌سنجد: روند (بازدهی ۱۲ و ۳ ماه)، ارزش (P/E در برابر هم‌گروه‌ها؛ زیان‌ده صفر می‌گیرد)، پول حقیقی (۵ جلسهٔ اخیر)، توجه بازار (حجم امروز در برابر معمول) و ریسک کم (نوسان روزانه و بیشترین افت سال). وزن بخش‌ها با سطح ریسک پروفایلت عوض می‌شود. بخشی که برای نمادی معلوم نیست کنار می‌رود و بقیه وزنش را می‌گیرند. فقط امتیاز ۶۵ به بالا، با دست‌کم چهار بخشِ معلوم (از جمله ریسک)، اینجا می‌آید. امتیاز بالا یعنی «ارزش بررسی دارد»، نه «بخر».',
   inflow: 'پول حقیقی یعنی خرید منهای فروش اشخاص حقیقی (نه شرکت‌ها و صندوق‌ها)، به ریال، از آمار روزانهٔ سایت بورس. شرط: دست‌کم ۳ جلسه آمار، ورود خالص در ۵ جلسهٔ اخیر حداقل ۸٪ ارزش معاملات، و ورود در بیشتر جلسه‌ها. «قدرت خریدار» یعنی میانگین خرید هر خریدار حقیقی تقسیم بر میانگین فروش هر فروشندهٔ حقیقی. ورود پول گاهی ادامه‌دار نیست و ممکن است یک خریدار بزرگ باشد.',
   momentum12: 'از بین نمادهای پرمعامله، ۱۰٪ که بیشترین بازدهی ۱۲ ماه (تعدیل‌شده) را داشته‌اند. روند قوی گاهی ادامه پیدا می‌کند، ولی سهمی که چند برابر شده ممکن است خبرهای خوبش را قبلاً در قیمت گرفته باشد؛ P/E و فاصله از سقف را کنارش ببین.',
+  active: 'شرط‌ها: بازدهی ۱۲ ماه دست‌کم ۱۰ واحد درصد بیشتر از شاخص کل در همان روزها؛ بازدهی ۳ ماه مثبت و نه کمتر از شاخص؛ سودده (EPS و P/E مثبت)؛ امروز معامله شده و در ۲۰ جلسهٔ اخیر حداکثر ۲ جلسه بدون معامله بوده؛ و ارزش معاملات «یک روز معمول» (میانهٔ ۲۰ جلسه، روزهای بی‌معامله صفر) دست‌کم یک میلیارد تومان. میانه به جای میانگین یعنی یک معاملهٔ بلوکی بزرگ سهم کم‌معامله را پرمعامله نشان نمی‌دهد. پرچم قرمز جدی هم نباید داشته باشد. به ترتیب امتیاز ترکیبی (تا رشد تند یک‌ساله به‌تنهایی اول نیاید). رشد گذشته تضمین ادامه‌اش نیست.',
   momentum3: 'همان روند قوی در ۳ ماه اخیر، برای نمادهایی که در فهرست اول ۱۲ ماه نیامده‌اند. حرکت‌های کوتاه‌مدت پرنوسان‌ترند و زودتر برمی‌گردند.',
   volume: 'نمادهایی که امروز دست‌کم ۳ برابر میانهٔ ۲۰ روز معاملهٔ قبلی‌شان معامله شده‌اند و ارزش معاملاتشان قابل‌توجه است. دلیلش می‌تواند خبر، عرضهٔ سنگین یا خرید یک‌باره باشد؛ جهت قیمت امروز را هم ببین.',
   cheap: 'نمادهای پرمعامله و سودده‌ای که P/E آن‌ها حداکثر ۶۰٪ میانهٔ هم‌گروه‌هاست. P/E از سود برآوردی سایت بورس است؛ اگر سود یک‌باره یا رو به کاهش باشد، ارزانی فقط ظاهری است.',
@@ -189,7 +192,7 @@ export function RadarPage({ st, s, openPrice, route }) {
         const more = all.length - list.length;
         return html`<${Fold} ...${fold(g.id)} title=${g.t} count=${ids.size} peek=${peekOf(names)} sub=${g.d}>
           ${tabs.length > 1 && html`<div class="rd-tabs" role="tablist">${tabs.map((x) => html`<button role="tab" aria-selected=${x === cur ? 'true' : 'false'} class=${'chip' + (x === cur ? ' on' : '') + (x.weak ? ' weak' : '')} title=${x.weak ? 'در گذشته جواب نداده: میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده' : SIG_D[x.sig]} onClick=${() => setTabOf({ ...tabOf, [g.id]: x.sig })}>${TAB_T[x.sig] || RD.SIGNALS[x.sig].t}<span class="rd-tab-n">${num(x.all.length)}</span>${x.weak && html`<${Icon} n="alert" cls="xs" />`}</button>`)}</div>`}
-          <div class="row" style="gap:6px;align-items:flex-start"><span class="xs muted grow">${SIG_D[sig]}</span><${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />${weak && html`<span class="pill stale" title="میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}</div>
+          <div class="row" style="gap:6px;align-items:flex-start"><span class="xs muted grow">${tabs.length > 1 ? SIG_D[sig] : ''}</span><${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />${weak && html`<span class="pill stale" title="میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}</div>
           ${sig === 'cand' ? html`<${Candidates} bare cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} onFit=${setFit} />`
             : html`${STOCK_SIGS.has(sig) && ((tt) => tt && html`<div class=${'rd-track' + (tt.weak ? ' bad' : tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`)(recLines(built.records?.[sig]))}
           <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${setFit} />`)}</div>

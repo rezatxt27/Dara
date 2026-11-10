@@ -277,7 +277,19 @@ export function closeOn(rec, t) {
   return ans >= 0 ? rec.p[ans] : null;
 }
 /** Everything a card or a rule needs about one stock, on session day D (day number). */
-export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
+/**
+ * The market's sessions this radar actually has trading rows for: a session no stock has a row for (the browser was
+ * closed and its days aren't fetched yet) mustn't make every stock look as if it didn't trade. Cached per radar.
+ */
+const seenCache = new WeakMap();
+export function sessSeen(radar) {
+  const c = seenCache.get(radar); if (c && c.sess === radar.sess && c.day === radar.day) return c.out;
+  const days = new Set(); for (const r of Object.values(radar.stocks || {})) if (!r.need) for (const x of r.h || []) days.add(x[0]);
+  const out = radar.sess ? radar.sess.filter((d) => days.has(dayNum(d))) : null;
+  seenCache.set(radar, { sess: radar.sess, day: radar.day, out });
+  return out;
+}
+export function stockMetrics(rec, D, sectorPE = {}, sess = null, seen = sess) {
   const n = rec.d.length;
   const close = n ? rec.p[n - 1] : rec.today?.close || NaN;
   const first = n ? rec.d[0] : Infinity;
@@ -292,9 +304,17 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
   const avgVol = median(prev.map((x) => x[1]));
   // average value traded per session over the last 20 sessions — a session without a trade counts as zero, so a stock
   // that trades twice a month doesn't look liquid. (Without the session list: the last 28 days ≈ 20 sessions.)
-  const sd = (sess || []).map(dayNum).filter((x) => x <= D).slice(-20);
+  const sd = (seen || []).map(dayNum).filter((x) => x <= D).slice(-20);
   const from = sd.length >= 10 ? sd[0] : D - 27, per = sd.length >= 10 ? sd.length : 20;
   const avgVal = h.length ? h.filter((x) => x[0] >= from && x[0] <= D).reduce((a, x) => a + x[2], 0) / per : (rec.today?.val || 0) / per;
+  // how steadily it trades: in how many of those sessions it traded at all, and the median day's value (a session without a
+  // trade is zero, so one big block doesn't make a stock that sits still most days look busy). A stock that traded in
+  // fewer than half of them isn't liquid, whatever its average.
+  const hv = new Map(h.map((x) => [x[0], x[2]]));
+  const tradeOf = sd.length >= 10 ? sd.length : null;
+  const tradeDays = tradeOf ? sd.filter((d) => hv.get(d) > 0).length : null;
+  const medVal = tradeOf ? median(sd.map((d) => hv.get(d) || 0)) : null;
+  const gappy = tradeOf !== null && tradeDays < tradeOf / 2;
   const mPE = sectorPE[rec.sector];
   // risk: the worst fall from a previous peak within the year, and how much it usually moves in a day (last ~120 sessions)
   let peak = 0, dd = 0; for (const v of yr) { if (v > peak) peak = v; else if (peak > 0) dd = Math.min(dd, v / peak - 1); }
@@ -310,8 +330,8 @@ export function stockMetrics(rec, D, sectorPE = {}, sess = null) {
   return {
     close, ret7: ret(7), ret30: ret(30), ret91: ret(91), ret182: ret(182), ret365: ret(365),
     hi52: hi, lo52: lo, fullYear, fromHigh: hi > 0 ? close / hi - 1 : null, fromLow: lo > 0 ? close / lo - 1 : null,
-    volToday, volRatio: volToday > 0 && avgVol > 0 && prev.length >= 10 ? volToday / avgVol : null, avgVal, liquid: avgVal >= LIQ,
-    traded: !!lastH && lastH[0] >= D - 7, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
+    volToday, volRatio: volToday > 0 && avgVol > 0 && prev.length >= 10 ? volToday / avgVol : null, avgVal, liquid: avgVal >= LIQ && !gappy, tradeDays, tradeOf, medVal, gappy,
+    traded: !!lastH && lastH[0] >= D - 7, tradedToday: !!lastH && lastH[0] === D, eps: rec.eps, pe: isFinite(rec.pe) ? rec.pe : null, sectorPE: isFinite(mPE) ? mPE : null,
     peRel: isFinite(rec.pe) && rec.pe > 0 && mPE > 0 ? rec.pe / mPE : null, dayChange: rec.today?.py > 0 ? rec.today.close / rec.today.py - 1 : null,
     dd1y: fullYear && yr.length > 20 ? dd : null, dvol, ey: isFinite(rec.pe) && rec.pe > 0 && rec.eps > 0 ? 1 / rec.pe : null,
     hi6, brk: brkFresh, lo10,
@@ -545,6 +565,7 @@ export const SIGNALS = {
   strength: { t: 'قوی‌تر از شاخص', kind: 'stock' },
   momentum12: { t: 'روند قوی، ۱۲ ماه', kind: 'stock' },
   momentum3: { t: 'روند قوی، ۳ ماه', kind: 'stock' },
+  active: { t: 'رشد خوب و پرمعامله', kind: 'stock' },
   volume: { t: 'حجم غیرعادی', kind: 'stock' },
   cheap: { t: 'ارزان نسبت به گروه', kind: 'stock' },
   nearLow: { t: 'نزدیک کف سالانه، سودده', kind: 'stock' },
@@ -573,6 +594,7 @@ function stockChecks(m, money, { depositPct = null, volMed = null } = {}) {
   if (m.fromHigh !== null && m.fullYear) c.push(m.fromHigh > -0.03 ? 'نزدیک بالاترین قیمت سال است' : `${fa(P0(m.fromHigh))} پایین‌تر از بالاترین قیمت سال`);
   if (m.ret365 !== null && m.ret365 > 1) c.push('رشد زیادی کرده؛ بخشی از خبرهای خوب ممکن است در قیمت لحاظ شده باشد');
   if (!m.liquid) c.push(`معاملاتش کم است (میانگین روزانه ${money(m.avgVal)})؛ خرید و فروش ممکن است سخت باشد`);
+  else if (m.tradeOf !== null && m.tradeDays < m.tradeOf - ACTIVE_MISS) c.push(`در ${fa(m.tradeDays)} جلسه از ${fa(m.tradeOf)} جلسهٔ اخیر معامله شده؛ همه‌روزه معامله نمی‌شود`);
   return c;
 }
 function fundChecks(f, m, money) {
@@ -600,7 +622,8 @@ export function stockFlags(m) {
   if (m.ret30 !== null && m.ret30 >= 0.4) add('hot', `${fa(P(m.ret30))} در یک ماه؛ بعد از رشد تند، ریسک اصلاح بالاست`);
   if ((m.eps !== null && m.eps !== undefined && isFinite(m.eps) && m.eps <= 0) || m.pe < 0) add('loss', 'زیان‌ده است (سود هر سهم منفی یا صفر)');
   else if (m.peRel !== null && m.peRel >= 1.5) add('pe', `P/E ${fa(N(m.peRel))} برابر میانهٔ گروه`);
-  if (m.traded && !m.liquid) add('thin', 'معاملاتش کم است؛ خرید آسان است، فروش یک‌جا سخت');
+  if (m.traded && m.gappy) add('gappy', `فقط در ${fa(m.tradeDays)} جلسه از ${fa(m.tradeOf)} جلسهٔ اخیر معامله شده؛ بازدهی‌اش با معاملات کم ساخته شده و فروش ممکن است سخت باشد`, true);
+  else if (m.traded && !m.liquid) add('thin', 'معاملاتش کم است؛ خرید آسان است، فروش یک‌جا سخت');
   return f;
 }
 
@@ -608,6 +631,14 @@ export function stockFlags(m) {
 export const isBreakout = (m) => !!m.brk && m.liquid && m.volRatio >= 1.5;
 export const isStrong = (m) => m.liquid && m.rel91 !== null && m.rel91 !== undefined && m.rel91 >= 0.1 && m.rel30 >= 0.02 && m.ret30 > 0;
 export const isFlowRun = (m) => m.liquid && m.flowN7 >= 6 && m.flowPos7 >= 5 && m.flow7 > 0;
+/**
+ * «رشد خوب و پرمعامله»: did well and still trades every day — a year at least 10 points ahead of the index, the last
+ * 3 months up and not behind it, profitable, traded today and in all but at most two of the last sessions, with a
+ * median day's value of at least LIQ. (bx: the index's 12- and 3-month returns over the same days.)
+ */
+export const ACTIVE_MISS = 2;
+export const isActive = (m, bx365, bx91) => m.liquid && m.tradedToday && m.tradeOf !== null && m.tradeDays >= m.tradeOf - ACTIVE_MISS && m.medVal >= LIQ
+  && m.eps > 0 && m.pe > 0 && m.ret365 !== null && bx365 !== null && m.ret365 >= bx365 + 0.1 && m.ret91 !== null && m.ret91 > 0 && (bx91 === null || m.ret91 >= bx91);
 export const isPowerRun = (m) => m.liquid && m.powerN3 >= 3 && m.powerMin3 >= 1.2 && m.flow3 > 0;
 const isValue = (m) => m.eps > 0 && m.pe > 0 && m.peRel !== null && m.peRel <= 0.8;
 const isCalm = (m, volMed) => m.dvol !== null && volMed > 0 && m.dvol <= volMed && m.dd1y !== null && m.dd1y > -0.35;
@@ -724,9 +755,9 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
   const day = radar.day; if (!day) return { day: null, cards: [], ready: 0, total: 0 };
   const D = dayNum(day);
   const sectors = sectorMedians(radar.stocks);
-  const stocks = Object.entries(radar.stocks).map(([ins, rec]) => ({ ins, rec, m: stockMetrics(rec, D, sectors, radar.sess) }));
+  const stocks = Object.entries(radar.stocks).map(([ins, rec]) => ({ ins, rec, m: stockMetrics(rec, D, sectors, radar.sess, sessSeen(radar)) }));
   // against the index over the same days (for «قوی‌تر از شاخص»)
-  const bx30 = benchRet(radar, 30, D).index, bx91 = benchRet(radar, 91, D).index;
+  const bx30 = benchRet(radar, 30, D).index, bx91 = benchRet(radar, 91, D).index, bx365 = benchRet(radar, 365, D).index;
   for (const x of stocks) { x.m.rel30 = x.m.ret30 !== null && bx30 !== null ? x.m.ret30 - bx30 : null; x.m.rel91 = x.m.ret91 !== null && bx91 !== null ? x.m.ret91 - bx91 : null; }
   const ready = stocks.filter((s) => !s.rec.need).length;
   const cards = [];
@@ -773,6 +804,12 @@ export function buildCards(radar, { depositPct = 25, money = (v) => String(Math.
     .sort((a, b) => a.m.fromLow - b.m.fromLow).slice(0, max)
     .forEach((s) => push('nearLow', s, [`${s.m.fromLow < 0.005 ? 'روی کمترین قیمت سال' : `${fa(P0(s.m.fromLow))} بالاتر از کمترین قیمت سال`}`, `EPS مثبت (${fa(Math.round(s.m.eps))} ریال)، P/E ${fa(N(s.m.pe))}${s.m.ret365 !== null ? `؛ بازدهی ۱۲ ماه ${fa(P(s.m.ret365))}` : ''}`]));
 
+  // 4b) did well and keeps trading every day (nothing severe against it): by the combined score, so a year's spike alone
+  // doesn't lead; then the year's return
+  live.filter((s) => isActive(s.m, bx365, bx91) && !stockFlags(s.m).some((f) => f.severe))
+    .sort((a, b) => (scores.get(b.ins)?.score ?? -1) - (scores.get(a.ins)?.score ?? -1) || b.m.ret365 - a.m.ret365 || a.ins.localeCompare(b.ins)).slice(0, max)
+    .forEach((s) => push('active', s, [`بازدهی ۱۲ ماه ${fa(P(s.m.ret365))} در برابر شاخص کل ${fa(P(bx365))}؛ ۳ ماه اخیر ${fa(P(s.m.ret91))}`,
+      `در ${fa(s.m.tradeDays)} جلسه از ${fa(s.m.tradeOf)} جلسهٔ اخیر و امروز معامله شده؛ ارزش معاملات یک روز معمول ${money(s.m.medVal)}`, `سودده: P/E ${fa(N(s.m.pe))}`]));
   // 5) persistence and breakouts
   const flowWord = (m) => `${fa(m.flowPos7)} جلسه از ${fa(m.flowN7)} جلسهٔ اخیر ورود پول حقیقی؛ جمعاً ${money(m.flow7)}`;
   live.filter((s) => isFlowRun(s.m)).sort((a, b) => b.m.flowPos7 - a.m.flowPos7 || b.m.flow7 - a.m.flow7).slice(0, max)
@@ -868,7 +905,7 @@ export function runRule(radar, rule, { level = 'mid' } = {}) {
   const D = dayNum(radar.day);
   if (rule.kind === 'stock') {
     const sectors = sectorMedians(radar.stocks);
-    const all = Object.entries(radar.stocks).filter(([, r]) => !r.need).map(([ins, rec]) => ({ ins, rec, m: ruleView(stockMetrics(rec, D, sectors, radar.sess)) }));
+    const all = Object.entries(radar.stocks).filter(([, r]) => !r.need).map(([ins, rec]) => ({ ins, rec, m: ruleView(stockMetrics(rec, D, sectors, radar.sess, sessSeen(radar))) }));
     // the score is measured among all liquid stocks (as on the cards), whatever the rule's sector
     const sc = rule.conds.some((c) => c.f === 'score') ? scoreStocks(all.filter((s) => s.m.liquid && s.m.traded), level) : null;
     if (sc) for (const s of all) s.m = { ...s.m, score: sc.get(s.ins)?.score ?? null };
@@ -907,7 +944,7 @@ export function report(radar, { ins = null, fundKey = null, fundName = '' } = {}
   if (!radar?.day) return null;
   const D = dayNum(radar.day);
   if (ins && radar.stocks?.[ins]) {
-    const rec = radar.stocks[ins]; const m = stockMetrics(rec, D, sectorMedians(radar.stocks), radar.sess);
+    const rec = radar.stocks[ins]; const m = stockMetrics(rec, D, sectorMedians(radar.stocks), radar.sess, sessSeen(radar));
     return { kind: 'stock', day: radar.day, sym: rec.sym, name: rec.name, sector: radar.sectors?.[rec.sector] || '', market: marketOf(rec.isin), m, partial: !!rec.need, bench: benches(radar) };
   }
   const f = (fundKey && fundOf(radar, fundKey, fundName)) || (ins && (radar.funds || []).find((x) => x.insCode === ins)) || null;

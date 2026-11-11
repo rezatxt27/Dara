@@ -11,13 +11,13 @@ const TIP = 'برای هر بخش رادار فقط یک گزینه: همان ک
 
 // each tile: which sections feed it, its title, and the headline number of its pick
 const TILES = [
-  { id: 'growth', t: 'کاندیدای رشد', sigs: ['cand'], head: (c) => `${num((c.checks || []).filter((x) => x.on && !x.weak).length)} نشانه از ۵`, icon: 'sparkles' },
-  { id: 'trend', t: 'قوی‌ترین روند', sigs: ['breakout', 'strength', 'momentum3'], head: (c) => (c.m?.rel91 !== null && c.m?.rel91 !== undefined ? `۳ ماه ${pctTxt(c.m.rel91)} جلوتر از شاخص` : `۳ ماه ${pctTxt(c.m?.ret91)}`), icon: 'chart' },
-  { id: 'money', t: 'بیشترین ورود پول حقیقی', sigs: ['flowRun', 'buyerPower', 'inflow'], head: (c) => (c.m?.flowPos7 ? `${num(c.m.flowPos7)} جلسه از ${num(c.m.flowN7)} ورود پول` : c.m?.flowShare5 ? `${pctTxt(c.m.flowShare5)} ارزش معاملات` : 'ورود پول'), icon: 'cash' },
-  { id: 'value', t: 'ارزنده‌ترین سهم', sigs: ['cheap'], head: (c) => (c.m?.pe ? `P/E ${num(Math.round(c.m.pe * 10) / 10, 1)} (گروه ${num(Math.round((c.m.sectorPE || 0) * 10) / 10, 1)})` : ''), icon: 'percent' },
-  { id: 'fund', t: 'بهترین صندوق سهامی', sigs: ['topFund'], fund: (c) => /سهامی|شاخصی|بخشی|اهرمی/.test(c.sub || ''), head: (c) => `بازده ۱۲ ماه ${pctTxt(c.m?.y1)}`, icon: 'layers' },
-  { id: 'fixed', t: 'بهترین درآمد ثابت', sigs: ['fixedBeat'], head: (c) => `بازده ۱۲ ماه ${pctTxt(c.m?.y1)}`, icon: 'shield' },
-  { id: 'nav', t: 'صندوق زیر ارزش واقعی', sigs: ['negBubble'], head: (c) => `${num(Math.abs(Math.round((c.m?.bubble || 0) * 1000)) / 10, 1)}٪ ارزان‌تر از NAV`, icon: 'target' },
+  { id: 'growth', tone: 'violet', t: 'کاندیدای رشد', sigs: ['cand'], head: (c) => `${num((c.checks || []).filter((x) => x.on && !x.weak).length)} نشانه از ۵`, icon: 'sparkles' },
+  { id: 'trend', tone: 'green', t: 'قوی‌ترین روند', sigs: ['breakout', 'strength', 'momentum3'], head: (c) => (c.m?.rel91 !== null && c.m?.rel91 !== undefined ? `۳ ماه ${pctTxt(c.m.rel91)} جلوتر از شاخص` : `۳ ماه ${pctTxt(c.m?.ret91)}`), icon: 'chart' },
+  { id: 'money', tone: 'blue', t: 'بیشترین ورود پول حقیقی', sigs: ['flowRun', 'buyerPower', 'inflow'], head: (c) => (c.m?.flowPos7 ? `${num(c.m.flowPos7)} جلسه از ${num(c.m.flowN7)} ورود پول` : c.m?.flowShare5 ? `${pctTxt(c.m.flowShare5)} ارزش معاملات` : 'ورود پول'), icon: 'cash' },
+  { id: 'value', tone: 'amber', t: 'ارزنده‌ترین سهم', sigs: ['cheap'], head: (c) => (c.m?.pe ? `P/E ${num(Math.round(c.m.pe * 10) / 10, 1)} (گروه ${num(Math.round((c.m.sectorPE || 0) * 10) / 10, 1)})` : ''), icon: 'percent' },
+  { id: 'fund', tone: 'indigo', t: 'بهترین صندوق سهامی', sigs: ['topFund'], fund: (c) => /سهامی|شاخصی|بخشی|اهرمی/.test(c.sub || ''), head: (c) => `بازده ۱۲ ماه ${pctTxt(c.m?.y1)}`, icon: 'layers' },
+  { id: 'fixed', tone: 'teal', t: 'بهترین درآمد ثابت', sigs: ['fixedBeat'], head: (c) => `بازده ۱۲ ماه ${pctTxt(c.m?.y1)}`, icon: 'shield' },
+  { id: 'nav', tone: 'pink', t: 'صندوق زیر ارزش واقعی', sigs: ['negBubble'], head: (c) => `${num(Math.abs(Math.round((c.m?.bubble || 0) * 1000)) / 10, 1)}٪ ارزان‌تر از NAV`, icon: 'target' },
 ];
 
 export function BestOfRadar({ radar, built, gold, s, openPrice, onFit, fold }) {
@@ -29,11 +29,11 @@ export function BestOfRadar({ radar, built, gold, s, openPrice, onFit, fold }) {
   if (!tiles.length && !g) return null;
   const rec = (sig) => { const r = built.records?.[sig]?.use; return r && r.hit !== null && r.hit !== undefined ? { hit: r.hit, n: r.n, weak: !!built.records[sig].weak, test: !!r.test } : null; };
   const names = [...tiles.map(({ c }) => c.sym || c.name), g && g.name];
-  return html`<${Fold} ...${fold} cls="bo" title="برترین هر بخش، امروز" count=${tiles.length + (g ? 1 : 0)} peek=${names.filter(Boolean).slice(0, 4).join('، ')}
+  return html`<${Fold} ...${fold} cls="bo" tone="violet" icon="sparkles" title="برترین هر بخش، امروز" count=${tiles.length + (g ? 1 : 0)} peek=${html`<span class="pk-row">${names.filter(Boolean).slice(0, 4).map((n) => html`<span class="pk"><b>${n}</b></span>`)}</span>`}
     sub="از هر بخش رادار، بهترین گزینهٔ امروز؛ پیشنهاد خرید نیست، نقطهٔ شروع بررسی است." tip=${html`<${Tip} title="برترین هر بخش" text=${TIP} />`}>
     <div class="bo-grid">
-      ${tiles.map(({ t, c }) => { const r = rec(c.sig); return html`<article class="card bo-tile">
-        <div class="row between" style="gap:6px"><span class="xs sb muted"><${Icon} n=${t.icon} cls="xs" /> ${t.t}</span>${c.kind === 'stock' && c.score !== undefined && html`<span class="bo-score" title="امتیاز ترکیبی رادار">${num(Math.round(c.score))}</span>`}</div>
+      ${tiles.map(({ t, c }) => { const r = rec(c.sig); return html`<article class=${'card bo-tile tone-' + t.tone}>
+        <div class="row between" style="gap:6px"><span class="bo-lbl"><span class="bo-ic" aria-hidden="true"><${Icon} n=${t.icon} cls="sm" /></span>${t.t}</span>${c.kind === 'stock' && c.score !== undefined && html`<span class="bo-score" title="امتیاز ترکیبی رادار">${num(Math.round(c.score))}</span>`}</div>
         <button class="bo-name" onClick=${() => openPrice(c.ref)}><b>${c.sym || c.name}</b>${c.sym && html`<span class="xs muted ellipsis">${c.name}</span>`}</button>
         <div class="bo-head">${t.head(c)}</div>
         <div class="xs muted bo-why">${c.why?.[0] || ''}</div>
@@ -41,15 +41,15 @@ export function BestOfRadar({ radar, built, gold, s, openPrice, onFit, fold }) {
         ${c.flags?.length > 0 && html`<div class="rd-flags">${c.flags.slice(0, 2).map((f) => html`<span class="rd-flag"><${Icon} n="alert" cls="xs" />${f.t}</span>`)}</div>`}
         ${c.stop?.price > 0 && html`<div class="xs faint">باطل زیر قیمت ${num(Math.round(c.stop.price / (s.currency === 'rial' ? 1 : 10)))} ${s.currency === 'rial' ? 'ریال' : 'تومان'}</div>`}
         ${r ? html`<div class=${'xs bo-rec ' + (r.weak ? 'bad' : r.hit >= 0.5 ? 'good' : '')}>${r.weak ? 'این بخش در گذشته جواب نداده؛ ' : ''}کارنامهٔ بخش: ${num(Math.round(r.hit * 100))}٪ مواقع جلوتر از شاخص${r.test ? ' (آزمون روی گذشته)' : ''}</div>` : c.kind === 'stock' ? html`<div class="xs faint">کارنامهٔ این بخش هنوز کافی نیست</div>` : ''}
-        <div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار</button>
+        <div class="row wrap bo-act" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار</button>
           <button class="btn sm ghost" onClick=${() => onFit(c)}><${Icon} n="layers" cls="sm" />به سبد من می‌خورد؟</button></div>
       </article>`; })}
-      ${g && html`<article class="card bo-tile">
-        <span class="xs sb muted"><${Icon} n="gold" cls="xs" /> ارزان‌ترین راه طلا</span>
+      ${g && html`<article class="card bo-tile tone-gold">
+        <span class="bo-lbl"><span class="bo-ic" aria-hidden="true"><${Icon} n="gold" cls="sm" /></span>ارزان‌ترین راه طلا</span>
         <div class="bo-name" style="cursor:default"><b>${g.name}</b></div>
         <div class="bo-head">${g.kind === 'etf' ? `حباب ${pctTxt(g.bubble, 1)}` : `${pctTxt(g.premium, 1)} نسبت به طلای جهانی`}</div>
         <div class="xs muted bo-why">با هزینهٔ خرید و فروش، ${pctTxt(g.buy, 1)} نسبت به ارزش طلای داخلش؛ ارزان‌ترین بین سکه‌ها، طلای ۱۸ عیار و صندوق‌های طلا</div>
-        ${g.ref && html`<div class="row" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(g.ref)}><${Icon} n="chart" cls="sm" />نمودار</button></div>`}
+        ${g.ref && html`<div class="row wrap bo-act" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(g.ref)}><${Icon} n="chart" cls="sm" />نمودار</button></div>`}
       </article>`}
     </div>
     <div class="xs faint bo-fresh">جلسهٔ ${fmtJ(radar.day)}${radar.at > 1e12 && radar.at <= Date.now() ? `؛ آخرین بررسی رادار ${ago(radar.at)}` : ''}${radar.fundsAt > 1e12 && radar.fundsAt <= Date.now() ? `؛ فهرست صندوق‌ها ${ago(radar.fundsAt)}` : ''}${gold ? '؛ قیمت طلا و سکه از به‌روزرسانی قیمت‌ها' : ''}. هر ۱۵ دقیقه (تا وقتی کروم باز است) دوباره بررسی می‌شود.</div>

@@ -16,13 +16,13 @@ import { BestOfRadar } from '../best.js';
 // records and cards unchanged). Gold's cheapest route already compares the gold funds, so «کم‌حباب‌ترین صندوق‌های طلا»
 // lives there. A tab whose record did worse than the index goes last and is never the one a section opens on.
 const GROUPS = [
-  { id: 'stocks', t: 'سهم‌های برتر امروز', kind: 'stock', sigs: ['cand', 'top'], d: 'سهم‌هایی که چند نشانهٔ جدا با هم دارند، یا در جمع روند، ارزش، پول، توجه و ریسک بیشترین امتیاز را گرفته‌اند.' },
-  { id: 'active', t: 'رشد خوب و پرمعامله', kind: 'stock', sigs: ['active'], d: 'سهم‌هایی که در یک سال خوب رشد کرده‌اند، سودده‌اند و هنوز هر روز خرید و فروش می‌شوند؛ نه سهمی که بازدهی‌اش را با چند معاملهٔ پراکنده ساخته.' },
-  { id: 'trend', t: 'روند قوی', kind: 'stock', sigs: ['breakout', 'strength', 'momentum3', 'momentum12'], d: 'سهم‌هایی که قیمتشان از بازار جلوتر است: تازه از سقف ۶ ماه رد شده، از شاخص جلوترند، یا در ۳ و ۱۲ ماه پربازده بوده‌اند.' },
-  { id: 'money', t: 'ورود پول', kind: 'stock', sigs: ['inflow', 'flowRun', 'buyerPower', 'volume'], d: 'جایی که پول حقیقی و حجم معاملات می‌رود: ورود پول اخیر، ورود پیاپی، خریداران دست‌به‌نقدتر و حجم غیرعادی امروز.' },
-  { id: 'value', t: 'ارزنده', kind: 'stock', sigs: ['cheap', 'nearLow'], d: 'سهم‌های سودده‌ای که قیمتشان نسبت به سود یا به سقف سال پایین است.' },
-  { id: 'funds', t: 'صندوق‌ها', kind: 'fund', sigs: ['topFund', 'fixedBeat', 'negBubble'], d: 'پربازده‌ترین صندوق هر نوع، درآمد ثابت بهتر از سپرده، و صندوق‌های قابل معامله زیر ارزش دارایی‌هایشان.' },
-  { id: 'gold', t: 'طلا', kind: 'fund', sigs: [] },
+  { id: 'stocks', tone: 'violet', icon: 'sparkles', t: 'سهم‌های برتر امروز', kind: 'stock', sigs: ['cand', 'top'], d: 'سهم‌هایی که چند نشانهٔ جدا با هم دارند، یا در جمع روند، ارزش، پول، توجه و ریسک بیشترین امتیاز را گرفته‌اند.' },
+  { id: 'active', tone: 'teal', icon: 'zap', t: 'رشد خوب و پرمعامله', kind: 'stock', sigs: ['active'], d: 'سهم‌هایی که در یک سال خوب رشد کرده‌اند، سودده‌اند و هنوز هر روز خرید و فروش می‌شوند؛ نه سهمی که بازدهی‌اش را با چند معاملهٔ پراکنده ساخته.' },
+  { id: 'trend', tone: 'green', icon: 'chart', t: 'روند قوی', kind: 'stock', sigs: ['breakout', 'strength', 'momentum3', 'momentum12'], d: 'سهم‌هایی که قیمتشان از بازار جلوتر است: تازه از سقف ۶ ماه رد شده، از شاخص جلوترند، یا در ۳ و ۱۲ ماه پربازده بوده‌اند.' },
+  { id: 'money', tone: 'blue', icon: 'cash', t: 'ورود پول', kind: 'stock', sigs: ['inflow', 'flowRun', 'buyerPower', 'volume'], d: 'جایی که پول حقیقی و حجم معاملات می‌رود: ورود پول اخیر، ورود پیاپی، خریداران دست‌به‌نقدتر و حجم غیرعادی امروز.' },
+  { id: 'value', tone: 'amber', icon: 'percent', t: 'ارزنده', kind: 'stock', sigs: ['cheap', 'nearLow'], d: 'سهم‌های سودده‌ای که قیمتشان نسبت به سود یا به سقف سال پایین است.' },
+  { id: 'funds', tone: 'indigo', icon: 'layers', t: 'صندوق‌ها', kind: 'fund', sigs: ['topFund', 'fixedBeat', 'negBubble'], d: 'پربازده‌ترین صندوق هر نوع، درآمد ثابت بهتر از سپرده، و صندوق‌های قابل معامله زیر ارزش دارایی‌هایشان.' },
+  { id: 'gold', tone: 'gold', icon: 'gold', t: 'طلا', kind: 'fund', sigs: [] },
 ];
 // a list's name as a tab inside its section
 const TAB_T = { cand: 'کاندیداهای رشد', top: 'بالاترین امتیاز', breakout: 'شکست سقف ۶ ماه', strength: 'جلوتر از شاخص', momentum3: 'پربازده ۳ ماه', momentum12: 'پربازده ۱۲ ماه',
@@ -93,6 +93,27 @@ const PRESETS = [
   { name: 'درآمد ثابت بالای ۳۰٪', kind: 'fund', ftype: 4, conds: [{ f: 'y1', op: '>=', v: 30 }] },
   { name: '۳۰٪ زیر سقف سال', kind: 'stock', conds: [{ f: 'fromHigh', op: '<=', v: -30 }, { f: 'pe', op: '>=', v: 0.1 }] },
 ];
+/**
+ * A card's one number: the figure its list is about, big and coloured (a year's return, three months for the short-trend
+ * lists, P/E for value, the discount for a fund under NAV, individual money for the flow lists). null when unknown.
+ */
+function headline(c, fmt) {
+  const m = c.m || {};
+  const p = (v, l) => (v === null || v === undefined || !isFinite(v) ? null : { v: pctTxt(v), c: v > 0.0005 ? 'pos' : v < -0.0005 ? 'neg' : '', l });
+  if (c.kind === 'fund') {
+    if (c.sig === 'negBubble' && isFinite(m.bubble)) return { v: `${num(Math.abs(Math.round(m.bubble * 1000)) / 10, 1)}٪`, c: 'pos', l: 'زیر NAV' };
+    return p(m.y1, 'بازده ۱۲ ماه') || p(m.m6, 'بازده ۶ ماه') || p(m.m3, 'بازده ۳ ماه');
+  }
+  if (c.sig === 'cheap' && m.pe > 0) return { v: num(Math.round(m.pe * 10) / 10, 1), c: '', l: m.sectorPE > 0 ? `P/E؛ گروه ${num(Math.round(m.sectorPE * 10) / 10, 1)}` : 'P/E' };
+  if (['inflow', 'flowRun', 'buyerPower'].includes(c.sig) && m.flow5 && fmt) return { v: `${m.flow5 > 0 ? '+' : '−'}${fmt(Math.abs(m.flow5))}`, c: m.flow5 > 0 ? 'pos' : 'neg', l: `پول حقیقی ${num(Math.min(5, m.flowN || 5))} جلسه` };
+  if (['momentum3', 'breakout', 'strength', 'volume'].includes(c.sig)) return p(m.ret91, 'بازده ۳ ماه') || p(m.ret365, 'بازده ۱۲ ماه');
+  return p(m.ret365, 'بازده ۱۲ ماه') || p(m.ret91, 'بازده ۳ ماه') || p(m.ret30, 'بازده ۱ ماه');
+}
+/** A closed section's peek: its first three as small chips with their number, then how many more. */
+function peekChips(cards, total = cards.length, fmt = null) {
+  if (!cards.length) return '';
+  return html`<span class="pk-row">${cards.slice(0, 3).map((c) => { const h = headline(c, fmt); return html`<span class="pk"><b>${c.sym || c.name}</b>${h && html`<i class=${'num ' + h.c}>${h.v}</i>`}</span>`; })}${total > 3 ? html`<span class="pk-more">${num(total - 3)}+</span>` : ''}</span>`;
+}
 /** A closed section's peek: the first few names, then how many more. */
 const peekOf = (names, total = names.length) => { const l = names.filter(Boolean); if (!l.length) return ''; const head = l.slice(0, 3).join('، '); return total > 3 ? `${head} و ${num(total - 3)} مورد دیگر` : head; };
 // sections open the first time (the owner's own choice is kept after that); everything else starts as one row
@@ -147,23 +168,24 @@ export function RadarPage({ st, s, openPrice, route }) {
   const setAllFolds = (open) => act.setRadarUser({ fold: Object.fromEntries(FOLD_IDS.map((id) => [id, open])) });
   const force = async () => { setRun({ busy: true }); const r = await send('radar', { force: true, batch: 40 }); setRun(r?.ok ? r : { error: r?.error }); if (!r?.ok) toast(r?.error || 'بررسی انجام نشد'); };
 
-  const head = html`<div class="card rd-top">
-    <div class="row between wrap" style="gap:10px">
-      <div><div class="row wrap" style="gap:8px"><h3 style="margin:0"><${Icon} n="radar" cls="sm" />رادار فرصت‌ها</h3>${day && html`<span class="sub">جلسهٔ ${fmtJ(day)}</span>`}${radar?.fundsAt > 0 && html`<span class="sub" title="فیپیران NAV صندوق‌ها را روزی یک بار و معمولاً با یک روز فاصله منتشر می‌کند">· صندوق‌ها ${ago(radar.fundsAt)}</span>`}</div>
-        <div class="xs muted" style="margin-top:4px">هر روز بعد از بسته شدن بازار، کل بورس و فرابورس و همهٔ صندوق‌ها با قاعده‌های ثابت گشته می‌شوند.</div></div>
+  const head = html`<div class="hero rd-hero">
+    <div class="row between wrap" style="gap:10px;position:relative;z-index:1">
+      <div><div class="row wrap" style="gap:8px;align-items:center"><span class="rh-ic" aria-hidden="true"><${Icon} n="radar" /></span><h3 style="margin:0">رادار فرصت‌ها</h3>${day && html`<span class="rh-chip">جلسهٔ ${fmtJ(day)}</span>`}${radar?.fundsAt > 0 && html`<span class="rh-chip" title="فیپیران NAV صندوق‌ها را روزی یک بار و معمولاً با یک روز فاصله منتشر می‌کند">صندوق‌ها ${ago(radar.fundsAt)}</span>`}</div>
+        <div class="rh-sub">هر روز بعد از بسته شدن بازار، کل بورس و فرابورس و همهٔ صندوق‌ها با قاعده‌های ثابت گشته می‌شوند.</div></div>
       <div class="row" style="gap:6px">
         <${Seg} value=${tab} onChange=${setTab} options=${[['today', 'امروز'], ['rules', `قاعده‌های من${user.rules.length ? ` (${num(user.rules.length)})` : ''}`], ['marks', `پیگیری${user.marks.length ? ` (${num(user.marks.length)})` : ''}`]]} />
         <button class="btn icon ghost" title="بررسی دوباره" aria-label="بررسی دوباره" disabled=${run?.busy} onClick=${force}><${Icon} n="refresh" cls=${run?.busy ? 'sm spin' : 'sm'} /></button>
       </div>
     </div>
+    ${tab === 'today' && pulse && html`<${Pulse} p=${pulse} s=${s} />`}
     ${day && html`<${RadarSearch} radar=${radar} openPrice=${openPrice} today=${built} />`}
     ${pending > 0 && total > 0 && html`<div class="rd-prog"><div class="row between xs"><span>${year > 0 ? 'در حال جمع کردن قیمت‌های یک سال' : 'در حال گرفتن قیمت‌های پایانی جلسه'}: ${num(total - pending)} از ${num(total)} نماد</span><span class="muted">${run && !run.error ? 'تا این صفحه باز است ادامه دارد' : 'در پس‌زمینه ادامه دارد'}</span></div>
       <div class="progress"><i style=${`width:${Math.round(((total - pending) / total) * 100)}%;background:var(--accent)`}></i></div>
       <div class="xs muted">تا کامل شود، کارت‌های سهام فقط برای نمادهای آماده ساخته می‌شوند.</div></div>`}
     ${radar?.waitFor && day && radar.waitFor > day && html`<div class="xs muted" style="margin-top:8px">قیمت‌های پایانی جلسهٔ ${fmtJ(radar.waitFor)} هنوز کامل منتشر نشده (معمولاً بعد از ساعت ۱۳:۳۰ و گاهی دیرتر)؛ تا آن موقع کارت‌ها از جلسهٔ ${fmtJ(day)} هستند و خودکار به‌روز می‌شوند.</div>`}
     ${(run?.error || radar?.error) && html`<div class="callout warn" style="margin-top:10px"><${Icon} n="info" cls="sm" /><div>${run?.error || radar.error}</div></div>`}
-    <div class="xs muted rd-note">این‌ها پیشنهاد خرید یا فروش نیستند؛ فهرست چیزهایی است که با قاعده‌های بالا ارزش بررسی دارند. بازدهی گذشته تضمینی برای آینده نیست.</div>
   </div>`;
+  const note = html`<div class="xs faint rd-note">این‌ها پیشنهاد خرید یا فروش نیستند؛ فهرست چیزهایی است که با قاعده‌های ثابت ارزش بررسی دارند. بازدهی گذشته تضمینی برای آینده نیست.</div>`;
 
   if (radar === null) return html`<div class="page">${head}</div>`;
   if (!day) return html`<div class="page">${head}<div class="card"><div class="empty small" style="padding:24px">
@@ -171,7 +193,6 @@ export function RadarPage({ st, s, openPrice, route }) {
     <div style="margin-top:12px"><button class="btn primary" disabled=${run?.busy} onClick=${force}><${Icon} n="radar" cls="sm" />بررسی بازار</button></div></div></div></div>`;
 
   return html`<div class="page">${head}
-    ${tab === 'today' && pulse && html`<${Pulse} p=${pulse} s=${s} />`}
     ${tab === 'today' && html`<div class="row wrap" style="gap:6px">${[['all', 'همه'], ['stock', 'سهام'], ['fund', 'صندوق‌ها']].map(([k, t]) => html`<button class=${'chip' + (only === k ? ' on' : '')} onClick=${() => setOnly(k)}>${t}</button>`)}
         <span class="grow"></span>${((anyOpen) => html`<button class="btn sm ghost" onClick=${() => setAllFolds(!anyOpen)}><${Icon} n="chevronDown" cls=${'sm' + (anyOpen ? ' rot' : '')} />${anyOpen ? 'بستن همه' : 'باز کردن همه'}</button>`)(FOLD_IDS.some(isOpen))}</div>
       <${Mine} radar=${radar} st=${st} s=${s} cards=${built.cards} depositPct=${depositPct} openPrice=${openPrice} fold=${fold('mine')} />
@@ -179,20 +200,20 @@ export function RadarPage({ st, s, openPrice, route }) {
       ${GROUPS.map((g) => {
         if (only !== 'all' && only !== g.kind) return null;
         if (g.id === 'gold') return gold && gold.rows.length + gold.funds.length > 1 ? html`<${GoldRoutes} g=${gold} s=${s} openPrice=${openPrice} fold=${fold('gold')} />`
-          : html`<${Fold} ...${fold('gold')} title="طلا: ارزان‌ترین راه خرید امروز" peek="منتظر قیمت‌های تازه"><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div><//>`;
+          : html`<${Fold} ...${fold('gold')} tone="gold" icon="gold" title="طلا، ارزان‌ترین راه خرید امروز" peek="منتظر قیمت‌های تازه"><div class="card rd-gold"><div class="xs muted" style="padding:6px 0">برای این مقایسه قیمت تازهٔ اونس جهانی، دلار آزاد و سکه یا طلای ۱۸ عیار لازم است (از tgju) و الان همه‌شان نرسیده. با به‌روز شدن قیمت‌ها اینجا پر می‌شود.</div></div><//>`;
         // its tabs: lists with cards today (candidates even when empty — it says why), weak ones last
         const tabs = g.sigs.map((sig) => ({ sig, all: built.cards.filter((c) => c.sig === sig), weak: !!built.weak?.has(sig) }))
           .filter((x) => x.all.length || (x.sig === 'cand' && !pending)).sort((a, b) => a.weak - b.weak);
         if (!tabs.length) return null;
         const cur = tabs.find((x) => x.sig === tabOf[g.id]) || tabs.find((x) => !x.weak && x.all.length) || tabs[0];
-        const ids = new Set(); const names = [];
-        for (const x of tabs) for (const c of x.all) if (!ids.has(c.id)) { ids.add(c.id); names.push(c.sym || c.name); }
+        const ids = new Set(); const firsts = [];
+        for (const x of [cur, ...tabs]) for (const c of x.all) if (!ids.has(c.id)) { ids.add(c.id); firsts.push(c); }
         const { sig, all, weak } = cur;
         const list = showAll[sig] ? all : all.filter(RD.isFirst);
         const more = all.length - list.length;
-        return html`<${Fold} ...${fold(g.id)} title=${g.t} count=${ids.size} peek=${peekOf(names)} sub=${g.d}>
+        return html`<${Fold} ...${fold(g.id)} tone=${g.tone} icon=${g.icon} title=${g.t} count=${ids.size} peek=${peekChips(firsts, ids.size, fmt)} sub=${g.d} tip=${tabs.length === 1 && html`<${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />`}>
           ${tabs.length > 1 && html`<div class="rd-tabs" role="tablist">${tabs.map((x) => html`<button role="tab" aria-selected=${x === cur ? 'true' : 'false'} class=${'chip' + (x === cur ? ' on' : '') + (x.weak ? ' weak' : '')} title=${x.weak ? 'در گذشته جواب نداده: میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده' : SIG_D[x.sig]} onClick=${() => setTabOf({ ...tabOf, [g.id]: x.sig })}>${TAB_T[x.sig] || RD.SIGNALS[x.sig].t}<span class="rd-tab-n">${num(x.all.length)}</span>${x.weak && html`<${Icon} n="alert" cls="xs" />`}</button>`)}</div>`}
-          <div class="row" style="gap:6px;align-items:flex-start"><span class="xs muted grow">${tabs.length > 1 ? SIG_D[sig] : ''}</span><${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />${weak && html`<span class="pill stale" title="میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}</div>
+          ${(tabs.length > 1 || weak) && html`<div class="row" style="gap:6px;align-items:flex-start"><span class="xs muted grow">${tabs.length > 1 ? SIG_D[sig] : ''}</span>${tabs.length > 1 && html`<${Tip} title=${RD.SIGNALS[sig].t} text=${SIG_TIP[sig]} />`}${weak && html`<span class="pill stale" title="میانگین کارت‌های این فهرست یک ماه بعد از شاخص کل بدتر بوده و کمتر از نیمی از مواقع جلوتر بوده‌اند؛ در کاندیداها حساب نمی‌شود">در گذشته جواب نداده</span>`}</div>`}
           ${sig === 'cand' ? html`<${Candidates} bare cards=${all} radar=${radar} s=${s} rec=${built.records?.cand} isNew=${isNew} marked=${marked} mark=${mark} openPrice=${openPrice} onFit=${setFit} />`
             : html`${STOCK_SIGS.has(sig) && ((tt) => tt && html`<div class=${'rd-track' + (tt.weak ? ' bad' : tt.good === true ? ' good' : tt.good === false ? ' bad' : '')}><${Icon} n="chart" cls="xs" /><span>${tt.lines.map((l) => html`${l}<br />`)}گذشته تضمین آینده نیست.</span></div>`)(recLines(built.records?.[sig]))}
           <div class="rd-grid">${list.map((c) => html`<${Card} c=${c} radar=${radar} s=${s} isNew=${isNew(c)} marked=${marked.has(c.id)} onMark=${() => mark(c)} openPrice=${openPrice} onFit=${setFit} />`)}</div>
@@ -203,29 +224,68 @@ export function RadarPage({ st, s, openPrice, route }) {
     ${tab === 'marks' && html`<${Marks} radar=${radar} user=${user} s=${s} openPrice=${openPrice} />`}
     ${editRule && html`<${RuleModal} rule=${editRule} sectors=${radar.sectors || {}} onClose=${() => setEditRule(null)} />`}
     ${fit && html`<${CommitteeModal} st=${st} s=${s} focus=${fit} onClose=${() => setFit(null)} openPrice=${(r) => { setFit(null); openPrice(r); }} />`}
+    ${note}
   </div>`;
 }
 
+/**
+ * A radar card: at a glance the name, its one number, a year's line and the score ring; the other lists it is in, the
+ * five signs (candidates) and red flags below. Why it was picked and what to check before deciding wait behind «جزئیات».
+ */
 function Card({ c, radar, s, isNew, marked, onMark, openPrice, onFit = null }) {
+  const [more, setMore] = useState(false);
+  const fmt = (v) => money(v, s, { compact: true });
   const q = c.kind === 'stock' ? `نماد «${c.sym}» (${c.name}) امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`
     : `صندوق «${c.name}» امروز در رادار دارا آمده. با عددهای همین امروزش توضیح بده چرا، و چه چیزهایی را باید پیش از تصمیم بررسی کنم. توصیهٔ خرید یا فروش نکن.`;
-  return html`<article class="card rd-card">
-    <div class="row between" style="gap:8px;align-items:flex-start">
+  const h = headline(c, fmt);
+  const rec = c.kind === 'stock' ? radar.stocks?.[c.ins] : null;
+  const v = rec && radar.day ? RD.spark(rec, RD.dayNum(radar.day)) : [];
+  const up = v.length > 1 && v[v.length - 1] >= v[0];
+  const m = c.m || {};
+  const other = (c.lit || []).filter((g) => RD.SIGNALS[g] && g !== c.sig);
+  const sev = (c.flags || []).filter((f) => f.severe), soft = (c.flags || []).filter((f) => !f.severe);
+  return html`<article class=${'card rd-card' + (more ? ' more' : '')}>
+    <div class="rc-top">
       <button class="rd-name" onClick=${() => openPrice(c.ref)} title="نمودار و کارنامه">
         <span class="row" style="gap:6px"><b>${c.sym || c.name}</b>${isNew && html`<span class="pill live">تازه</span>`}${PR.tooRisky(s.profile, c) && html`<span class="tag-risk" title="نوسان روزانه یا افت یک سالش برای ریسکی که در پروفایلت گفته‌ای زیاد است؛ فقط برچسب است">با پروفایلت پرریسک</span>`}</span>
         <span class="xs muted ellipsis">${c.sym ? c.name + '، ' : ''}${c.sub}</span></button>
-      <button class=${'btn icon sm ghost' + (marked ? ' on' : '')} title=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-label=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-pressed=${marked ? 'true' : 'false'} onClick=${onMark}><${Icon} n=${marked ? 'circleCheck' : 'plus'} cls="sm" /></button>
+      ${c.kind === 'stock' && c.score !== undefined && html`<${Ring} v=${c.score} />`}
+      <button class=${'btn icon sm ghost rc-mark' + (marked ? ' on' : '')} title=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-label=${marked ? 'برداشتن از پیگیری' : 'افزودن به پیگیری'} aria-pressed=${marked ? 'true' : 'false'} onClick=${onMark}><${Icon} n=${marked ? 'circleCheck' : 'plus'} cls="sm" /></button>
     </div>
-    <${Viz} kind=${c.kind} m=${c.m} rec=${c.kind === 'stock' ? radar.stocks?.[c.ins] : null} day=${radar.day} s=${s} />
+    <div class="rc-mid">
+      ${h && html`<div class="rc-head"><b class=${'num ' + h.c}>${h.v}</b><span class="xs muted">${h.l}</span></div>`}
+      ${v.length > 1 && html`<div class="rc-spark" title="روند یک سال (قیمت تعدیل‌شده)" aria-hidden="true"><${Sparkline} values=${v} w=${120} h=${40} color=${up ? 'var(--pos)' : 'var(--neg)'} /></div>`}
+    </div>
+    ${c.kind === 'fund' ? html`<${Rets} items=${[['۱ ماه', m.m1], ['۳ ماه', m.m3], ['۶ ماه', m.m6], ['۱۲ ماه', m.y1]]} />` : html`<${Rets} items=${[['۱ ماه', m.ret30], ['۳ ماه', m.ret91], ['۶ ماه', m.ret182], ['۱۲ ماه', m.ret365]]} />`}
     ${c.checks && html`<div class="rd-checks">${c.checks.map((x) => html`<span class=${'rd-ck' + (x.on && !x.weak ? ' on' : '') + (x.on && x.weak ? ' weak' : '')} title=${x.on && x.weak ? 'این نشانه را دارد، ولی در کارنامه از شاخص بدتر بوده و حساب نمی‌شود' : ''}><${Icon} n=${x.on && !x.weak ? 'circleCheck' : 'minus'} cls="xs" />${x.t}</span>`)}</div>`}
-    ${c.stop && html`<div class="rd-stop xs"><b>چه چیزی این را باطل می‌کند:</b> بسته شدن زیر <span class="num">${money(c.stop.price, s)}</span> (${c.stop.t})</div>`}
-    ${c.kind === 'stock' && c.score !== undefined && html`<${Score} c=${c} full=${c.sig === 'top'} />`}
-    ${c.flags?.length > 0 && html`<div class="rd-flags">${c.flags.map((f) => html`<span class=${'rd-flag' + (f.severe ? ' sev' : '')}><${Icon} n="alert" cls="xs" />${f.t}</span>`)}</div>`}
-    ${c.kind === 'stock' && c.sig !== 'inflow' && html`<${Flow} m=${c.m} s=${s} />`}
-    ${((seen) => html`<div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small"><${Terms} text=${t} seen=${seen} /></div>`)}</div>
-    <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs"><${Terms} text=${t} seen=${seen} /></div>`)}</div>`)(new Set())}
-    <div class="row wrap" style="gap:6px;margin-top:auto"><button class="btn sm ghost" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" />نمودار و کارنامه</button>${onFit && html`<button class="btn sm ghost" title="کمیتهٔ سرمایه‌گذاری: نقدینگی، اثر روی سبد و حالت اشتباه" onClick=${() => onFit(c)}><${Icon} n="layers" cls="sm" />به سبد من می‌خورد؟</button>`}<span class="grow"></span><${AskBtn} q=${q} label="از دستیار بپرس" /></div>
+    ${other.length > 0 && html`<div class="rc-tags">${other.map((g) => html`<span class="rc-tag" title=${'در فهرست «' + (TAB_T[g] || RD.SIGNALS[g].t) + '» هم هست: ' + SIG_D[g]}>${TAB_T[g] || RD.SIGNALS[g].t}</span>`)}</div>`}
+    ${sev.length + soft.length > 0 && html`<div class="rd-flags">${[...sev, ...soft].slice(0, more ? 9 : 2).map((f) => html`<span class=${'rd-flag' + (f.severe ? ' sev' : '')}><${Icon} n="alert" cls="xs" />${f.t}</span>`)}${!more && sev.length + soft.length > 2 ? html`<span class="xs faint">و ${num(sev.length + soft.length - 2)} نکتهٔ دیگر</span>` : ''}</div>`}
+    ${more && html`<div class="rc-more">
+      ${c.kind === 'stock' && html`<${YearBar} pos=${RD.yearPos(m)} lo=${m.lo52} hi=${m.hi52} fmt=${(x) => `${money(x, s)} (تعدیل‌شده)`} />`}
+      ${c.kind === 'stock' && c.parts && html`<div class="rc-parts"><span class="xs sb muted">امتیاز ترکیبی از کجا آمده</span><div class="rd-parts">${PART_ORDER.filter((k) => c.parts[k] !== undefined).map((k) => html`<div class="rd-part" title=${`${RD.SCORE_PARTS[k]}: بهتر از ${num(Math.round(c.parts[k] * 100))}٪ نمادهای پرمعامله`}>
+        <span class="xs muted">${RD.SCORE_PARTS[k]}</span><span class="rd-pbar"><i style=${`width:${Math.max(4, Math.round(c.parts[k] * 100))}%`}></i></span></div>`)}</div></div>`}
+      ${c.kind === 'stock' && html`<${Flow} m=${m} s=${s} />`}
+      ${c.stop && html`<div class="rd-stop xs"><b>چه چیزی این را باطل می‌کند:</b> بسته شدن زیر <span class="num">${money(c.stop.price, s)}</span> (${c.stop.t})</div>`}
+      ${((seen) => html`<div class="rd-why"><span class="xs sb">چرا دیده شد</span>${c.why.map((t) => html`<div class="small"><${Terms} text=${t} seen=${seen} /></div>`)}</div>
+      <div class="rd-check"><span class="xs sb">پیش از تصمیم ببین</span>${c.check.map((t) => html`<div class="xs"><${Terms} text=${t} seen=${seen} /></div>`)}</div>`)(new Set())}
+    </div>`}
+    <div class="rc-act">
+      <button class="btn sm ghost rc-more-btn" aria-expanded=${more ? 'true' : 'false'} onClick=${() => setMore(!more)}><${Icon} n="chevronDown" cls=${'sm' + (more ? ' rot' : '')} />${more ? 'کمتر' : 'چرا و جزئیات'}</button>
+      <span class="grow"></span>
+      <button class="btn icon sm ghost" title="نمودار و کارنامه" aria-label="نمودار و کارنامه" onClick=${() => openPrice(c.ref)}><${Icon} n="chart" cls="sm" /></button>
+      ${onFit && html`<button class="btn icon sm ghost" title="به سبد من می‌خورد؟ (کمیتهٔ سرمایه‌گذاری: نقدینگی، اثر روی سبد و حالت اشتباه)" aria-label="به سبد من می‌خورد؟" onClick=${() => onFit(c)}><${Icon} n="layers" cls="sm" /></button>`}
+      <${AskBtn} q=${q} label="" cls="btn icon sm ghost" title="از دستیار بپرس" />
+    </div>
   </article>`;
+}
+
+/** The combined score as a ring: how full is the score out of 100, its number inside. */
+function Ring({ v }) {
+  const r = 17, C = 2 * Math.PI * r;
+  const tone = v >= 75 ? 'hi' : v >= 50 ? 'mid' : 'lo';
+  return html`<span class=${'rc-ring ' + tone} title=${`امتیاز ترکیبی رادار: ${num(v)} از ۱۰۰`} role="img" aria-label=${`امتیاز ${num(v)} از ۱۰۰`}>
+    <svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><circle cx="22" cy="22" r=${r} class="bg" /><circle cx="22" cy="22" r=${r} class="fg" stroke-dasharray=${`${(C * Math.max(2, Math.min(100, v))) / 100} ${C}`} transform="rotate(-90 22 22)" /></svg>
+    <b class="num">${num(v)}</b></span>`;
 }
 
 /** «کاندیداهای رشد»: the short list (or why it's empty), its record, and where the last month's candidates are now. */
@@ -244,20 +304,6 @@ function Candidates({ cards, radar, s, rec, isNew, marked, mark, openPrice, onFi
 }
 
 const PART_ORDER = ['trend', 'value', 'flow', 'attention', 'safety'];
-/** The combined score: a number and — on «برترین‌ها» — a bar per part; elsewhere one line, with the other lists it is in. */
-function Score({ c, full }) {
-  const tone = c.score >= 75 ? 'hi' : c.score >= 50 ? 'mid' : 'lo';
-  const lit = (c.lit || []).filter((g) => RD.SIGNALS[g]);
-  return html`<div class=${'rd-score' + (full ? ' full' : '')}>
-    <div class="row" style="gap:10px;align-items:center">
-      <span class=${'rd-sc-n ' + tone} title="امتیاز ترکیبی از ۱۰۰"><b class="num">${num(c.score)}</b><span class="xs">از ۱۰۰</span></span>
-      ${full ? html`<div class="rd-parts grow">${PART_ORDER.filter((k) => c.parts?.[k] !== undefined).map((k) => html`<div class="rd-part" title=${`${RD.SCORE_PARTS[k]}: بهتر از ${num(Math.round(c.parts[k] * 100))}٪ ${k === 'value' ? 'نمادهای پرمعاملهٔ سودده (زیان‌ده صفر می‌گیرد)' : k === 'flow' ? 'نمادهای پرمعامله‌ای که آمار پول حقیقی‌شان هست' : 'نمادهای پرمعامله'}`}>
-          <span class="xs muted">${RD.SCORE_PARTS[k]}</span><span class="rd-pbar"><i style=${`width:${Math.max(4, Math.round(c.parts[k] * 100))}%`}></i></span></div>`)}</div>`
-        : html`<span class="xs muted grow">امتیاز ترکیبی${c.parts ? `؛ قوی در ${PART_ORDER.filter((k) => c.parts[k] >= 0.7).map((k) => RD.SCORE_PARTS[k]).join('، ') || '—'}` : ''}</span>`}
-    </div>
-    ${((other) => other.length > 0 && html`<div class="row wrap" style="gap:4px">${!full ? html`<span class="xs faint">در فهرست‌های دیگر هم هست:</span>` : ''}${other.map((g) => html`<span class="pill auto xs" title=${SIG_D[g]}>${TAB_T[g] || RD.SIGNALS[g].t}</span>`)}</div>`)(full ? lit : lit.filter((g) => g !== c.sig))}
-  </div>`;
-}
 /** Individual money over the last sessions, on a stock card — or how far its gathering has got. */
 function Flow({ m, s }) {
   if (!m) return null;
@@ -277,8 +323,8 @@ function Pulse({ p, s }) {
     p.flowToday !== null && (p.flowToday > 0 ? 'پول حقیقی وارد شد' : p.flowToday < 0 ? 'پول حقیقی خارج شد' : null),
   ].filter(Boolean).join('، ');
   const tone = p.tone >= 1 ? 'pos' : p.tone <= -1 ? 'neg' : '';
-  return html`<section class="card rd-pulse">
-    <div class="row between wrap" style="gap:8px"><div class="row" style="gap:8px;align-items:center"><span class=${'rd-dot ' + tone} aria-hidden="true"></span><h4 style="margin:0">نبض بازار</h4><span class="xs muted">جلسهٔ ${fmtJ(p.day)}</span></div>
+  return html`<section class="rd-pulse">
+    <div class="row between wrap" style="gap:8px"><div class="row" style="gap:8px;align-items:center"><span class=${'rd-dot ' + tone} aria-hidden="true"></span><h4 style="margin:0">نبض بازار</h4></div>
       <${Tip} title="نبض بازار" text="خلاصهٔ همین جلسه از داده‌های سایت بورس: تغییر شاخص کل، تعداد نمادهای مثبت و منفی، پول حقیقی (خرید منهای فروش اشخاص حقیقی)، و P/E میانهٔ نمادهای سودده. «بازده سود» یعنی ۱ تقسیم بر P/E: اگر سود شرکت‌ها ثابت بماند، هر ۱۰۰ تومان سهم چقدر سود سالانه دارد؛ کنار سود سپرده می‌آید تا مقایسه ساده باشد. پیش‌بینی نیست." /></div>
     ${line && html`<div class="rd-pline">${line}.</div>`}
     ${p.pending > 0 && html`<div class="xs muted">تعداد مثبت و منفی و پول حقیقی وقتی قیمت‌های پایانی همهٔ نمادها رسید می‌آید (${num(p.pending)} نماد مانده).</div>`}
@@ -311,7 +357,7 @@ function GoldRoutes({ g, s, openPrice, fold }) {
   const gr = (x) => num(x, 2);
   const pct = (x) => pctTxt(x, 1);
   const tip = `همه با یک خط‌کش سنجیده می‌شوند: قیمت جهانی طلا (اونس × دلار بازار آزاد). برای هر سکه وزن طلای خالص داخلش (مثلاً سکهٔ امامی ۸٫۱۳۳ گرم با عیار ۹۰۰) به قیمت جهانی حساب می‌شود و قیمت بازارش با آن مقایسه می‌شود؛ اختلاف همان «حباب» است. بعد نیمی از هزینهٔ رفت‌وبرگشت (کارمزد و اختلاف خرید و فروش، تخمینی: ۱۸ عیار ${num(BB.ROUTE_COST.geram18, 1)}٪، سکهٔ امامی ${num(BB.ROUTE_COST.sekee)}٪ تا گرمی ${num(BB.ROUTE_COST.retail_gerami)}٪) که موقع خرید می‌دهی اضافه می‌شود. «با ${budget} می‌گیری» یعنی بعد از این هزینه، چند گرم طلای ۱۸ عیار به قیمت جهانی می‌ارزد؛ عدد بیشتر یعنی طلای بیشتر برای همان پول. قیمت ۱۸ عیار، قیمت آب‌شده بدون اجرت ساخت است. صندوق‌های طلا جدا آمده‌اند: ارزش دارایی صندوق (NAV) با قیمت داخلی آنچه نگه می‌دارد (بیشتر گواهی سکه و شمش) حساب می‌شود، پس حبابشان فقط نسبت به NAV خودشان است. حباب‌ها هر روز عوض می‌شوند.`;
-  return html`<${Fold} ...${fold} title="طلا، ارزان‌ترین راه خرید امروز" peek=${best ? `امروز ${best.name}: با ${budget} حدود ${gr(best.grams18)} گرم طلای ۱۸ عیار` : ''} sub="کدام راه، برای همان پول طلای بیشتری می‌دهد" tip=${html`<${Tip} title="ارزان‌ترین راه خرید طلا" text=${tip} />`}>
+  return html`<${Fold} ...${fold} tone="gold" icon="gold" title="طلا، ارزان‌ترین راه خرید امروز" peek=${best ? `امروز ${best.name}: با ${budget} حدود ${gr(best.grams18)} گرم طلای ۱۸ عیار` : ''} sub="کدام راه، برای همان پول طلای بیشتری می‌دهد" tip=${html`<${Tip} title="ارزان‌ترین راه خرید طلا" text=${tip} />`}>
     <div class="card rd-gold">
       ${best && html`<div class="rd-ghero">امروز <b>${best.name}</b> ${best.premium < 0.01 && best.premium > -0.01 ? 'تقریباً هم‌قیمت طلای جهانی است' : `${pct(best.premium)} ${best.premium >= 0 ? 'گران‌تر' : 'ارزان‌تر'} از طلای جهانی است`}: با ${budget} حدود <b class="num">${gr(best.grams18)} گرم</b> طلای ۱۸ عیار می‌گیری${next ? html`؛ با ${next.name} <span class="num">${gr(next.grams18)} گرم</span>` : ''}.</div>`}
       <div class="rd-gref"><span>قیمت جهانی هر گرم طلای ۱۸ عیار: <b class="num">${money(g.gold.per18, s)}</b></span>
@@ -507,7 +553,7 @@ function Mine({ radar, st, s, cards, depositPct, openPrice, fold }) {
   const warned = items.filter((x) => x.flags.some((f) => f.warn)).length;
   const shown = all || items.length <= 6 ? items : items.slice(0, 6);
   const note = warned ? `${num(warned)} مورد نکته‌ای دارد که بهتر است نگاهی بیندازی` : 'سهم‌ها و صندوق‌هایی که داری، با عددهای همین جلسه';
-  return html`<${Fold} ...${fold} title="دارایی‌های تو در رادار" count=${items.length} peek=${peekOf(items.map((x) => x.sym || x.name))} sub=${note}
+  return html`<${Fold} ...${fold} tone="pink" icon="assets" title="دارایی‌های تو در رادار" count=${items.length} peek=${peekOf(items.map((x) => x.sym || x.name))} sub=${note}
     after=${warned > 0 && !fold.open && html`<span class="pill stale"><${Icon} n="alert" cls="xs" />${num(warned)} نکته</span>`}>
     <div class="card rd-mine">${shown.map((x) => html`<div class="rd-mrow">
       <button class="rd-name" onClick=${() => openPrice(x.ref)} title="نمودار و کارنامه">

@@ -154,16 +154,18 @@ export function Toggle({ on, onChange, title }) {
  * peek of the first few names — so a long page reads as a list of headings; open, the description and the content.
  * `tip` and `after` (a ⓘ, a badge) sit beside the button, never inside it.
  */
-export function Fold({ open, onToggle, title, count = 0, peek = '', tip = null, after = null, sub = '', cls = '', children }) {
-  return html`<section class=${'rd-sec fold' + (open ? ' open' : '') + (cls ? ' ' + cls : '')}>
+export function Fold({ open, onToggle, title, count = 0, peek = '', tip = null, after = null, sub = '', cls = '', icon = null, tone = '', children }) {
+  return html`<section class=${'rd-sec fold' + (open ? ' open' : '') + (tone ? ' tone-' + tone : '') + (cls ? ' ' + cls : '')}>
     <div class="rd-sec-h fold-h">
       <button type="button" class="fold-btn" aria-expanded=${open ? 'true' : 'false'} onClick=${onToggle}>
-        <${Icon} n="chevronDown" cls="sm fold-chev" /><h4>${title}</h4>${count > 0 && html`<span class="fold-n">${num(count)}</span>`}
-        ${!open && peek && html`<span class="fold-peek xs muted ellipsis">${peek}</span>`}
+        ${icon && html`<span class="fold-ic" aria-hidden="true"><${Icon} n=${icon} cls="sm" /></span>`}<h4>${title}</h4>${count > 0 && html`<span class="fold-n">${num(count)}</span>`}
+        ${!open && peek && html`<span class="fold-peek xs muted">${peek}</span>`}
+        <${Icon} n="chevronDown" cls="sm fold-chev" />
       </button>
-      ${open && tip}${after}${open && sub && html`<span class="xs muted fold-sub">${sub}</span>`}
+      ${open && tip}${after}
     </div>
-    ${open && children}
+    ${open && sub && html`<div class="xs muted fold-sub">${sub}</div>`}
+    ${open && html`<div class="fold-body">${children}</div>`}
   </section>`;
 }
 export function Seg({ value, options, onChange, cls = '' }) {
